@@ -65,6 +65,7 @@ Reglas:
 - Identidad: `src/features/auth/{types,schemas,api}.ts`, `src/auth/{pkce,handoff,session,open-url*,refresh-token*}.ts`, `src/lib/{api-client,api-error,http,ids,idempotency,query-keys,query-client}.ts`, `src/stores/{session,preferences}.store.ts`, `src/components/ui/virtual-list.tsx`.
 - Pantallas: `app/(auth)/{welcome,login,register,verify-email}.tsx`, `app/sso/callback.tsx`, `app/settings/index.tsx`.
 - Feed (UC-06): `src/features/feed/{types,api}.ts`, `src/features/feed/components/post-card.tsx`, `app/(tabs)/feed.tsx`, `src/mocks/{index,feed}.ts`, `locales/{es,en}/feed.json`.
+- Notificaciones (UC-24): `src/features/notifications/{types,api}.ts`, `.../components/notification-item.tsx`, `app/notifications.tsx`, `src/mocks/notifications.ts`, `locales/{es,en}/notifications.json`.
 - `bandadau-frontend/AGENTS.md`: sección "Datos, rendimiento y compilador".
 
 **Decisiones**
@@ -75,8 +76,9 @@ Reglas:
 
 **Pendientes**
 - [x] Feed (UC-06): `useInfiniteQuery` + `VirtualList` + estados (cargando/vacío/error) con mocks locales (`EXPO_PUBLIC_USE_MOCKS`).
-- [ ] Conectar `getFeed` real cuando exista `social-service`; prueba de contrato/mocks con MSW.
-- [ ] Preferencias offline (cola) y persister de Query; notificaciones (UC-24); UC-04 avatar.
+- [x] Notificaciones (UC-24): lista paginada, marcar una/todas como leídas, con mocks.
+- [ ] Conectar `getFeed`/`listNotifications` reales cuando existan `social-service`/`notification-service`.
+- [ ] Preferencias offline (cola) y persister de Query; UC-04 avatar.
 - [ ] Refrendo humano de las actas §5.4 (`08-revisiones.md`).
 
 **Verificación**
