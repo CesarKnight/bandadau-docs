@@ -50,6 +50,30 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Ratio real de media y recuadro guía de recorte
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Que el media use su relación de aspecto real y mostrar la guía de recorte al subir |
+| UCs / HU | UC-05, UC-06, UC-07 |
+| Componentes | `bandadau-frontend` |
+
+**Archivos tocados**
+- `src/features/feed/components/post-carousel.tsx`: el contenedor toma el `aspectRatio` de la **primera imagen** (medido con `expo-image onLoad`), como Instagram; ya no fuerza 1:1 (evita recortes; la modal web de comentarios muestra el contenido completo).
+- `src/features/create/components/media-preview.tsx` (nuevo): `targetRatio` (vertical 3:4 / horizontal 4:3 / cuadrada 1:1) y `MediaPreviewFrame` (marco + guía punteada + etiqueta de orientación).
+- `app/(tabs)/create.tsx`: picker mock (alterna 3:4 y 4:3) y vista previa del resultado.
+- `src/mocks/feed.ts`: imágenes con orientaciones variadas; `locales/{es,en}/create.json` (orientation/preview/remove).
+
+**Convención de recorte**
+- Retrato → **3:4**, paisaje → **4:3**, cuadrado → **1:1** (como se pidió). Nota: Instagram hoy usa 4:5 en retrato; se deja 3:4 por decisión del equipo.
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅.
+
+---
+
 ### 2026-10-14 — Fix nav web + scroll del feed y card de post moderna
 
 | Campo | Valor |
