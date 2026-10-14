@@ -50,6 +50,27 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Auth con safe-area/insets y logo en registro
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Welcome/Login/Registro correctos en native (insets, Dynamic Island) y logo en registro |
+| UCs / HU | UC-01, UC-02 |
+| Componentes | `bandadau-frontend` |
+
+**Archivos tocados**
+- `src/components/brand/brand-hero.tsx`: prop `paddingTop` (inset superior) para que el logo no quede bajo la Dynamic Island.
+- `src/components/screens/auth-layout.tsx` (nuevo): hero + formulario centrado, scrollable y keyboard-aware, respetando insets superior e inferior.
+- `app/(auth)/welcome.tsx`: hero + contenido **scrollable** con insets (evita que los botones se recorten en pantallas chicas).
+- `app/(auth)/login.tsx`, `register.tsx` (ahora con **logo** vía hero), `verify-email.tsx`: usan `AuthLayout`.
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅.
+
+---
+
 ### 2026-10-14 — Polyfill Intl.PluralRules (Hermes) para i18n
 
 | Campo | Valor |
