@@ -63,6 +63,7 @@ Reglas:
 **Archivos tocados**
 - `src/components/navigation/floating-tab-bar.tsx`: `href: null` en `PlatformPressable` (fix de Homy: evita el `preventDefault` del `<a>` que impedía navegar con `TabTrigger` en web).
 - `src/components/ui/feed-list.tsx` + `src/components/screens/screen.tsx` + `app/(tabs)/feed.tsx`: `minHeight: 0` en la cadena flex (web) para que la lista scrollee internamente en vez de empujar la página.
+- **Causa real del no-scroll (web y nativo):** `alignSelf: 'center'` en la columna del feed anulaba el `stretch` vertical → la lista quedaba sin altura acotada. Se quitó `alignSelf`/`width` de la columna.
 - `src/features/feed/components/post-card.tsx`: card moderna con estilo propio (borde+radio+shadow, avatar con anillo de marca, media inset redondeada) manteniendo funcionalidades IG.
 
 **Verificación**
