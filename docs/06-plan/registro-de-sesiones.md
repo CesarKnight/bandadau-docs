@@ -50,6 +50,31 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Ratios IG, swipe, bottom sheet con gorhom en web móvil y flechas solo desktop
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Convención de ratios de Instagram, arreglar el índice por swipe, y usar gorhom en web móvil |
+| UCs / HU | UC-05, UC-06, UC-07 |
+| Componentes | `bandadau-frontend` |
+
+**Archivos tocados**
+- `src/lib/media-ratio.ts` (nuevo): ratios IG — retrato **4:5**, paisaje **1.91:1**, cuadrado **1:1**; `src/features/feed/components/post-carousel.tsx` deriva el ratio de la primera imagen (`expo-image onLoad`) y actualiza el índice con `onScroll` (antes solo con `onMomentumScrollEnd`, por eso el swipe no movía los puntos).
+- `src/hooks/use-device-type.ts` (nuevo): `isWebMobile`/`isWebDesktop`; **flechas del carrusel solo en web desktop**.
+- `src/features/comments/comments-sheet.tsx` (nuevo): bottom sheet **`@gorhom/bottom-sheet`** compartido; `comments-panel.native.tsx` lo reexporta y `comments-panel.web.tsx` lo usa en **web móvil** (web desktop sigue con modal IG). **Corrección:** antes web móvil usaba un modal propio; Homy usa gorhom también en web móvil.
+- `app/(tabs)/feed.tsx`: separación entre header y feed (`paddingTop: 12`) y columna web a 480 (menos alto); `locales/{es,en}/create.json` (orientaciones 4:5/1.91:1/1:1).
+- `bandadau-frontend/AGENTS.md`: nota de bottom sheets (gorhom nativo + web móvil; modal en web desktop) y ratios IG.
+
+**Convención anotada (futuras implementaciones)**
+- Bottom sheets: **siempre `@gorhom/bottom-sheet`** en nativo y web móvil; web desktop → modal centrado (patrón Homy). Dividir por plataforma con `.native.tsx`/`.web.tsx` y, en web, por ancho con `useDeviceType()`.
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅.
+
+---
+
 ### 2026-10-14 — Ratio real de media y recuadro guía de recorte
 
 | Campo | Valor |
