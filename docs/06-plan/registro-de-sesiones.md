@@ -50,6 +50,24 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Feed estilo Instagram y logo de marca en el sidebar
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Feed con estética Instagram y lockup de marca (aves + wordmark) en el sidebar |
+| UCs / HU | UC-06 (feed), E18 (marca) |
+| Componentes | `bandadau-frontend` |
+
+**Archivos tocados**
+- `src/features/feed/components/post-card.tsx` (post estilo Instagram: header, media cuadrada full-bleed, acciones, likes, caption), `app/(tabs)/feed.tsx` (header de marca + bell, edge-to-edge), `src/components/screens/screen.tsx` (`padded` opcional), `src/mocks/feed.ts` (media + comentarios), `locales/{es,en}/feed.json` (likes/comments/acciones), `src/components/navigation/global-sidebar.tsx` (`BandadaMark` + `BandadaWordmark`).
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅.
+
+---
+
 ### 2026-10-14 — Kit de marca aplicado (paleta, iconos, splash) y alineación de tokens
 
 | Campo | Valor |
