@@ -67,6 +67,7 @@ Reglas:
 - Feed (UC-06): `src/features/feed/{types,api}.ts`, `src/features/feed/components/post-card.tsx`, `app/(tabs)/feed.tsx`, `src/mocks/{index,feed}.ts`, `locales/{es,en}/feed.json`.
 - Notificaciones (UC-24): `src/features/notifications/{types,api}.ts`, `.../components/notification-item.tsx`, `app/notifications.tsx`, `src/mocks/notifications.ts`, `locales/{es,en}/notifications.json`.
 - Perfil (UC-04): `src/features/profile/{types,api}.ts`, `app/(tabs)/profile.tsx`, `app/profile/edit.tsx`, `src/mocks/profile.ts`, `locales/{es,en}/profile.json`.
+- Primitivas UI + auth (mockups): `src/components/ui/{text,button,text-field,chip}.tsx`, `src/components/screens/auth-scaffold.tsx`, `app/(auth)/{welcome,login,register,verify-email}.tsx`.
 - `bandadau-frontend/AGENTS.md`: sección "Datos, rendimiento y compilador".
 
 **Decisiones**
@@ -79,6 +80,8 @@ Reglas:
 - [x] Feed (UC-06): `useInfiniteQuery` + `VirtualList` + estados (cargando/vacío/error) con mocks locales (`EXPO_PUBLIC_USE_MOCKS`).
 - [x] Notificaciones (UC-24): lista paginada, marcar una/todas como leídas, con mocks.
 - [x] Perfil (UC-04): vista + edición (displayName, carrera, semestre, bio, intereses) con mocks.
+- [x] Primitivas UI (Text/Button/TextField/Chip/Scaffold) y mockups de auth (welcome/login/registro/verificación).
+- [ ] Mockups del resto de secciones (feed, eventos, billetera, tickets, grupos) hasta cerrar el backend.
 - [ ] Conectar `getFeed`/`listNotifications`/`profiles/me` reales cuando existan los servicios.
 - [ ] Preferencias offline (cola) y persister de Query; avatar (subida prefirmada).
 - [ ] Refrendo humano de las actas §5.4 (`08-revisiones.md`).
