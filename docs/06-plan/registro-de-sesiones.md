@@ -50,6 +50,26 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Welcome y Login con hero de marca
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Branding en Welcome y Login con el logo y la paleta |
+| UCs / HU | UC-01, UC-02, E18 |
+| Componentes | `bandadau-frontend` |
+
+**Archivos tocados**
+- `src/components/brand/brand-hero.tsx` (nuevo): bloque de marca (azul río en claro / azul noche en oscuro) con el logo **invertido a blanco** + acento paraba; reutilizable.
+- `app/(auth)/welcome.tsx`: hero + título/pitch/CTAs/términos.
+- `app/(auth)/login.tsx`: hero (con subtítulo) + formulario.
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅.
+
+---
+
 ### 2026-10-14 — Notificaciones por tipo, perfil, crear y escáner
 
 | Campo | Valor |
