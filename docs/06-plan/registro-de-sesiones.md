@@ -50,6 +50,28 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Respuestas plegables (10/hide) y mockups más sólidos
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Respuestas con "ver más" (10) y ocultar; endurecer mockups de las demás pantallas |
+| UCs / HU | UC-06, UC-07, UC-09, UC-11, UC-12, UC-15, UC-16 |
+| Componentes | `bandadau-frontend` |
+
+**Archivos tocados**
+- `src/features/comments/components/comment-thread.tsx`: muestra 2 respuestas, **"Ver 10 respuestas"** por lotes y **"Ocultar respuestas"**; `locales/{es,en}/comments.json` (`viewReplies`/`hideReplies`).
+- Eventos: `src/features/events/components/event-card.tsx` (cover real con `expo-image`, badge de fecha y de precio), `app/events/[eventId].tsx` (cover).
+- Billetera: `app/(tabs)/wallet.tsx` (saldo con icono, **paquetes como tarjetas** con créditos y precio en BOB vía `formatNumber`, movimientos).
+- Tickets: `src/features/tickets/components/ticket-card.tsx` (badge de estado con color), `app/tickets/[ticketId].tsx` (look de ticket con separador punteado).
+- Grupos: `app/groups/index.tsx` (botón "Crear grupo"); i18n `wallet.packages`, `groups.create`.
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅.
+
+---
+
 ### 2026-10-14 — Comentarios (scroll + ver respuestas) y nav bar que se encoge
 
 | Campo | Valor |
