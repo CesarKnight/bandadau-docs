@@ -50,6 +50,29 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Compat Hermes (Intl) y versiones del SDK
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`); `main` (`bandadau-shared`) |
+| Objetivo | Arreglar crash en nativo (`Intl.RelativeTimeFormat`) y alinear dependencias del SDK |
+| UCs / HU | UC-06, UC-07, UC-24 |
+| Componentes | `bandadau-shared/packages/i18n`, `bandadau-frontend` |
+
+**Causa**
+- Hermes no implementa `Intl.RelativeTimeFormat`; `new Intl.RelativeTimeFormat()` lanzaba *"undefined cannot be used as a constructor"* al renderizar `PostCard` (`formatRelative`).
+
+**Archivos tocados**
+- `bandadau-shared/packages/i18n/src/format.ts`: guardas `hasIntl(...)` y **fallbacks** para `formatNumber`, `formatCredits`, `formatDate`, `formatDateTime` y `formatRelative` (funciona aunque el runtime no traiga `Intl`).
+- `bandadau-frontend/package.json`: `react-native-svg@15.15.4` y `typescript@~6.0.3` (esperados por Expo SDK 57); `jest.setup.ts` sin `extend-expect` (RNTL v14 incluye los matchers).
+- Requiere `pnpm install` en el frontend tras reconstruir `@bandada/i18n` (hard-link).
+
+**Verificación**
+- `pnpm --filter @bandada/i18n build` ✅ · frontend `typecheck` ✅ · `lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅ · `expo install --check` → *Dependencies are up to date*.
+
+---
+
 ### 2026-10-14 — Welcome full-screen (sin sidebar) y acceso como invitado
 
 | Campo | Valor |
