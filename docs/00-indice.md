@@ -94,11 +94,12 @@ algo lo contradice, se corrige el otro documento o se escribe un ADR.
 [guia-para-agentes.md](06-plan/guia-para-agentes.md) (prompts plantilla) ·
 [registro-de-sesiones.md](06-plan/registro-de-sesiones.md) (handoff entre sesiones).
 
-## Fuera de `bandadau-docs/docs/` (workspace de 8 repos, ADR-0017)
+## Fuera de `bandadau-docs/docs/` (workspace de 8 repos, ADR-0017 + kit de marca)
 
 | Ruta (relativa al workspace) | Contenido |
 |---|---|
-| [`AGENTS.md`](../../AGENTS.md) del workspace | Guía común para agentes; copia versionada en [`bandadau-docs/workspace/`](../workspace/AGENTS.md) |
+| [`AGENTS.md`](../../AGENTS.md) del workspace | Guía común para agentes |
+| [`bandadau-brand/`](../../bandadau-brand/README.md) | Kit de marca: SVG, iconos de app (`app-icons/`), `react-native/BandadaLogo.tsx` y la paleta (`marca-y-dominio.md`) |
 | [`bandadau-docs/contracts/`](../contracts/README.md) | OpenAPI (8 servicios + shared), AsyncAPI, GraphQL SDL, herramientas MCP |
 | [`bandadau-shared/AGENTS.md`](../../bandadau-shared/AGENTS.md) | Librerías `@bandada/*` en `packages/` (incl. ui-tokens e i18n) |
 | [`bandadau-backend/AGENTS.md`](../../bandadau-backend/AGENTS.md) · `bandadau-backend/services/<servicio>/AGENTS.md` | Reglas del repo y por servicio (9) |

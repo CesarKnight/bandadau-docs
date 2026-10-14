@@ -50,6 +50,37 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Kit de marca aplicado (paleta, iconos, splash) y alineación de tokens
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`); `main` en `bandadau-shared`/`bandadau-docs` |
+| Objetivo | Integrar `bandadau-brand/` en la app y alinear la paleta de tokens con la marca |
+| UCs / HU | Transversal (E18 tokens; RF-29/D13) |
+| Componentes | `bandadau-brand`, `bandadau-shared/packages/ui-tokens`, `bandadau-frontend` |
+
+**Archivos tocados**
+- Paleta: `bandadau-shared/packages/ui-tokens/tokens/primitive/color.tokens.json` (azul `#1238A8`/`#0A1F66`/`#1A52D6`, amarillo `#FFC21A`/ámbar `#F5A100`).
+- Docs: `01-vision/marca-y-dominio.md` (identidad visual + kit), `04-patrones-y-reglas/design-tokens-y-temas.md` (hex de ejemplo), `00-indice.md` (referencia a `bandadau-brand`).
+- App: `bandadau-frontend/assets/brand/*` (iconos, splash, notificación, favicon), `src/components/brand/BandadaLogo.tsx`, `app.config.ts` (icon/ios.icon dark+tinted/android.adaptiveIcon/web.favicon/splash/notifications), `app/_layout.tsx` (+`BandadaSplash`), `app/index.tsx` (+`BandadaLoader`), `app/(auth)/welcome.tsx` y `src/components/navigation/global-sidebar.tsx` (marca).
+- Dependencias: `react-native-reanimated@4.5.1` + `react-native-worklets@0.10.1` (el logo animado los usa; `babel-preset-expo` añade el plugin de worklets automáticamente).
+
+**Decisiones**
+- La paleta de la app se deriva del kit: primario azul río `#1238A8`, acentos paraba `#FFC21A` (oscuro) / ámbar `#F5A100` (claro). Contraste AA verificado (128 pares).
+- Los hex del logo son propios de la marca (no tokens de UI): excepción documentada en `marca-y-dominio.md`.
+- `bandadau-brand/` es una carpeta del workspace **sin repositorio git propio** (a diferencia de los 8 repos); a decidir si se versiona aparte.
+
+**Pendientes**
+- [ ] Probar en dispositivo: animaciones del logo, iconos `dark`/`tinted` de iOS 18 y el ícono temático de Android 13+ (declarado en el README del kit).
+- [ ] Decidir si `bandadau-brand` pasa a repositorio propio y se añade al workspace.
+
+**Verificación**
+- `pnpm --filter @bandada/ui-tokens build` → contraste AA (light+dark) OK.
+- `bandadau-frontend`: `pnpm typecheck` ✅, `pnpm lint` ✅, `expo export -p web` ✅.
+
+---
+
 ### 2026-10-14 — Fase B: identidad mobile (UC-01/02/03) + stack de datos
 
 | Campo | Valor |
