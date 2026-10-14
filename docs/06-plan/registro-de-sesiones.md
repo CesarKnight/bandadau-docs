@@ -68,6 +68,8 @@ Reglas:
 - Notificaciones (UC-24): `src/features/notifications/{types,api}.ts`, `.../components/notification-item.tsx`, `app/notifications.tsx`, `src/mocks/notifications.ts`, `locales/{es,en}/notifications.json`.
 - Perfil (UC-04): `src/features/profile/{types,api}.ts`, `app/(tabs)/profile.tsx`, `app/profile/edit.tsx`, `src/mocks/profile.ts`, `locales/{es,en}/profile.json`.
 - Primitivas UI + auth (mockups): `src/components/ui/{text,button,text-field,chip}.tsx`, `src/components/screens/auth-scaffold.tsx`, `app/(auth)/{welcome,login,register,verify-email}.tsx`.
+- Listas (patrón Homy): `src/hooks/use-infinite-list.ts`, `src/components/ui/feed-list.tsx` (FlashList nativo / FlatList web + sentinel IntersectionObserver, footer spinner, refresh).
+- Secciones (mockups): `src/features/{events,wallet,tickets,groups}/{types,api}.ts` + `components/*`; `app/(tabs)/{events,wallet,create}.tsx`, `app/events/[eventId].tsx`, `app/tickets/{index,[ticketId]}.tsx`, `app/groups/index.tsx`; mocks `src/mocks/{events,wallet,tickets,groups}.ts`.
 - `bandadau-frontend/AGENTS.md`: sección "Datos, rendimiento y compilador".
 
 **Decisiones**
@@ -81,8 +83,9 @@ Reglas:
 - [x] Notificaciones (UC-24): lista paginada, marcar una/todas como leídas, con mocks.
 - [x] Perfil (UC-04): vista + edición (displayName, carrera, semestre, bio, intereses) con mocks.
 - [x] Primitivas UI (Text/Button/TextField/Chip/Scaffold) y mockups de auth (welcome/login/registro/verificación).
-- [ ] Mockups del resto de secciones (feed, eventos, billetera, tickets, grupos) hasta cerrar el backend.
-- [ ] Conectar `getFeed`/`listNotifications`/`profiles/me` reales cuando existan los servicios.
+- [x] Motor de listas estilo Homy (`useInfiniteList` con dedupe/refresh/error y `FeedList` nativo+web) aplicado a todas las listas.
+- [x] Mockups de secciones: eventos (+detalle), billetera (saldo/recarga/movimientos), tickets (+detalle QR), grupos, crear publicación.
+- [ ] Conectar listas reales cuando existan `social`/`eventos`/`tickets`/`notification`; billetera `wallet-service` ya existe.
 - [ ] Preferencias offline (cola) y persister de Query; avatar (subida prefirmada).
 - [ ] Refrendo humano de las actas §5.4 (`08-revisiones.md`).
 
