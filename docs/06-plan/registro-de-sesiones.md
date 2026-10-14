@@ -50,6 +50,27 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Formularios de auth: PasswordField, accesorio y auto-submit
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Mejorar los formularios de identidad |
+| UCs / HU | UC-01, UC-02 |
+| Componentes | `bandadau-frontend` |
+
+**Archivos tocados**
+- `src/components/ui/text-field.tsx`: prop `rightAccessory` (accesorio a la derecha del input).
+- `src/components/ui/password-field.tsx` (nuevo): contraseña con **mostrar/ocultar**; usado en login y registro.
+- `app/(auth)/verify-email.tsx`: **auto-submit** al completar los 6 dígitos (solo dígitos); botón sigue disponible.
+- `locales/{es,en}/auth.json` (`showPassword`/`hidePassword`).
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅.
+
+---
+
 ### 2026-10-14 — react-native-keyboard-controller y ajustes de auth/Button
 
 | Campo | Valor |
