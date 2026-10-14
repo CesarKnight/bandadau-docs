@@ -50,6 +50,36 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — react-native-keyboard-controller y ajustes de auth/Button
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Buen manejo del teclado (formularios y sheet) + cerrar ajustes de la sesión anterior |
+| UCs / HU | UC-01, UC-02 |
+| Componentes | `bandadau-frontend` |
+
+**Cambios de la otra sesión (revisados y commiteados)**
+- `app/(auth)/welcome.tsx`: "Iniciar sesión" `ghost` → `secondary`.
+- `src/components/brand/brand-hero.tsx`: `height` excluye el inset (`minHeight: height + paddingTop`) y el mark escala.
+- `src/components/ui/button.tsx`: `style` deja de ser función (`({pressed}) => …`) → `useState` + `onPressIn/Out`; borde para `variant !== 'primary'`; `alignSelf: stretch` + `minHeight` en `lg`.
+
+**Teclado (`react-native-keyboard-controller@1.21.9`)**
+- `app/_layout.tsx`: `KeyboardProvider` (dentro de `GestureHandlerRootView`).
+- `src/components/screens/auth-layout.tsx`: `KeyboardAvoidingView` de la librería (behavior `padding`).
+- `src/hooks/use-tab-bar-keyboard.{ts,native.ts}`: la tab bar se **oculta** con el teclado (UI thread vía `useReanimatedKeyboardAnimation`); aplicado en `floating-tab-bar.tsx`.
+- `bandadau-frontend/AGENTS.md`: nota de teclado.
+
+**Nota (revisión de NativeWind)**
+- La app usa **`StyleSheet` + `useTokens()`** en todo (0 usos de `className`); NativeWind v4 está configurado pero no se usa. El `style` en forma de **función** en `Pressable` no se aplicaba bajo el `jsxImportSource: 'nativewind'` (runtime `react-native-css-interop`), de ahí el cambio a `useState`. Pendiente decidir: documentar la desviación (StyleSheet+tokens) o arreglar/migrar NativeWind.
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅.
+- **Requiere rebuild del dev client** (módulo nativo nuevo).
+
+---
+
 ### 2026-10-14 — Auth con safe-area/insets y logo en registro
 
 | Campo | Valor |
