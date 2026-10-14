@@ -64,6 +64,7 @@ Reglas:
 - `bandadau-frontend/`: config (`app.config.ts` React Compiler; dependencias `expo-dev-client`, `@shopify/flash-list`, `react-native-css-interop`, `babel-plugin-react-compiler`; `app/index.tsx` gate de sesión).
 - Identidad: `src/features/auth/{types,schemas,api}.ts`, `src/auth/{pkce,handoff,session,open-url*,refresh-token*}.ts`, `src/lib/{api-client,api-error,http,ids,idempotency,query-keys,query-client}.ts`, `src/stores/{session,preferences}.store.ts`, `src/components/ui/virtual-list.tsx`.
 - Pantallas: `app/(auth)/{welcome,login,register,verify-email}.tsx`, `app/sso/callback.tsx`, `app/settings/index.tsx`.
+- Feed (UC-06): `src/features/feed/{types,api}.ts`, `src/features/feed/components/post-card.tsx`, `app/(tabs)/feed.tsx`, `src/mocks/{index,feed}.ts`, `locales/{es,en}/feed.json`.
 - `bandadau-frontend/AGENTS.md`: sección "Datos, rendimiento y compilador".
 
 **Decisiones**
@@ -73,7 +74,8 @@ Reglas:
 - pnpm 10.34.7 vía Corepack; **pnpm 12 no funciona con Corepack 0.34** (su bin es `pnpm`, no `bin/pnpm.cjs`) — no es un problema de Apple Silicon.
 
 **Pendientes**
-- [ ] `app/(tabs)/feed` con `getFeed` real (social-service no existe; usar mocks) y `VirtualList`.
+- [x] Feed (UC-06): `useInfiniteQuery` + `VirtualList` + estados (cargando/vacío/error) con mocks locales (`EXPO_PUBLIC_USE_MOCKS`).
+- [ ] Conectar `getFeed` real cuando exista `social-service`; prueba de contrato/mocks con MSW.
 - [ ] Preferencias offline (cola) y persister de Query; notificaciones (UC-24); UC-04 avatar.
 - [ ] Refrendo humano de las actas §5.4 (`08-revisiones.md`).
 
