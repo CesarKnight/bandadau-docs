@@ -50,6 +50,31 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Tema oscuro navy de marca y logo invertido
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`); `main` (`bandadau-shared`/`bandadau-docs`) |
+| Objetivo | Dark mode con tonalidad azul oscura de marca + detalles amarillos; logo a blanco en oscuro |
+| UCs / HU | E18 (tokens, D13); RF-29 |
+| Componentes | `bandadau-shared/packages/ui-tokens`, `bandadau-frontend` |
+
+**Archivos tocados**
+- `tokens/semantic/color.dark.tokens.json`: fondos `blue.950/900/800` (azul noche), textos azul claro, `border.focus` y `brand.accent` en amarillo paraba, `feedback.info` y `secondary` azulados.
+- `src/theme/use-brand.ts` (nuevo): color de logo azul en claro / **blanco** en oscuro, acento amarillo.
+- `global-sidebar.tsx`, `app/(auth)/welcome.tsx`, `app/index.tsx`: usan `useBrand()`.
+- `bandadau-frontend/AGENTS.md`: nota de pnpm (reinstalar tras rebuild de `@bandada/*`).
+
+**Decisión**
+- El dark vira de neutro cálido a **navy de marca** (#04102E/#071747/#0A1F66) con acento amarillo; el logo se invierte a blanco. Contraste AA verificado.
+
+**Verificación**
+- `pnpm --filter @bandada/ui-tokens build` → contraste 128 pares OK.
+- `bandadau-frontend`: `typecheck` ✅, `lint` ✅, `expo export -p web --clear` ✅.
+
+---
+
 ### 2026-10-14 — Feed estilo Instagram y logo de marca en el sidebar
 
 | Campo | Valor |
