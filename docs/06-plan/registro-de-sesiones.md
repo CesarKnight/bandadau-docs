@@ -65,6 +65,7 @@ Reglas:
 - `app/(auth)/welcome.tsx`: botón **"Ingresar como invitado"**.
 - `src/stores/session.store.ts`: `guest` + `loginAsGuest()` (usuario placeholder, sin restricciones de momento).
 - `locales/{es,en}/auth.json` (`welcome.guest`).
+- `app/index.tsx`: el arranque en frío **siempre** va a Welcome (restaura la sesión en segundo plano); el feed se alcanza tras ingresar (login/registro/invitado).
 
 **Decisión**
 - El invitado abre sesión local sin cuenta (`accessToken: null`, `guest: true`) y va al feed; se restringirá cuando existan los guards reales.
