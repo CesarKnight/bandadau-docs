@@ -66,6 +66,7 @@ Reglas:
 - Pantallas: `app/(auth)/{welcome,login,register,verify-email}.tsx`, `app/sso/callback.tsx`, `app/settings/index.tsx`.
 - Feed (UC-06): `src/features/feed/{types,api}.ts`, `src/features/feed/components/post-card.tsx`, `app/(tabs)/feed.tsx`, `src/mocks/{index,feed}.ts`, `locales/{es,en}/feed.json`.
 - Notificaciones (UC-24): `src/features/notifications/{types,api}.ts`, `.../components/notification-item.tsx`, `app/notifications.tsx`, `src/mocks/notifications.ts`, `locales/{es,en}/notifications.json`.
+- Perfil (UC-04): `src/features/profile/{types,api}.ts`, `app/(tabs)/profile.tsx`, `app/profile/edit.tsx`, `src/mocks/profile.ts`, `locales/{es,en}/profile.json`.
 - `bandadau-frontend/AGENTS.md`: sección "Datos, rendimiento y compilador".
 
 **Decisiones**
@@ -77,8 +78,9 @@ Reglas:
 **Pendientes**
 - [x] Feed (UC-06): `useInfiniteQuery` + `VirtualList` + estados (cargando/vacío/error) con mocks locales (`EXPO_PUBLIC_USE_MOCKS`).
 - [x] Notificaciones (UC-24): lista paginada, marcar una/todas como leídas, con mocks.
-- [ ] Conectar `getFeed`/`listNotifications` reales cuando existan `social-service`/`notification-service`.
-- [ ] Preferencias offline (cola) y persister de Query; UC-04 avatar.
+- [x] Perfil (UC-04): vista + edición (displayName, carrera, semestre, bio, intereses) con mocks.
+- [ ] Conectar `getFeed`/`listNotifications`/`profiles/me` reales cuando existan los servicios.
+- [ ] Preferencias offline (cola) y persister de Query; avatar (subida prefirmada).
 - [ ] Refrendo humano de las actas §5.4 (`08-revisiones.md`).
 
 **Verificación**
