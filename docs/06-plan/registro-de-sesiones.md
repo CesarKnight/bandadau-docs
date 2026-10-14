@@ -50,6 +50,30 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Welcome full-screen (sin sidebar) y acceso como invitado
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Welcome ocupa toda la pantalla en web sin la global sidebar; login/registro igual; botón invitado |
+| UCs / HU | UC-01, UC-02, UC-03 |
+| Componentes | `bandadau-frontend` |
+
+**Archivos tocados**
+- `app/_layout.tsx`: la global sidebar se oculta en rutas de auth (`/welcome`, `/login`, `/register`, `/verify-email`); el contenido pasa a full-width.
+- `app/(auth)/welcome.tsx`: botón **"Ingresar como invitado"**.
+- `src/stores/session.store.ts`: `guest` + `loginAsGuest()` (usuario placeholder, sin restricciones de momento).
+- `locales/{es,en}/auth.json` (`welcome.guest`).
+
+**Decisión**
+- El invitado abre sesión local sin cuenta (`accessToken: null`, `guest: true`) y va al feed; se restringirá cuando existan los guards reales.
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅.
+
+---
+
 ### 2026-10-14 — Welcome y Login con hero de marca
 
 | Campo | Valor |
