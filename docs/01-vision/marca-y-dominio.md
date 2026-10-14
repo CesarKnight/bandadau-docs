@@ -36,11 +36,25 @@ La compra y gestión del dominio está a cargo del equipo. La documentación usa
 Local: los mismos con `bandada.localhost` (`app.bandada.localhost`, …). El dominio se
 parametriza con `BASE_DOMAIN`; ningún código debe tener el dominio escrito a mano.
 
-## Identidad visual (punto de partida)
+## Identidad visual
 
-- Paleta inspirada en la paraba barba azul / paraba roja: azul `#1E5AA8` (primario),
-  amarillo `#F5B700` (acento), rojo `#D7263D` (alertas/énfasis), neutros cálidos.
-- Isotipo: tres siluetas de ave en formación de "U".
-- Tokens en `bandadau-shared/packages/ui-tokens` (fuente única para landing, admin, MFEs y app), con modos claro y
-  oscuro. Los hex de arriba son **primitivos**: en código nunca se usan directamente (ver
-  `bandadau-docs/docs/04-patrones-y-reglas/design-tokens-y-temas.md`).
+El kit de marca vive en `bandadau-brand/` (SVG, PNG de app-icons y `react-native/BandadaLogo.tsx`;
+ver su `README.md`). Concepto: **nueve aves en vuelo forman una U**; la última (arriba a la derecha)
+es la que guía y lleva el amarillo de la paraba.
+
+| Color | Hex | Uso |
+|---|---|---|
+| Azul río | `#1238A8` | Primario (marca, acciones) |
+| Azul noche | `#0A1F66` | Fondos oscuros, splash |
+| Azul cielo | `#1A52D6` | Variante clara del primario |
+| Amarillo paraba | `#FFC21A` | Acento sobre fondos oscuros |
+| Ámbar | `#F5A100` | Acento sobre fondos claros |
+| Rojo | `#D7263D` | Alertas / énfasis (`highlight`) |
+
+Tipografía del wordmark: **Nunito ExtraBold** vectorizada (no requiere instalar fuentes).
+
+- Estos hex son **primitivos**: los tokens de `bandadau-shared/packages/ui-tokens` los consumen en la
+  capa semántica (`color.brand.*`, `color.action.*`); en código la UI usa **solo tokens semánticos**
+  (`bandadau-docs/docs/04-patrones-y-reglas/design-tokens-y-temas.md`), nunca los hex directamente.
+- Aplicación del kit (iconos iOS/Android, splash, notificaciones, favicon) en el `app.config` de la app
+  móvil; ver `bandadau-brand/README.md`.

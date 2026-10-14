@@ -25,7 +25,7 @@ flowchart LR
 
 | Nivel | Ejemplo | ¿Quién lo usa? | ¿Cambia con el tema? |
 |---|---|---|---|
-| Primitivo | `color.blue.600 = #1E5AA8` | **Solo** los tokens semánticos | No |
+| Primitivo | `color.blue.600 = #1238A8` | **Solo** los tokens semánticos | No |
 | Semántico | `color.action.primary.bg → {color.blue.600}` (light) / `{color.blue.400}` (dark) | Componentes | **Sí** |
 | Componente | `button.primary.bg → {color.action.primary.bg}` | Primitivas del design system (`Button`, `Card`…) | Indirectamente |
 
@@ -66,7 +66,7 @@ Ejemplo de primitivo y semántico (DTCG):
 
 ```json
 // primitive/color.tokens.json
-{ "color": { "blue": { "600": { "$type": "color", "$value": "#1E5AA8" },
+ { "color": { "blue": { "600": { "$type": "color", "$value": "#1238A8" },
                        "400": { "$type": "color", "$value": "#5B8FD6" } } } }
 
 // semantic/color.light.tokens.json
