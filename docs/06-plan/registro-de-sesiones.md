@@ -50,6 +50,28 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Notificaciones por tipo, perfil, crear y escáner
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Endurecer mockups: notificaciones, perfil, crear y escáner de tickets |
+| UCs / HU | UC-04, UC-05, UC-14, UC-24 |
+| Componentes | `bandadau-frontend` |
+
+**Archivos tocados**
+- `src/features/notifications/components/notification-item.tsx`: icono por `NotificationType` (mapa parcial con fallback).
+- `app/(tabs)/profile.tsx`: portada, avatar con anillo de marca, stats con divisores, tabs Publicaciones/Guardados y grid; `profile.savedEmpty`.
+- `app/(tabs)/create.tsx`: contador `n/2000` y chips de hashtags extraídos del texto.
+- `app/scan.tsx` (UC-14, nuevo): marco de cámara + resultado simulado (válida/usada/firma inválida); namespace `scan`; botón "Escanear entrada" en `app/tickets/index.tsx`.
+- `eslint.config.mjs`: ignora `plugins/**` (config plugins CommonJS); nota: se incorporó `plugins/with-ios-signing.js` + su entrada en `app.config.ts` (ya presentes en el repo).
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅.
+
+---
+
 ### 2026-10-14 — Respuestas plegables (10/hide) y mockups más sólidos
 
 | Campo | Valor |
