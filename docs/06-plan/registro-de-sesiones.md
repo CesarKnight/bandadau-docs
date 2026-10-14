@@ -50,6 +50,27 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Comentarios (scroll + ver respuestas) y nav bar que se encoge
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Ver el scroll del sheet con muchos comentarios/respuestas y el colapso de la tab bar |
+| UCs / HU | UC-06, UC-07 |
+| Componentes | `bandadau-frontend` |
+
+**Archivos tocados**
+- `src/mocks/comments.ts`: 12 comentarios raíz + respuestas (para probar scroll y expandir) en todos los posts (incl. el de Lucía Pérez).
+- `src/features/comments/components/comment-thread.tsx`: muestra 2 respuestas y **"Ver N respuestas"** para expandir; `locales/{es,en}/comments.json` (`viewReplies` ICU).
+- Nav bar estilo Homy: `src/components/navigation/tab-bar-collapse.tsx` (provider + `useTabBarOnScroll`/`useTabBarCollapse`), `floating-tab-bar.tsx` (encoge con `withSpring`, respeta `useReducedMotion`), `custom-tabs.tsx` (envuelve con el provider y resetea al cambiar de ruta), `feed-list.tsx` (conecta `onScroll`).
+- `eslint.config.mjs`: `react-hooks/immutability` off (la regla del React Compiler no entiende los shared values de Reanimated).
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅.
+
+---
+
 ### 2026-10-14 — Media a todo el ancho y reapertura del bottom sheet
 
 | Campo | Valor |
