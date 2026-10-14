@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — social-service
-  version: 1.1.0
+  version: 1.2.0
   summary: Red social (perfiles, posts, feed, comentarios, reacciones, seguidores, grupos y denuncias).
   description: |
     API del bounded context **Social** (`social-service`, TypeScript + NestJS 11, Clean
@@ -21,6 +21,8 @@ info:
       `admin-gateway` e `insights-service` (MCP `get_content_stats`, `list_flagged_content`).
 
     ## Changelog
+    - 1.2.0 (2026-10-14): respuestas a comentarios (UC-07): `Comment.parentId` y `Comment.replyCount`
+      (un nivel de anidación); `CreateCommentRequest.parentId` para responder a un comentario raíz.
     - 1.1.0 (2026-10-14): ADR-0016/D15 — `rejectGroupMember`, `leaveGroup`, `getProfileInternal`,
       `listGroupsInternal`; enums `ReportReason`, `ReportResolution`, `CommentStatus`, `HiddenReason`
       y `GroupMemberRole` (`OWNER`, `ADMIN`, `MEMBER`); `Comment.status`; denuncias con `reason`
@@ -2188,6 +2190,15 @@ components:
         createdAt:
           type: string
           format: date-time
+        parentId:
+          type: string
+          format: uuid
+          description: Comentario raíz al que responde este comentario (un solo nivel de anidación). Ausente en comentarios raíz.
+        replyCount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Cantidad de respuestas directas (solo relevante en comentarios raíz).
 
     CommentPage:
       allOf:
@@ -2208,6 +2219,10 @@ components:
           type: string
           minLength: 1
           maxLength: 500
+        parentId:
+          type: string
+          format: uuid
+          description: Si se envía, el comentario es una respuesta a ese comentario raíz (UC-07).
 
     SetReactionRequest:
       type: object
