@@ -82,6 +82,12 @@ Estado al 2026-10-14: los 24 UCs tienen borradores hasta **Secuencia (pendiente 
 **ninguna revisión formal** se ha realizado; por regla, no se implementa ningún UC hasta aprobar
 su CDR.
 
+> **Excepción registrada (2026-10-14):** el lote de arranque de la app mobile (**UC-01, UC-02,
+> UC-03**) sí tiene actas **RR/PDR/CDR retroactivas** (ver §5.4), aprobadas con observaciones no
+> bloqueantes. Quedan habilitados para implementación; los demás UC siguen en "pendiente CDR".
+> La aprobación de §5.4 es de agentes y **requiere refrendo humano** del equipo en la revisión de
+> cierre.
+
 ### 5.1 Hitos globales
 
 | Hito | Fecha objetivo | Alcance | Revisores | Resultado | Acta |
@@ -97,9 +103,9 @@ su CDR.
 
 | UC | RR | PDR | CDR | DR | Observaciones |
 |---|---|---|---|---|---|
-| UC-01 | Pendiente | Pendiente | Pendiente | Pendiente | — |
-| UC-02 | Pendiente | Pendiente | Pendiente | Pendiente | — |
-| UC-03 | Pendiente | Pendiente | Pendiente | Pendiente | — |
+| UC-01 | Aprobada | Aprobada | Aprobada | Pendiente | Acta retroactiva §5.4 (refrendo humano pendiente) |
+| UC-02 | Aprobada | Aprobada | Aprobada | Pendiente | Acta retroactiva §5.4 (refrendo humano pendiente) |
+| UC-03 | Aprobada | Aprobada | Aprobada | Pendiente | Acta retroactiva §5.4 (refrendo humano pendiente) |
 | UC-04 | Pendiente | Pendiente | Pendiente | Pendiente | Incluye RF-29/RF-30 (tema e idioma) |
 | UC-05 | Pendiente | Pendiente | Pendiente | Pendiente | — |
 | UC-06 | Pendiente | Pendiente | Pendiente | Pendiente | — |
@@ -134,3 +140,48 @@ su CDR.
   |---|---|---|---|---|---|---|
 - Decisiones / ADRs derivados: …
 ```
+
+### 5.4 Actas retroactivas — lote mobile (UC-01, UC-02, UC-03)
+
+> Emitidas el **2026-10-14** por un agente (Claude Code / opencode) sobre los borradores ya
+> existentes, para habilitar el arranque de `bandadau-frontend`. **Requieren refrendo humano.**
+> Resultado de las tres: **Aprobada con observaciones** (ninguna bloqueante).
+
+#### RR — Actas retroactivas · 2026-10-14
+- Revisores: Agente (checklist RR); refrendo humano pendiente.
+- Alcance: UC-01, UC-02, UC-03.
+- Resultado: Aprobada con observaciones.
+- Hallazgos:
+  | # | UC | Ítem de checklist | Severidad | Corrección | Dueño | Estado |
+  |---|---|---|---|---|---|---|
+  | 1 | UC-01/02/03 | Trazabilidad RF→UC y cabecera completa de plantilla | menor | Presente en los tres UC (`07-trazabilidad.md` RF-01…RF-04) | Líder | OK |
+  | 2 | UC-01/02/03 | Pantallas en `05-prototipos-gui.md` con estados vacío/error/offline | menor | P-APP-01…P-APP-04 y P-APP-16 documentadas | Frontend | OK |
+  | 3 | UC-01 | `displayName` en `User` (propuesta derivada) | menor | Registrar como propuesta; no bloquea | Líder | Abierto |
+- Decisiones / ADRs derivados: ninguna.
+
+#### PDR — Actas retroactivas · 2026-10-14
+- Revisores: Agente (checklist PDR); refrendo humano pendiente.
+- Alcance: UC-01, UC-02, UC-03.
+- Resultado: Aprobada con observaciones.
+- Hallazgos:
+  | # | UC | Ítem de checklist | Severidad | Corrección | Dueño | Estado |
+  |---|---|---|---|---|---|---|
+  | 1 | UC-01/02/03 | Reglas de robustez (actor↔boundary, boundary↔control, control↔entity) | menor | Correctas; sin actor↔control ni boundary↔entity | Líder | OK |
+  | 2 | UC-01/02/03 | Tabla objeto→componente real (catálogo) | menor | Coincide con `catalogo-servicios.md` | Líder | OK |
+  | 3 | UC-03 | `I9a` (fragmento `#cv` puede perderse) como riesgo a verificar en dispositivo | menor | Verificar en device real; anotar en `registro-de-sesiones.md` | Frontend | Abierto |
+- Decisiones / ADRs derivados: ninguna.
+
+#### CDR — Actas retroactivas · 2026-10-14
+- Revisores: Agente (checklist CDR); refrendo humano pendiente.
+- Alcance: UC-01, UC-02, UC-03.
+- Resultado: Aprobada con observaciones.
+- Hallazgos:
+  | # | UC | Ítem de checklist | Severidad | Corrección | Dueño | Estado |
+  |---|---|---|---|---|---|---|
+  | 1 | UC-01/02/03 | Llamadas que cruzan servicios existen en `contracts/` (OpenAPI/AsyncAPI) | menor | `registerUser`, `verifyEmail`, `resendVerificationCode`, `listUniversities`, `login`, `refreshToken`, `logout`, `getMe`, `createHandoffCode`, `exchangeHandoffCode`, `bandada.identity.user.registered.v1` presentes | Líder | OK |
+  | 2 | UC-01 | Idempotencia: `registerUser` con `Idempotency-Key`; publicación por outbox en la misma tx | menor | Correcto (D3) | Backend | OK |
+  | 3 | UC-02 | Refresh en cookie `HttpOnly` en web (propuesta derivada) | menor | Ya documentado en `seguridad-y-sso.md` | Líder | OK |
+  | 4 | UC-03 | Body de `createHandoffCode` unificado con `codeChallenge` y respuesta `201` | menor | Alinear `decisiones-clave.md` D1 en el cierre documental | Líder | Abierto |
+  | 5 | UC-01/02/03 | Errores con Problem Details, `code` estable y localizable | menor | Catálogo en `api-rest-guidelines.md` + `@bandada/i18n` | Líder | OK |
+- Decisiones / ADRs derivados: ninguna (observaciones menores).
+- Observación de proceso: las actas se emitieron **después** de que identity-service ya estaba parcialmente implementado; se regulariza a posteriori. Para el resto de UC se respetará el orden Robustez→Secuencia→CDR→Implementación.

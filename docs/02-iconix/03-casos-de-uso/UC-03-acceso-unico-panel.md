@@ -9,7 +9,7 @@
 | Requisitos | RF-04, RNF-06, RNF-08 |
 | Tecnologías de la cátedra que demuestra | **T13** (acceso por una sola entrada), T4 |
 | Servicios involucrados | identity-service (Hexagonal), bandadau-frontend (Expo SDK 57: iOS, Android, web), bandadau-admin/shell (Next.js 16 static export) |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Secuencia (CDR aprobada 2026-10-14 — acta retroactiva; implementación en curso) |
 
 Relación: UC-03 «extend» UC-02 (requiere sesión activa en la app de origen). Implementa D4 de `decisiones-clave.md`.
 

@@ -50,6 +50,34 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Actas ICONIX retroactivas del lote mobile (UC-01/02/03) y arranque de la app
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) · refrendo humano pendiente |
+| Rama | `feat/mobile-bootstrap` (sugerida) |
+| Objetivo | Habilitar el arranque de `bandadau-frontend` regularizando el gate ICONIX de UC-01/02/03 |
+| UCs / HU | UC-01/02/03 (Secuencia (pendiente CDR) → **Secuencia (CDR aprobada)**); HU-01…HU-07 |
+| Componentes | `bandadau-docs/docs/02-iconix/`, `bandadau-frontend` |
+
+**Archivos tocados**
+- `docs/02-iconix/08-revisiones.md` — actas RR/PDR/CDR retroactivas (`§5.4`), filas de UC-01/02/03 en `§5.2` a Aprobada, nota de excepción en `§5`.
+- `docs/02-iconix/03-casos-de-uso/UC-01-registrarse.md`, `UC-02-iniciar-sesion.md`, `UC-03-acceso-unico-panel.md` — cabecera de estado.
+
+**Decisiones**
+- Las actas son retroactivas (el diseño ya estaba completo y identity-service parcialmente implementado); resultado **Aprobada con observaciones**, ninguna bloqueante. Refrendo humano pendiente.
+- Arranque de `bandadau-frontend`: bootstrap Expo SDK 57 + navegación custom (native+web) adaptada de Homy a tokens de `@bandada/ui-tokens`.
+
+**Pendientes**
+- [ ] Refrendo humano de las actas §5.4 (equipo) — líder técnico.
+- [ ] Procesar observaciones menores: `displayName` en `User` (UC-01); alinear D1 `createHandoffCode` (UC-03); verificar `I9a` (fragmento `#cv`) en dispositivo real.
+- [ ] Implementar UC-01/02/03 en `bandadau-frontend` (pantallas, sesión/refresh, handoff).
+
+**Verificación**
+- Solo documentación en este tramo; sin comandos de build.
+
+---
+
 ### 2026-10-14 — Revisión de consistencia tras ADR-0017 (multi-repo) y nueva fecha de entrega
 
 | Campo | Valor |

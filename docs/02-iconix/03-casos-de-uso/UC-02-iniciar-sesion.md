@@ -9,7 +9,7 @@
 | Requisitos | RF-03, RNF-06, RNF-07, RNF-13 |
 | Tecnologías de la cátedra que demuestra | T4 (REST), base de T13 (identidad única) |
 | Servicios involucrados | identity-service (Hexagonal, Spring Boot 4), mobile, admin-shell |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Secuencia (CDR aprobada 2026-10-14 — acta retroactiva; implementación en curso) |
 
 Este UC agrupa tres flujos de la misma sesión: **login**, **renovación rotativa del refresh token** (con detección de reutilización) y **logout**. UC-03 lo «extiende» (requiere sesión activa).
 
