@@ -50,6 +50,27 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Media a todo el ancho y reapertura del bottom sheet
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Card con imagen full-bleed y bottom sheet que reabre tras cerrarse |
+| UCs / HU | UC-06, UC-07 |
+| Componentes | `bandadau-frontend` |
+
+**Archivos tocados**
+- `src/features/feed/components/post-card.tsx`: el carrusel de media ocupa **todo el ancho** de la card (se quitó el `marginHorizontal`/borde del contenedor).
+- `src/hooks/use-presentable-sheet.ts` (nuevo, patrón de Homy): `present()` en `requestAnimationFrame`, `isPresentedRef` + `justPresentedRef` para ignorar el `onChange` espurio de gorhom v5, cierre por `dismiss()`. **Resuelve el bug de que el sheet no volvía a abrirse tras quitarlo.**
+- `src/features/comments/comments-sheet.tsx`: usa `usePresentableSheet` (`onChange`/`onDismiss`); el botón X solo llama `onClose()`.
+- `bandadau-frontend/AGENTS.md`: nota de bottom sheets ampliada (usar `usePresentableSheet`).
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅.
+
+---
+
 ### 2026-10-14 — Ratios IG, swipe, bottom sheet con gorhom en web móvil y flechas solo desktop
 
 | Campo | Valor |
