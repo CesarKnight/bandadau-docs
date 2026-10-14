@@ -50,6 +50,29 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Feed responsive + carrusel Instagram y datos con imágenes
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Feed responsive (columna web), imágenes y carrusel estilo Instagram con flechas en web |
+| UCs / HU | UC-05/UC-06 |
+| Componentes | `bandadau-frontend` |
+
+**Archivos tocados**
+- `src/features/feed/components/post-carousel.tsx` (nuevo): pager `ScrollView` paging con puntos + flechas en web (patrón de `property-detail/image-carousel` de Homy, adaptado a tokens).
+- `src/features/feed/components/post-card.tsx`: usa `PostCarousel`; `app/(tabs)/feed.tsx`: columna centrada `maxWidth 560` en web.
+- `src/mocks/feed.ts`: imágenes aleatorias deterministas (picsum por seed), 1–4 por post; `src/features/feed/types.ts` (`PostMedia`); `locales/{es,en}/feed.json` (`previous`/`next`).
+
+**Decisión**
+- Placeholder de imágenes vía `picsum.photos` (seeded) para mockups; se sustituirá por `media-service`/`expo-image` con URLs reales.
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅.
+
+---
+
 ### 2026-10-14 — Tema oscuro navy de marca y logo invertido
 
 | Campo | Valor |
