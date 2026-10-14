@@ -50,6 +50,34 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Grilla del perfil y feed del usuario
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Arreglar la grilla del perfil y abrir el feed de un usuario al tocar un post |
+| UCs / HU | UC-04, UC-06 |
+| Componentes | `bandadau-frontend` |
+
+**Causa (grilla no visible)**
+- Los ítems eran `Image` **sin fondo**: si la imagen no cargaba, los cuadros quedaban invisibles. Se añadió `backgroundColor` (`bg.muted`) + `borderRadius`/`overflow`.
+
+**Feed del usuario**
+- `src/mocks/user-posts.ts` (nuevo) + `buildFeedItem` exportado de `mocks/feed.ts`: posts por autor.
+- `src/features/profile/api.ts`: `useUserPosts(userId)` (cursor) contra `GET /api/v1/profiles/{userId}/posts` (**mock de Fase 1**; el endpoint real se agregará al contrato de `social-service`).
+- `app/profile/[userId].tsx` (nuevo): feed del usuario (header con volver + nombre, `FeedList` + `PostCard` + panel de comentarios).
+- `app/(tabs)/profile.tsx`: cada ítem de la grilla es `Pressable` → abre el feed del usuario (pasa `userId` y `name`).
+- i18n `profile.{postsEmpty,back}`.
+
+**Nota**
+- `.expo/types` (typed routes) lo regenera el dev server; se eliminó el generado desactualizado.
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅.
+
+---
+
 ### 2026-10-14 — Formularios de auth: PasswordField, accesorio y auto-submit
 
 | Campo | Valor |
