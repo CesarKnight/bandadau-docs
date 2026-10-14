@@ -1,0 +1,405 @@
+openapi: 3.1.0
+info:
+  title: Bandada U — ticketing-service
+  version: 1.1.0
+  summary: Entradas (tickets) con QR firmado y validación en puerta.
+  description: |
+    API del bounded context **Entradas** (`ticketing-service`, TypeScript + NestJS 11,
+    Clean Architecture, DynamoDB `bandada-ticketing`).
+
+    - Los tickets se **emiten y anulan solo por comandos de la SAGA**
+      (`bandada.ticketing.cmd.issue-ticket.v1`, `bandada.ticketing.cmd.void-ticket.v1`); no hay
+      endpoint REST de creación. Ver `bandadau-docs/contracts/asyncapi/bandada-events.yaml`.
+    - Un ticket por `Registration`. Estados `ISSUED → USED | VOIDED`; `USED` y `VOIDED` son finales.
+    - `qrPayload` es un **JWS compacto firmado con ES256** por ticketing-service (ADR-0016)
+      (header `{alg: ES256, kid}`, payload `{tid, eid, rid, sub, iat}` = ticket, evento,
+      inscripción, titular y emisión en epoch s), verificable sin conexión con la clave pública del
+      `kid` publicada en `GET /tickets/signing-keys` (`getTicketSigningKeys`). La app lo dibuja
+      como QR y funciona offline (no contiene datos personales legibles más allá de IDs). El QR no
+      lleva estado: la unicidad la garantiza la escritura condicional en DynamoDB.
+    - Errores RFC 9457 con `code` estable; `title`/`detail` según `Accept-Language` (D14).
+
+    ## Changelog
+    - 1.1.0 (2026-10-14): `getTicketSigningKeys` (JWKS ES256 del QR; D15, ADR-0016); claims del QR
+      alineados con UC-14 (`tid`, `eid`, `rid`, `sub`, `iat`); URI de `type` de Problem corregida.
+    - 1.0.0 (2026-10-14): versión inicial contract-first (D1, D3, D14).
+  contact:
+    name: Grupo 24 — Ingeniería de Software II
+servers:
+  - url: http://api.bandada.localhost/api/v1
+    description: Desarrollo local (Traefik)
+  - url: https://api.bandadau.com/api/v1
+    description: Producción
+tags:
+  - name: tickets
+    description: Entradas del usuario y validación en puerta.
+security:
+  - bearerAuth: []
+paths:
+  /tickets/me:
+    get:
+      tags: [tickets]
+      operationId: listMyTickets
+      summary: Listar mis entradas
+      description: Entradas del usuario autenticado, ordenadas por fecha del evento (próximas primero).
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TicketStatus'
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Página de entradas.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketPage'
+              examples:
+                pagina:
+                  value:
+                    items:
+                      - id: 0192a3c5-7777-7aaa-8bbb-000000000101
+                        registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+                        eventId: 0192a3be-1234-7abc-8def-000000000042
+                        userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+                        eventTitle: Taller de Docker para principiantes
+                        eventStartsAt: '2026-10-20T22:00:00Z'
+                        venue: Auditorio de la Facultad de Tecnología, UMSA
+                        status: ISSUED
+                        issuedAt: '2026-10-14T14:00:03Z'
+                        usedAt: null
+                        voidedAt: null
+                    nextCursor: null
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /tickets/signing-keys:
+    get:
+      tags: [tickets]
+      operationId: getTicketSigningKeys
+      summary: Obtener las claves públicas de firma del QR (JWKS)
+      description: |
+        Conjunto de claves públicas **ES256** (JWK `kty: EC`, `crv: P-256`, RFC 7517/7518) con las que
+        se verifica la firma del `qrPayload` (UC-14, D15, ADR-0016). La app del portero las descarga
+        al abrir *Validar entradas* y las guarda en caché para verificar **sin conexión**; si
+        aparece un `kid` desconocido, vuelve a pedirlas (rotación). Incluye la clave activa y la
+        anterior durante la ventana de rotación. Las claves privadas nunca salen de
+        `ticketing-service`. Distinta de `/.well-known/jwks.json` de identity (RS256, tokens de acceso).
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Claves públicas vigentes.
+          headers:
+            Cache-Control:
+              description: Política de caché.
+              schema:
+                type: string
+              example: public, max-age=3600
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketSigningKeys'
+              examples:
+                claves:
+                  summary: Clave activa de octubre 2026
+                  value:
+                    keys:
+                      - kty: EC
+                        crv: P-256
+                        kid: tk-2026-10
+                        use: sig
+                        alg: ES256
+                        x: f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU
+                        y: x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /tickets/{ticketId}:
+    get:
+      tags: [tickets]
+      operationId: getTicket
+      summary: Obtener una entrada con su QR
+      description: Devuelve la entrada con el `qrPayload` firmado. Solo el dueño (o un ADMIN).
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Entrada.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketDetail'
+              examples:
+                emitida:
+                  value:
+                    id: 0192a3c5-7777-7aaa-8bbb-000000000101
+                    registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+                    eventId: 0192a3be-1234-7abc-8def-000000000042
+                    userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+                    eventTitle: Taller de Docker para principiantes
+                    eventStartsAt: '2026-10-20T22:00:00Z'
+                    venue: Auditorio de la Facultad de Tecnología, UMSA
+                    status: ISSUED
+                    issuedAt: '2026-10-14T14:00:03Z'
+                    usedAt: null
+                    voidedAt: null
+                    qrPayload: eyJhbGciOiJFUzI1NiIsImtpZCI6InRrLTIwMjYtMTAifQ.eyJ0aWQiOiIwMTkyYTNjNS03Nzc3LTdhYWEtOGJiYi0wMDAwMDAwMDAxMDEiLCJlaWQiOiIwMTkyYTNiZS0xMjM0LTdhYmMtOGRlZi0wMDAwMDAwMDAwNDIiLCJyaWQiOiIwMTkyYTNiZi1hYWFhLTdiYmItOGNjYy0wMDAwMDAwMDA3NzciLCJzdWIiOiIwMTkyYTNiNC01YzZkLTdlOGYtOWEwYi0xYzJkM2U0ZjVhNmIiLCJpYXQiOjE3OTE5ODY0MDN9.k3Jx9_Qm2Zc1vW8uT0eLrA4sPdHf6Gy7NiOb5XcVlEu1MpRqYtKw3SjDhFgAzBn2CxIoUe0LmVa9TsWr8QpNdA
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /tickets/validate:
+    post:
+      tags: [tickets]
+      operationId: validateTicket
+      summary: Validar una entrada en la puerta
+      description: |
+        Verifica la firma ES256 del `qrPayload` (con el `kid` del header) y marca el ticket como `USED` **una sola vez**
+        (escritura condicional `status = ISSUED` en DynamoDB) (UC-14, RF-18). Requiere rol
+        `ORGANIZER` y ser organizador del evento del ticket (o `ADMIN`).
+        Publica `bandada.ticketing.ticket.used.v1`.
+
+        Respuestas de negocio:
+        - `200` → ticket validado ahora (`result: VALID`).
+        - `409` `TICKET_ALREADY_USED` (incluye `usedAt`) o `TICKET_VOIDED`.
+        - `422` `INVALID_QR_SIGNATURE` / `TICKET_EVENT_MISMATCH` (si se envía `eventId` y no coincide).
+        - `403` `NOT_EVENT_ORGANIZER`.
+
+        **Idempotente** con `Idempotency-Key` (D3): reintentar la misma validación devuelve la
+        respuesta original (`Idempotent-Replayed: true`) en lugar de `409`.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidateTicketRequest'
+            examples:
+              escaneo:
+                value:
+                  qrPayload: eyJhbGciOiJFUzI1NiIsImtpZCI6InRrLTIwMjYtMTAifQ.eyJ0aWQiOiIwMTkyYTNjNS03Nzc3LTdhYWEtOGJiYi0wMDAwMDAwMDAxMDEiLCJlaWQiOiIwMTkyYTNiZS0xMjM0LTdhYmMtOGRlZi0wMDAwMDAwMDAwNDIiLCJyaWQiOiIwMTkyYTNiZi1hYWFhLTdiYmItOGNjYy0wMDAwMDAwMDA3NzciLCJzdWIiOiIwMTkyYTNiNC01YzZkLTdlOGYtOWEwYi0xYzJkM2U0ZjVhNmIiLCJpYXQiOjE3OTE5ODY0MDN9.k3Jx9_Qm2Zc1vW8uT0eLrA4sPdHf6Gy7NiOb5XcVlEu1MpRqYtKw3SjDhFgAzBn2CxIoUe0LmVa9TsWr8QpNdA
+                  eventId: 0192a3be-1234-7abc-8def-000000000042
+      responses:
+        '200':
+          description: Entrada validada y marcada como usada.
+          headers:
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidateTicketResponse'
+              examples:
+                valida:
+                  value:
+                    result: VALID
+                    ticket:
+                      id: 0192a3c5-7777-7aaa-8bbb-000000000101
+                      registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+                      eventId: 0192a3be-1234-7abc-8def-000000000042
+                      userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+                      eventTitle: Taller de Docker para principiantes
+                      eventStartsAt: '2026-10-20T22:00:00Z'
+                      venue: Auditorio de la Facultad de Tecnología, UMSA
+                      status: USED
+                      issuedAt: '2026-10-14T14:00:03Z'
+                      usedAt: '2026-10-20T21:48:10Z'
+                      voidedAt: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          description: El ticket ya fue usado o está anulado (o la clave de idempotencia está en curso).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/TicketConflictProblem'
+              examples:
+                yaUsado:
+                  value:
+                    type: https://api.bandadau.com/problems/ticket-already-used
+                    title: Entrada ya utilizada
+                    status: 409
+                    detail: Esta entrada se validó el 20/10/2026 a las 17:48.
+                    instance: /api/v1/tickets/validate
+                    code: TICKET_ALREADY_USED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+                    ticketId: 0192a3c5-7777-7aaa-8bbb-000000000101
+                    usedAt: '2026-10-20T21:48:10Z'
+        '422':
+          $ref: './shared/components.yaml#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+components:
+  schemas:
+    TicketStatus:
+      type: string
+      enum: [ISSUED, USED, VOIDED]
+    Ticket:
+      type: object
+      required: [id, registrationId, eventId, userId, status, issuedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        registrationId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        eventTitle:
+          type: string
+          description: Copia desnormalizada recibida en el comando `issue-ticket`.
+        eventStartsAt:
+          type: string
+          format: date-time
+        venue:
+          type: string
+        status:
+          $ref: '#/components/schemas/TicketStatus'
+        issuedAt:
+          type: string
+          format: date-time
+        usedAt:
+          type: [string, 'null']
+          format: date-time
+        voidedAt:
+          type: [string, 'null']
+          format: date-time
+    TicketDetail:
+      allOf:
+        - $ref: '#/components/schemas/Ticket'
+        - type: object
+          required: [qrPayload]
+          properties:
+            qrPayload:
+              type: string
+              description: |
+                JWS compacto ES256 (`header.payload.firma`, base64url) que se codifica en el QR.
+                Header `{alg: ES256, kid}`; payload `{tid, eid, rid, sub, iat}`. Se verifica con
+                `getTicketSigningKeys`.
+              pattern: '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$'
+    TicketPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Ticket'
+    ValidateTicketRequest:
+      type: object
+      additionalProperties: false
+      required: [qrPayload]
+      properties:
+        qrPayload:
+          type: string
+          maxLength: 2048
+          description: JWS compacto ES256 leído del QR.
+        eventId:
+          type: string
+          format: uuid
+          description: Evento que se está controlando en la puerta (opcional, recomendado).
+    ValidateTicketResponse:
+      type: object
+      required: [result, ticket]
+      properties:
+        result:
+          type: string
+          enum: [VALID]
+        ticket:
+          $ref: '#/components/schemas/Ticket'
+    TicketConflictProblem:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/Problem'
+        - type: object
+          properties:
+            ticketId:
+              type: string
+              format: uuid
+            usedAt:
+              type: [string, 'null']
+              format: date-time
+    EcPublicJwk:
+      type: object
+      required: [kty, crv, kid, use, alg, x, y]
+      properties:
+        kty:
+          type: string
+          const: EC
+        crv:
+          type: string
+          const: P-256
+        kid:
+          type: string
+          description: Coincide con el `kid` del header del JWS del QR.
+        use:
+          type: string
+          const: sig
+        alg:
+          type: string
+          const: ES256
+        x:
+          type: string
+          description: Coordenada X (base64url, 32 bytes).
+        y:
+          type: string
+          description: Coordenada Y (base64url, 32 bytes).
+    TicketSigningKeys:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/EcPublicJwk'
+  securitySchemes:
+    bearerAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/bearerAuth'

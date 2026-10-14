@@ -1,0 +1,1082 @@
+# =============================================================================
+# Bandada U — GraphQL del panel de administración (admin-gateway)
+# Versión: 1.1.0 (2026-10-14) — schema-first según D11, D13, D14 y D15 (ADR-0016).
+# Servido por admin-gateway (NestJS 11 + Apollo Server 5) en /graphql
+# (HTTP + WebSocket `graphql-ws` para suscripciones).
+#
+# Reglas:
+# - Autorización por directiva @auth(requires: [...]): basta con tener UNO de los roles.
+#   Sin @auth en un campo raíz => se exige sesión válida.
+# - Paginación Relay (Connection / Edge / PageInfo). Los cursores son opacos y
+#   corresponden al `nextCursor` de los servicios REST.
+# - Límite de profundidad 7 y de complejidad (configurado en el gateway).
+# - DataLoader por servicio (identity, social, media, events, wallet, insights).
+# - Los errores de negocio de las mutaciones se devuelven en `errors: [UserError!]!`
+#   del payload; los de autenticación/autorización como errores GraphQL con
+#   `extensions.code` = UNAUTHENTICATED | FORBIDDEN.
+# - Textos (`message` de UserError) localizados según `Accept-Language` (D14).
+#
+# Changelog
+# - 1.1.0: ADR-0016/D15 — mutaciones `retrySaga` y `createMcpToken`/`revokeMcpToken`
+#   (solo ADMIN); enums alineados con el modelo de dominio (`GeneratedReportStatus.READY`,
+#   `AlertKind.MODERATION_ESCALATION`, `AgentKind.EXTERNAL_MCP`, `RegistrationFailureReason`,
+#   `ReportReason`, `ReportResolution`, `MediaPurpose`, `SagaType`, `SagaStep`, `NotificationType`);
+#   argumentos opcionales de paginación y filtro en `contentReports`, `events`, `registrations`,
+#   `sagas`, `reports`, `alerts` y `agentRuns`; `University.enabled`, `MediaAsset.purpose`,
+#   `ContentReport.details/resolution`, `Alert.resource/occurrences`, `AgentRun.stopReason`.
+#   Los enums dejan de estar marcados como PROPUESTA.
+# - 1.0.0: versión inicial.
+# =============================================================================
+
+"""Fecha y hora ISO-8601 en UTC, p. ej. `2026-10-14T15:04:05Z`."""
+scalar DateTime
+
+"""Fecha ISO-8601 sin hora, p. ej. `2026-10-14`."""
+scalar Date
+
+"""Identificador UUID (v7 generado por la aplicación)."""
+scalar UUID
+
+"""Valor JSON arbitrario (datasets, especificaciones Vega-Lite, detalles de alertas)."""
+scalar JSON
+
+"""Entero de 64 bits serializado como número JSON (créditos y contadores)."""
+scalar Long
+
+"""Exige que el usuario autenticado tenga al menos uno de los roles indicados."""
+directive @auth(requires: [Role!]!) on FIELD_DEFINITION | OBJECT
+
+# -----------------------------------------------------------------------------
+# Enums del modelo de dominio (valores idénticos a API/DB)
+# -----------------------------------------------------------------------------
+
+"""Estado de la cuenta de usuario."""
+enum UserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+"""Rol de un usuario. Un usuario tiene uno o más roles."""
+enum Role {
+  STUDENT
+  ORGANIZER
+  MODERATOR
+  ADMIN
+}
+
+"""Idioma de la interfaz y del contenido generado (D14)."""
+enum Locale {
+  es
+  en
+}
+
+"""Preferencia de tema visual (D13)."""
+enum ThemePreference {
+  SYSTEM
+  LIGHT
+  DARK
+}
+
+"""Visibilidad de un post."""
+enum PostVisibility {
+  PUBLIC
+  FOLLOWERS
+  GROUP
+}
+
+"""Estado de un post."""
+enum PostStatus {
+  PENDING_MEDIA
+  PUBLISHED
+  HIDDEN
+  REMOVED
+}
+
+"""Tipo de reacción."""
+enum ReactionType {
+  LIKE
+  HELPFUL
+  FUNNY
+  SUPPORT
+}
+
+"""Privacidad de un grupo."""
+enum GroupPrivacy {
+  PUBLIC
+  PRIVATE
+}
+
+"""Estado de una membresía de grupo."""
+enum MembershipStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+  LEFT
+}
+
+"""Tipo de medio."""
+enum MediaKind {
+  IMAGE
+  VIDEO
+}
+
+"""Estado de un medio."""
+enum MediaStatus {
+  PENDING_UPLOAD
+  PROCESSING
+  APPROVED
+  FLAGGED
+  REJECTED
+}
+
+"""Decisión automática del modelo de moderación."""
+enum ModerationDecision {
+  ALLOW
+  REVIEW
+  BLOCK
+}
+
+"""Estado de una denuncia de contenido."""
+enum ReportStatus {
+  OPEN
+  RESOLVED_KEPT
+  RESOLVED_REMOVED
+}
+
+"""Estado de un evento."""
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  FINISHED
+}
+
+"""Estado de una inscripción."""
+enum RegistrationStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+  CANCELLATION_PENDING
+  CANCELLED
+}
+
+"""Estado de una SAGA."""
+enum SagaStatus {
+  STARTED
+  AWAITING_DEBIT
+  AWAITING_TICKET
+  COMPENSATING
+  COMPLETED
+  COMPENSATED
+  FAILED
+}
+
+"""Tipo de movimiento de la billetera."""
+enum LedgerEntryType {
+  TOPUP
+  DEBIT
+  REFUND
+}
+
+"""Estado de una recarga."""
+enum TopUpStatus {
+  PENDING
+  PAID
+  FAILED
+  EXPIRED
+}
+
+"""Estado de un ticket."""
+enum TicketStatus {
+  ISSUED
+  USED
+  VOIDED
+}
+
+"""Tipo de notificación."""
+enum NotificationType {
+  REGISTRATION_CONFIRMED
+  REGISTRATION_FAILED
+  EVENT_REMINDER
+  NEW_COMMENT
+  NEW_REACTION
+  NEW_FOLLOWER
+  GROUP_REQUEST
+  TOPUP_PAID
+  CONTENT_FLAGGED
+  ALERT
+  WELCOME
+  REGISTRATION_CANCELLED
+  EVENT_CANCELLED
+  NEW_EVENT
+}
+
+"""Severidad de una alerta."""
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+# Enums agregados al modelo de dominio por ADR-0016 (coinciden con los contratos REST).
+
+"""Estado de una alerta."""
+enum AlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+"""Tipo de alerta."""
+enum AlertKind {
+  SERVICE_DOWN
+  SAGA_FAILURES
+  DLQ_BACKLOG
+  MODERATION_BACKLOG
+  METRIC_ANOMALY
+  MODERATION_ESCALATION
+}
+
+"""Estado de un reporte generativo (`GeneratedReportStatus`; no confundir con `ReportStatus` de denuncias)."""
+enum GeneratedReportStatus {
+  PENDING
+  RUNNING
+  READY
+  FAILED
+}
+
+"""Agente que ejecutó una corrida."""
+enum AgentKind {
+  MONITORING
+  REPORT
+  "Sesión de un cliente MCP externo autenticado con token MCP."
+  EXTERNAL_MCP
+}
+
+"""Estado de una ejecución de agente."""
+enum AgentRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  ABORTED
+}
+
+"""Estado de salud de un servicio."""
+enum ServiceStatus {
+  UP
+  DEGRADED
+  DOWN
+}
+
+"""Tipo de elemento denunciado (`ReportTargetType`)."""
+enum ContentReportTargetType {
+  POST
+  COMMENT
+}
+
+"""Motivo de fallo de una inscripción."""
+enum RegistrationFailureReason {
+  EVENT_FULL
+  INSUFFICIENT_FUNDS
+  WALLET_NOT_FOUND
+  TICKET_ISSUE_FAILED
+  TIMEOUT
+  SAGA_ABORTED
+}
+
+"""Motivo de una denuncia."""
+enum ReportReason {
+  SPAM
+  HARASSMENT
+  NSFW
+  VIOLENCE
+  MISINFORMATION
+  OTHER
+}
+
+"""Uso de un medio."""
+enum MediaPurpose {
+  POST
+  AVATAR
+  EVENT_COVER
+}
+
+"""Tipo de SAGA."""
+enum SagaType {
+  REGISTRATION
+  CANCELLATION
+}
+
+"""Paso de una SAGA (D2)."""
+enum SagaStep {
+  RESERVE_SEAT
+  DEBIT_CREDITS
+  ISSUE_TICKET
+  VOID_TICKET
+  REFUND_CREDITS
+  RELEASE_SEAT
+}
+
+"""Decisión de un moderador sobre un medio marcado."""
+enum MediaReviewDecision {
+  "Aprueba el medio (pasa a APPROVED y se publican los posts que lo esperaban)."
+  APPROVE
+  "Rechaza el medio (pasa a REJECTED y se ocultan los posts que lo contienen)."
+  REJECT
+}
+
+"""Resolución de una denuncia (`ReportResolution`)."""
+enum ReportResolution {
+  "Mantener el contenido (RESOLVED_KEPT)."
+  KEEP
+  "Retirar el contenido (RESOLVED_REMOVED)."
+  REMOVE
+}
+
+"""Origen de un elemento de la cola de moderación."""
+enum ModerationSource {
+  "Marcado por el modelo de IA."
+  AI
+  "Ocultado por denuncias de usuarios."
+  REPORTS
+}
+
+"""Granularidad de una serie temporal."""
+enum TimeBucket {
+  DAY
+  WEEK
+  MONTH
+}
+
+"""Tipo de cambio en la cola de moderación."""
+enum ModerationQueueChangeType {
+  ADDED
+  RESOLVED
+}
+
+# -----------------------------------------------------------------------------
+# Paginación Relay
+# -----------------------------------------------------------------------------
+
+"""Información de paginación Relay."""
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+  endCursor: String
+}
+
+# -----------------------------------------------------------------------------
+# Entradas comunes
+# -----------------------------------------------------------------------------
+
+"""Rango de fechas inclusivo (UTC)."""
+input DateRangeInput {
+  from: Date!
+  to: Date!
+  "Granularidad de las series; por defecto DAY."
+  bucket: TimeBucket = DAY
+}
+
+"""Error de negocio devuelto por una mutación."""
+type UserError {
+  "Código estable (mismo `code` que los Problem Details REST)."
+  code: String!
+  "Mensaje localizado según Accept-Language."
+  message: String!
+  "Ruta del campo de entrada afectado, si aplica."
+  field: [String!]
+}
+
+# -----------------------------------------------------------------------------
+# Identidad
+# -----------------------------------------------------------------------------
+
+"""Universidad habilitada para el registro."""
+type University {
+  id: UUID!
+  name: String!
+  "Dominios de correo institucional permitidos (p. ej. `umsa.bo`)."
+  allowedDomains: [String!]!
+  "Si admite registros nuevos (RF-01)."
+  enabled: Boolean!
+  createdAt: DateTime!
+}
+
+"""Usuario de la plataforma (datos de identity + perfil social)."""
+type User {
+  id: UUID!
+  email: String!
+  status: UserStatus!
+  roles: [Role!]!
+  "Idioma preferido (D14)."
+  locale: Locale!
+  "Tema preferido (D13)."
+  theme: ThemePreference!
+  emailVerifiedAt: DateTime
+  university: University
+  "Nombre visible (perfil social)."
+  displayName: String
+  career: String
+  semester: Int
+  avatarUrl: String
+  createdAt: DateTime!
+  "Fecha de suspensión vigente, si existe."
+  suspendedAt: DateTime
+  "Motivo de la suspensión vigente."
+  suspensionReason: String
+}
+
+type UserEdge {
+  cursor: String!
+  node: User!
+}
+
+type UserConnection {
+  edges: [UserEdge!]!
+  pageInfo: PageInfo!
+}
+
+"""Filtro de búsqueda de usuarios."""
+input UserFilter {
+  "Texto libre sobre correo o nombre visible."
+  query: String
+  role: Role
+  status: UserStatus
+  universityId: UUID
+}
+
+# -----------------------------------------------------------------------------
+# Dashboard
+# -----------------------------------------------------------------------------
+
+"""Punto de una serie temporal."""
+type MetricPoint {
+  date: Date!
+  value: Long!
+}
+
+"""Serie temporal con nombre."""
+type MetricSeries {
+  "Nombre estable de la métrica (p. ej. `registrationsConfirmed`)."
+  name: String!
+  points: [MetricPoint!]!
+}
+
+"""Indicadores principales de la plataforma en un rango."""
+type Dashboard {
+  range: DateRange!
+  activeUsers: Long!
+  newUsers: Long!
+  posts: Long!
+  comments: Long!
+  reactions: Long!
+  registrationsConfirmed: Long!
+  registrationsFailed: Long!
+  registrationsCancelled: Long!
+  creditsToppedUp: Long!
+  creditsSpent: Long!
+  flaggedContent: Long!
+  openAlerts: Long!
+  series: [MetricSeries!]!
+}
+
+"""Rango de fechas resuelto."""
+type DateRange {
+  from: Date!
+  to: Date!
+}
+
+# -----------------------------------------------------------------------------
+# Moderación
+# -----------------------------------------------------------------------------
+
+"""Medio subido por un usuario."""
+type MediaAsset {
+  id: UUID!
+  owner: User
+  kind: MediaKind!
+  purpose: MediaPurpose!
+  status: MediaStatus!
+  "URL prefirmada de vista previa (expira)."
+  previewUrl: String
+  thumbnailUrl: String
+  tags: [String!]!
+  ocrText: String
+  moderation: ModerationResult
+  createdAt: DateTime!
+}
+
+"""Resultado del modelo de moderación sobre un medio."""
+type ModerationResult {
+  decision: ModerationDecision!
+  labels: [String!]!
+  "Puntajes por etiqueta (0–1), p. ej. `{\"nsfw\": 0.71}`."
+  scores: JSON!
+  maxScore: Float!
+  modelVersion: String!
+}
+
+"""Post de la red social (vista de moderación)."""
+type Post {
+  id: UUID!
+  author: User
+  text: String
+  hashtags: [String!]!
+  visibility: PostVisibility!
+  status: PostStatus!
+  media: [MediaAsset!]!
+  createdAt: DateTime!
+}
+
+"""Elemento de la cola de moderación (medio marcado o post ocultado por denuncias)."""
+type ModerationItem {
+  "Id del elemento (id del medio o del post)."
+  id: UUID!
+  source: ModerationSource!
+  media: MediaAsset
+  post: Post
+  "Denuncias abiertas asociadas."
+  openReports: Int!
+  enqueuedAt: DateTime!
+}
+
+type ModerationItemEdge {
+  cursor: String!
+  node: ModerationItem!
+}
+
+type ModerationItemConnection {
+  edges: [ModerationItemEdge!]!
+  pageInfo: PageInfo!
+  "Total aproximado de elementos pendientes."
+  totalCount: Int!
+}
+
+"""Filtro de la cola de moderación."""
+input ModerationQueueFilter {
+  source: ModerationSource
+  kind: MediaKind
+  "Solo elementos con puntaje máximo ≥ este valor."
+  minScore: Float
+}
+
+"""Denuncia de contenido."""
+type ContentReport {
+  id: UUID!
+  targetType: ContentReportTargetType!
+  targetId: UUID!
+  "Post denunciado (o post del comentario denunciado)."
+  post: Post
+  reporter: User
+  reason: ReportReason!
+  "Explicación opcional del denunciante."
+  details: String
+  status: ReportStatus!
+  "Decisión del moderador (null mientras está OPEN)."
+  resolution: ReportResolution
+  resolutionNote: String
+  createdAt: DateTime!
+  resolvedAt: DateTime
+  resolvedBy: User
+}
+
+"""Cambio en la cola de moderación (suscripción)."""
+type ModerationQueueChange {
+  type: ModerationQueueChangeType!
+  item: ModerationItem!
+  "Total pendiente tras el cambio."
+  totalCount: Int!
+}
+
+# -----------------------------------------------------------------------------
+# Eventos y SAGA
+# -----------------------------------------------------------------------------
+
+"""Evento o taller."""
+type Event {
+  id: UUID!
+  organizer: User
+  title: String!
+  description: String
+  coverUrl: String
+  startsAt: DateTime!
+  venue: String!
+  capacity: Int!
+  seatsTaken: Int!
+  priceCredits: Long!
+  status: EventStatus!
+  createdAt: DateTime!
+  "Inscripciones del evento."
+  registrations: [Registration!]! @auth(requires: [ADMIN])
+}
+
+"""Filtro de eventos."""
+input EventFilter {
+  from: DateTime
+  to: DateTime
+  status: EventStatus
+  organizerId: UUID
+  query: String
+}
+
+"""Inscripción a un evento."""
+type Registration {
+  id: UUID!
+  eventId: UUID!
+  user: User
+  status: RegistrationStatus!
+  failureReason: RegistrationFailureReason
+  saga: SagaInstance
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+"""Instancia de SAGA de inscripción o cancelación."""
+type SagaInstance {
+  id: UUID!
+  registrationId: UUID!
+  type: SagaType!
+  "Paso actual o último ejecutado."
+  step: SagaStep!
+  status: SagaStatus!
+  deadlineAt: DateTime
+  failureReason: RegistrationFailureReason
+  "Reintentos del comando del paso actual."
+  retries: Int!
+  startedAt: DateTime!
+  updatedAt: DateTime!
+}
+
+# -----------------------------------------------------------------------------
+# Billetera
+# -----------------------------------------------------------------------------
+
+"""Punto de la serie de créditos."""
+type CreditStatsPoint {
+  date: Date!
+  topUpCredits: Long!
+  debitCredits: Long!
+  refundCredits: Long!
+}
+
+"""Estadísticas agregadas de créditos."""
+type WalletStats {
+  range: DateRange!
+  topUpCount: Long!
+  topUpCredits: Long!
+  debitCount: Long!
+  debitCredits: Long!
+  refundCount: Long!
+  refundCredits: Long!
+  netCredits: Long!
+  circulatingCredits: Long
+  series: [CreditStatsPoint!]!
+}
+
+# -----------------------------------------------------------------------------
+# Insights
+# -----------------------------------------------------------------------------
+
+"""Reporte generativo."""
+type GeneratedReport {
+  id: UUID!
+  title: String
+  question: String!
+  locale: Locale!
+  status: GeneratedReportStatus!
+  requestedBy: User
+  markdown: String
+  "Datos tabulares `{ columns: [...], rows: [[...]] }`."
+  dataset: JSON
+  "Especificación Vega-Lite v5."
+  chart: JSON
+  "URL prefirmada del audio (≤ 90 s)."
+  audioUrl: String
+  audioDurationSeconds: Int
+  agentRun: AgentRun
+  failureReason: String
+  createdAt: DateTime!
+  completedAt: DateTime
+}
+
+type GeneratedReportEdge {
+  cursor: String!
+  node: GeneratedReport!
+}
+
+type GeneratedReportConnection {
+  edges: [GeneratedReportEdge!]!
+  pageInfo: PageInfo!
+}
+
+"""Alerta del agente de monitoreo."""
+type Alert {
+  id: UUID!
+  severity: AlertSeverity!
+  kind: AlertKind!
+  message: String!
+  details: JSON
+  status: AlertStatus!
+  "Recurso afectado (servicio, cola o autor)."
+  resource: String
+  "Veces que se detectó mientras seguía abierta."
+  occurrences: Int!
+  agentRun: AgentRun
+  raisedAt: DateTime!
+  acknowledgedAt: DateTime
+  acknowledgedBy: User
+}
+
+"""Paso de una ejecución de agente."""
+type AgentRunStep {
+  index: Int!
+  "LLM o TOOL_CALL."
+  kind: String!
+  toolName: String
+  input: JSON
+  outputSummary: String
+  isError: Boolean!
+  startedAt: DateTime!
+  durationMs: Int!
+}
+
+"""Consumo de tokens del LLM."""
+type TokenUsage {
+  input: Long!
+  output: Long!
+  total: Long!
+}
+
+"""Ejecución de un agente (MonitoringAgent o ReportAgent)."""
+type AgentRun {
+  id: UUID!
+  agent: AgentKind!
+  "SCHEDULE, MANUAL o REPORT_REQUEST."
+  trigger: String!
+  status: AgentRunStatus!
+  model: String
+  toolsUsed: [String!]!
+  tokens: TokenUsage
+  steps: [AgentRunStep!]!
+  report: GeneratedReport
+  alerts: [Alert!]!
+  error: String
+  "Por qué terminó (p. ej. COMPLETED, MAX_STEPS, MAX_TOKENS, ERROR)."
+  stopReason: String
+  startedAt: DateTime!
+  finishedAt: DateTime
+}
+
+type AgentRunEdge {
+  cursor: String!
+  node: AgentRun!
+}
+
+type AgentRunConnection {
+  edges: [AgentRunEdge!]!
+  pageInfo: PageInfo!
+}
+
+"""Salud de un servicio."""
+type ServiceHealth {
+  name: String!
+  status: ServiceStatus!
+  latencyMs: Int
+  "Resultado por dependencia, p. ej. `{\"db\": \"UP\", \"broker\": \"UP\"}`."
+  checks: JSON
+  error: String
+}
+
+"""Estado de una cola de RabbitMQ."""
+type QueueHealth {
+  name: String!
+  messagesReady: Long!
+  messagesUnacked: Long!
+  consumers: Int!
+  isDeadLetter: Boolean!
+}
+
+"""Salud agregada de la plataforma."""
+type ServiceHealthReport {
+  checkedAt: DateTime!
+  overall: ServiceStatus!
+  services: [ServiceHealth!]!
+  queues: [QueueHealth!]!
+}
+
+# -----------------------------------------------------------------------------
+# Inputs y payloads de mutaciones
+# -----------------------------------------------------------------------------
+
+input UpdateUserRolesInput {
+  userId: UUID!
+  "Conjunto completo de roles resultante (mínimo uno)."
+  roles: [Role!]!
+}
+
+type UpdateUserRolesPayload {
+  user: User
+  errors: [UserError!]!
+}
+
+input SuspendUserInput {
+  userId: UUID!
+  reason: String!
+  "Fin de la suspensión; null = indefinida."
+  until: DateTime
+}
+
+type SuspendUserPayload {
+  user: User
+  errors: [UserError!]!
+}
+
+input ReactivateUserInput {
+  userId: UUID!
+  note: String
+}
+
+type ReactivateUserPayload {
+  user: User
+  errors: [UserError!]!
+}
+
+input CreateUniversityInput {
+  name: String!
+  allowedDomains: [String!]!
+}
+
+type CreateUniversityPayload {
+  university: University
+  errors: [UserError!]!
+}
+
+type ModerateMediaPayload {
+  media: MediaAsset
+  errors: [UserError!]!
+}
+
+input ResolveContentReportInput {
+  reportId: UUID!
+  resolution: ReportResolution!
+  note: String
+}
+
+type ResolveContentReportPayload {
+  report: ContentReport
+  errors: [UserError!]!
+}
+
+type RequestReportPayload {
+  report: GeneratedReport
+  errors: [UserError!]!
+}
+
+type AcknowledgeAlertPayload {
+  alert: Alert
+  errors: [UserError!]!
+}
+
+type RunMonitoringPayload {
+  agentRun: AgentRun
+  errors: [UserError!]!
+}
+
+type RetrySagaPayload {
+  "SAGA reanudada (o su estado actual si ya no estaba FAILED)."
+  saga: SagaInstance
+  errors: [UserError!]!
+}
+
+input CreateMcpTokenInput {
+  "Nombre descriptivo para reconocer el token (p. ej. `Claude Desktop — laptop de Ana`)."
+  label: String
+}
+
+"""
+Token para clientes MCP externos (D9, ADR-0016): JWT de 8 h con `aud=mcp` y scope `mcp:tools`,
+emitido por identity (`createMcpToken`). `accessToken` solo se devuelve en la mutación que lo crea.
+"""
+type McpToken {
+  id: UUID!
+  "JWT del token; se muestra una sola vez."
+  accessToken: String!
+  audience: String!
+  scopes: [String!]!
+  label: String
+  expiresAt: DateTime!
+  createdAt: DateTime!
+}
+
+type CreateMcpTokenPayload {
+  token: McpToken
+  errors: [UserError!]!
+}
+
+type RevokeMcpTokenPayload {
+  "Id del token revocado."
+  revokedId: UUID
+  errors: [UserError!]!
+}
+
+# -----------------------------------------------------------------------------
+# Tipos raíz (D11)
+# -----------------------------------------------------------------------------
+
+type Query {
+  """Usuario autenticado en el panel."""
+  me: User! @auth(requires: [MODERATOR, ADMIN])
+
+  """KPIs y series de la plataforma en un rango."""
+  dashboard(range: DateRangeInput!): Dashboard! @auth(requires: [ADMIN])
+
+  """Búsqueda paginada de usuarios."""
+  users(filter: UserFilter, after: String, first: Int = 20): UserConnection! @auth(requires: [ADMIN])
+
+  """Usuario por id."""
+  user(id: UUID!): User @auth(requires: [MODERATOR, ADMIN])
+
+  """Universidades habilitadas."""
+  universities: [University!]! @auth(requires: [ADMIN])
+
+  """Cola de moderación (medios marcados por IA y posts ocultos por denuncias)."""
+  moderationQueue(filter: ModerationQueueFilter, after: String, first: Int = 20): ModerationItemConnection!
+    @auth(requires: [MODERATOR, ADMIN])
+
+  """Denuncias de contenido."""
+  contentReports(
+    "Por defecto OPEN."
+    status: ReportStatus = OPEN
+    targetType: ContentReportTargetType
+    "Máximo de elementos (1–50)."
+    first: Int = 50
+  ): [ContentReport!]! @auth(requires: [MODERATOR, ADMIN])
+
+  """Eventos según filtro."""
+  events(
+    filter: EventFilter
+    "Máximo de elementos (1–50)."
+    first: Int = 50
+  ): [Event!]! @auth(requires: [ADMIN])
+
+  """Evento por id."""
+  event(id: UUID!): Event @auth(requires: [ADMIN])
+
+  """Inscripciones de un evento."""
+  registrations(
+    eventId: UUID!
+    status: RegistrationStatus
+    "Máximo de elementos (1–50)."
+    first: Int = 50
+  ): [Registration!]! @auth(requires: [ADMIN])
+
+  """SAGAs por estado (p. ej. FAILED o COMPENSATED)."""
+  sagas(
+    status: SagaStatus
+    type: SagaType
+    "Solo SAGAs actualizadas desde este instante."
+    since: DateTime
+    "Máximo de elementos (1–50)."
+    first: Int = 50
+  ): [SagaInstance!]! @auth(requires: [ADMIN])
+
+  """Estadísticas de créditos."""
+  walletStats(range: DateRangeInput!): WalletStats! @auth(requires: [ADMIN])
+
+  """Reportes generativos (más recientes primero)."""
+  reports(
+    after: String
+    "Tamaño de página Relay (1–50)."
+    first: Int = 20
+    status: GeneratedReportStatus
+  ): GeneratedReportConnection! @auth(requires: [ADMIN])
+
+  """Reporte por id."""
+  report(id: UUID!): GeneratedReport @auth(requires: [ADMIN])
+
+  """Alertas por estado."""
+  alerts(
+    status: AlertStatus
+    severity: AlertSeverity
+    "Máximo de elementos (1–50)."
+    first: Int = 50
+  ): [Alert!]! @auth(requires: [ADMIN])
+
+  """Ejecuciones de agentes (más recientes primero)."""
+  agentRuns(
+    after: String
+    "Tamaño de página Relay (1–50)."
+    first: Int = 20
+    agent: AgentKind
+  ): AgentRunConnection! @auth(requires: [ADMIN])
+
+  """Salud de servicios, colas y DLQ."""
+  serviceHealth: ServiceHealthReport! @auth(requires: [ADMIN])
+}
+
+type Mutation {
+  """Reemplaza los roles de un usuario."""
+  updateUserRoles(input: UpdateUserRolesInput!): UpdateUserRolesPayload! @auth(requires: [ADMIN])
+
+  """Suspende una cuenta (revoca sus sesiones)."""
+  suspendUser(input: SuspendUserInput!): SuspendUserPayload! @auth(requires: [MODERATOR, ADMIN])
+
+  """Reactiva una cuenta suspendida."""
+  reactivateUser(input: ReactivateUserInput!): ReactivateUserPayload! @auth(requires: [ADMIN])
+
+  """Habilita una universidad nueva."""
+  createUniversity(input: CreateUniversityInput!): CreateUniversityPayload! @auth(requires: [ADMIN])
+
+  """Aprueba o rechaza un medio marcado."""
+  moderateMedia(id: UUID!, decision: MediaReviewDecision!, note: String): ModerateMediaPayload!
+    @auth(requires: [MODERATOR, ADMIN])
+
+  """Resuelve una denuncia de contenido."""
+  resolveContentReport(input: ResolveContentReportInput!): ResolveContentReportPayload!
+    @auth(requires: [MODERATOR, ADMIN])
+
+  """Solicita un reporte generativo; el idioma por defecto es el del usuario (D14)."""
+  requestReport(question: String!, locale: Locale): RequestReportPayload! @auth(requires: [ADMIN])
+
+  """Reconoce una alerta."""
+  acknowledgeAlert(id: UUID!): AcknowledgeAlertPayload! @auth(requires: [ADMIN])
+
+  """Ejecuta el agente de monitoreo inmediatamente."""
+  runMonitoringNow: RunMonitoringPayload! @auth(requires: [ADMIN])
+
+  """
+  Reimpulsa una SAGA `FAILED` desde el paso en que quedó (events `retrySaga`, D15, UC-13).
+  Errores de negocio: `SAGA_NOT_RETRYABLE`, `NOT_FOUND`.
+  """
+  retrySaga(id: UUID!): RetrySagaPayload! @auth(requires: [ADMIN])
+
+  """
+  Emite un token MCP de 8 h para un cliente externo (identity `createMcpToken`, D9/D15, UC-22).
+  El `accessToken` se devuelve una sola vez.
+  """
+  createMcpToken(input: CreateMcpTokenInput): CreateMcpTokenPayload! @auth(requires: [ADMIN])
+
+  """Revoca un token MCP antes de que expire (identity `revokeMcpToken`)."""
+  revokeMcpToken(id: UUID!): RevokeMcpTokenPayload! @auth(requires: [ADMIN])
+}
+
+type Subscription {
+  """Alertas nuevas (origen: `bandada.insights.alert.raised.v1`)."""
+  alertRaised(
+    "Severidad mínima a recibir (opcional)."
+    minSeverity: AlertSeverity
+  ): Alert! @auth(requires: [ADMIN])
+
+  """
+  Cambios en la cola de moderación (origen: eventos `bandada.media.asset.*`,
+  `bandada.social.content.reported.v1` y `bandada.social.post.hidden.v1`, recibidos por la cola
+  `admin-gateway.subscriptions.<instanceId>`).
+  """
+  moderationQueueChanged: ModerationQueueChange! @auth(requires: [MODERATOR, ADMIN])
+
+  """Se emite cuando el reporte indicado termina (origen: `bandada.insights.report.ready.v1`)."""
+  reportReady(id: UUID!): GeneratedReport! @auth(requires: [ADMIN])
+}

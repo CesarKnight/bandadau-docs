@@ -1,0 +1,1701 @@
+openapi: 3.1.0
+info:
+  title: Bandada U — identity-service
+  version: 1.1.0
+  summary: Identidad y acceso (registro, verificación, sesión, SSO handoff, usuarios y universidades).
+  description: |
+    API del bounded context **Identidad** (`identity-service`, Java 25 + Spring Boot 4,
+    arquitectura Hexagonal, PostgreSQL `identity_db`). Es el único proveedor de identidad para
+    la app, el panel y el servidor MCP (D4).
+
+    - Access token JWT **RS256** (15 min) + refresh token rotativo (30 días). Reutilizar un
+      refresh revocado revoca toda la familia (RF-03).
+    - Registro solo con correo de un dominio de universidad habilitada (RF-01) y verificación
+      por código de 6 dígitos (15 min, máx. 5 intentos; RF-02).
+    - Acceso por una sola entrada mediante **handoff code** + PKCE (`S256`), un solo uso, 60 s (D4, RF-04).
+    - Preferencias de idioma (`locale`) y tema (`theme`) sincronizadas en la cuenta (D13, D14).
+    - Errores RFC 9457 (`application/problem+json`); `title`/`detail` localizados según
+      `Accept-Language` (`es` por defecto) y respuesta con `Content-Language`. Los clientes traducen por `code`.
+    - Todas las respuestas devuelven `X-Correlation-Id`.
+    - Rutas `/internal/v1/**` (tag `internal`): solo red interna, token de servicio (`serviceAuth`);
+      el gateway las bloquea (403).
+
+    ## Changelog
+    - 1.1.0 (2026-10-14): `createMcpToken` / `revokeMcpToken` (token MCP de 8 h, `aud=mcp`, scope `mcp:tools`; D15, ADR-0016); `University.enabled` deja de ser propuesta.
+    - 1.0.0 (2026-10-14): versión inicial contract-first (D1, D3, D4, D13, D14).
+  contact:
+    name: Grupo 24 — Ingeniería de Software II
+servers:
+  - url: http://api.bandada.localhost/api/v1
+    description: Desarrollo local (Traefik)
+  - url: https://api.bandadau.com/api/v1
+    description: Producción
+tags:
+  - name: auth
+    description: Registro, verificación de correo, sesión y SSO handoff.
+  - name: users
+    description: Usuario autenticado y sus preferencias.
+  - name: universities
+    description: Universidades habilitadas para el registro.
+  - name: jwks
+    description: Llaves públicas para validar los JWT.
+  - name: internal
+    description: Endpoints internos (`/internal/v1`), solo con token de servicio. Consumidos por `admin-gateway`.
+security:
+  - bearerAuth: []
+paths:
+  /auth/register:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [auth]
+      operationId: registerUser
+      summary: Registrarse con correo institucional
+      description: |
+        Crea un usuario en estado `PENDING_VERIFICATION` y envía al correo un código de
+        verificación de 6 dígitos (válido 15 min). El dominio del correo debe pertenecer a la
+        universidad indicada y estar habilitado (UC-01, RF-01, RF-02). Publica
+        `bandada.identity.user.registered.v1` al verificarse el correo.
+        Si no se envía `locale`, se toma el de `Accept-Language` (por defecto `es`).
+      security: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterUserRequest'
+            examples:
+              estudiante:
+                summary: Estudiante de la UMSA
+                value:
+                  email: ana.quispe@umsa.bo
+                  password: 'Cóndor-Illimani-2026'
+                  universityId: 0191c0de-1111-7aaa-8bbb-000000000001
+                  locale: es
+      responses:
+        '201':
+          description: Usuario creado; código de verificación enviado.
+          headers:
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+            X-Correlation-Id:
+              $ref: './shared/components.yaml#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterUserResponse'
+              examples:
+                pendiente:
+                  summary: Pendiente de verificación
+                  value:
+                    userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                    email: ana.quispe@umsa.bo
+                    status: PENDING_VERIFICATION
+                    verificationExpiresIn: 900
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '409':
+          description: El correo ya está registrado, o hay una petición idéntica en curso (`IDEMPOTENCY_IN_PROGRESS`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                correoRegistrado:
+                  summary: Correo ya registrado
+                  value:
+                    type: https://api.bandadau.com/problems/email-already-registered
+                    title: Correo ya registrado
+                    status: 409
+                    detail: Ya existe una cuenta con este correo. Inicia sesión o recupera tu contraseña.
+                    instance: /api/v1/auth/register
+                    code: EMAIL_ALREADY_REGISTERED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '422':
+          description: |
+            Regla de negocio violada: `EMAIL_DOMAIN_NOT_ALLOWED` (el dominio no pertenece a la
+            universidad o no está habilitado), `UNIVERSITY_NOT_FOUND`, `WEAK_PASSWORD` o
+            `IDEMPOTENCY_KEY_REUSED`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                dominioNoPermitido:
+                  summary: Dominio no habilitado
+                  value:
+                    type: https://api.bandadau.com/problems/email-domain-not-allowed
+                    title: Correo no institucional
+                    status: 422
+                    detail: El dominio gmail.com no pertenece a una universidad habilitada.
+                    instance: /api/v1/auth/register
+                    code: EMAIL_DOMAIN_NOT_ALLOWED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+                claveReutilizada:
+                  summary: Idempotency-Key reutilizada
+                  value:
+                    type: https://api.bandadau.com/problems/idempotency-key-reused
+                    title: Clave de idempotencia reutilizada
+                    status: 422
+                    detail: La Idempotency-Key ya se usó con una petición diferente.
+                    instance: /api/v1/auth/register
+                    code: IDEMPOTENCY_KEY_REUSED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /auth/verify-email:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [auth]
+      operationId: verifyEmail
+      summary: Verificar el correo con el código
+      description: |
+        Valida el código de 6 dígitos enviado por correo (válido 15 min, máx. 5 intentos).
+        Si es correcto activa la cuenta (`ACTIVE`) y devuelve los tokens de sesión (UC-01, RF-02).
+        Por seguridad, código inexistente, incorrecto o expirado devuelven el mismo `code`
+        (`INVALID_VERIFICATION_CODE`), salvo que se agoten los intentos.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyEmailRequest'
+            examples:
+              codigo:
+                summary: Código recibido por correo
+                value:
+                  email: ana.quispe@umsa.bo
+                  code: '483920'
+      responses:
+        '200':
+          $ref: '#/components/responses/AuthTokens'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '409':
+          description: El correo ya estaba verificado (`EMAIL_ALREADY_VERIFIED`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                yaVerificado:
+                  summary: Ya verificado
+                  value:
+                    type: https://api.bandadau.com/problems/email-already-verified
+                    title: Correo ya verificado
+                    status: 409
+                    detail: Esta cuenta ya fue verificada. Inicia sesión.
+                    instance: /api/v1/auth/verify-email
+                    code: EMAIL_ALREADY_VERIFIED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '422':
+          description: Código incorrecto o expirado (`INVALID_VERIFICATION_CODE`) o intentos agotados (`VERIFICATION_ATTEMPTS_EXCEEDED`, hay que pedir un código nuevo).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                codigoInvalido:
+                  summary: Código incorrecto
+                  value:
+                    type: https://api.bandadau.com/problems/invalid-verification-code
+                    title: Código inválido
+                    status: 422
+                    detail: El código es incorrecto o expiró. Te quedan 3 intentos.
+                    instance: /api/v1/auth/verify-email
+                    code: INVALID_VERIFICATION_CODE
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+                    remainingAttempts: 3
+                intentosAgotados:
+                  summary: Intentos agotados
+                  value:
+                    type: https://api.bandadau.com/problems/verification-attempts-exceeded
+                    title: Intentos agotados
+                    status: 422
+                    detail: Superaste los 5 intentos. Solicita un código nuevo.
+                    instance: /api/v1/auth/verify-email
+                    code: VERIFICATION_ATTEMPTS_EXCEEDED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /auth/resend-code:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [auth]
+      operationId: resendVerificationCode
+      summary: Reenviar el código de verificación
+      description: |
+        Genera y envía un código nuevo (invalida el anterior y reinicia los intentos).
+        Siempre responde `202` aunque el correo no exista o ya esté verificado, para no
+        revelar qué cuentas existen. Con límite de peticiones (rate-limit) por correo e IP.
+      security: []
+      x-idempotency-exempt: Reenviar es inocuo (solo el último código es válido) y está limitado por rate-limit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResendVerificationCodeRequest'
+            examples:
+              reenvio:
+                summary: Reenvío
+                value:
+                  email: ana.quispe@umsa.bo
+      responses:
+        '202':
+          description: Solicitud aceptada. Si la cuenta está pendiente, se envió un código nuevo.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /auth/login:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Iniciar sesión
+      description: |
+        Autentica con correo y contraseña y devuelve access token (15 min), refresh token
+        (30 días) y el usuario (UC-02, RF-03). Rate-limit 10/min/IP (RNF-06).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              credenciales:
+                summary: Inicio de sesión
+                value:
+                  email: ana.quispe@umsa.bo
+                  password: 'Cóndor-Illimani-2026'
+      responses:
+        '200':
+          $ref: '#/components/responses/AuthTokens'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          description: Correo o contraseña incorrectos (`INVALID_CREDENTIALS`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                credencialesInvalidas:
+                  summary: Credenciales inválidas
+                  value:
+                    type: https://api.bandadau.com/problems/invalid-credentials
+                    title: Credenciales inválidas
+                    status: 401
+                    detail: El correo o la contraseña no son correctos.
+                    instance: /api/v1/auth/login
+                    code: INVALID_CREDENTIALS
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '403':
+          description: Cuenta sin verificar (`EMAIL_NOT_VERIFIED`) o suspendida (`ACCOUNT_SUSPENDED`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                noVerificado:
+                  summary: Correo sin verificar
+                  value:
+                    type: https://api.bandadau.com/problems/email-not-verified
+                    title: Correo sin verificar
+                    status: 403
+                    detail: Verifica tu correo con el código que te enviamos antes de iniciar sesión.
+                    instance: /api/v1/auth/login
+                    code: EMAIL_NOT_VERIFIED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+                suspendida:
+                  summary: Cuenta suspendida
+                  value:
+                    type: https://api.bandadau.com/problems/account-suspended
+                    title: Cuenta suspendida
+                    status: 403
+                    detail: Tu cuenta está suspendida. Contacta a soporte.
+                    instance: /api/v1/auth/login
+                    code: ACCOUNT_SUSPENDED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /auth/refresh:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [auth]
+      operationId: refreshToken
+      summary: Renovar tokens
+      description: |
+        Intercambia un refresh token válido por un par nuevo (rotación). El refresh usado queda
+        revocado. Si se presenta un refresh ya revocado, se revoca toda la familia de tokens
+        (posible robo) y se responde `401 REFRESH_TOKEN_REUSED` (RF-03).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+            examples:
+              renovar:
+                summary: Renovación
+                value:
+                  refreshToken: rt_9mQ2xY7kL1pZ4vB8nC3sD6fG0hJ5wE2r
+      responses:
+        '200':
+          $ref: '#/components/responses/AuthTokens'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          description: Refresh inválido o expirado (`INVALID_REFRESH_TOKEN`) o reutilizado (`REFRESH_TOKEN_REUSED`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                reutilizado:
+                  summary: Refresh reutilizado
+                  value:
+                    type: https://api.bandadau.com/problems/refresh-token-reused
+                    title: Sesión revocada
+                    status: 401
+                    detail: Detectamos un uso indebido de tu sesión y la cerramos en todos tus dispositivos. Vuelve a iniciar sesión.
+                    instance: /api/v1/auth/refresh
+                    code: REFRESH_TOKEN_REUSED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /auth/logout:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Cerrar sesión
+      description: Revoca el refresh token indicado (RF-03). Idempotente por naturaleza; revocar un token ya revocado también responde `204`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+            examples:
+              salir:
+                summary: Cerrar sesión
+                value:
+                  refreshToken: rt_9mQ2xY7kL1pZ4vB8nC3sD6fG0hJ5wE2r
+      responses:
+        '204':
+          description: Sesión cerrada.
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+
+  /auth/handoff:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [auth]
+      operationId: createHandoffCode
+      summary: Crear código de traspaso (SSO)
+      description: |
+        Genera un código de un solo uso (32 bytes aleatorios, guardado hasheado, 60 s) ligado al
+        usuario y a la app destino, para abrir el panel desde la app (o la app desde el panel)
+        sin volver a ingresar credenciales (D4, UC-03, RF-04). El cliente genera un
+        `codeVerifier` y envía su `codeChallenge = BASE64URL(SHA256(codeVerifier))`.
+        Para `targetApp = ADMIN` el usuario debe tener rol `MODERATOR` o `ADMIN`.
+      x-idempotency-exempt: Cada llamada debe producir un código nuevo de un solo uso; repetirla no tiene efectos acumulativos.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateHandoffCodeRequest'
+            examples:
+              alPanel:
+                summary: De la app al panel
+                value:
+                  targetApp: ADMIN
+                  codeChallenge: E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
+                  codeChallengeMethod: S256
+      responses:
+        '201':
+          description: Código creado.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HandoffCode'
+              examples:
+                codigo:
+                  summary: Código de traspaso
+                  value:
+                    code: hc_Q2FtYmlhcl9lc3RvX2VuX3Byb2R1Y2Npb24
+                    redirectUrl: http://admin.bandada.localhost/sso/callback?code=hc_Q2FtYmlhcl9lc3RvX2VuX3Byb2R1Y2Npb24
+                    expiresIn: 60
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /auth/handoff/exchange:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [auth]
+      operationId: exchangeHandoffCode
+      summary: Canjear código de traspaso
+      description: |
+        La app destino canjea el código junto con el `codeVerifier` (PKCE) y recibe tokens
+        emitidos para ella (`aud` de la app destino). El código se marca usado (`usedAt`) aunque
+        el canje falle por PKCE. Código inexistente, expirado, ya usado, de otra app o PKCE
+        incorrecto → `401 HANDOFF_CODE_INVALID` (mismo código para no filtrar información).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExchangeHandoffCodeRequest'
+            examples:
+              canje:
+                summary: Canje desde el panel
+                value:
+                  code: hc_Q2FtYmlhcl9lc3RvX2VuX3Byb2R1Y2Npb24
+                  codeVerifier: dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+      responses:
+        '200':
+          $ref: '#/components/responses/AuthTokens'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          description: Código de traspaso inválido (`HANDOFF_CODE_INVALID`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                invalido:
+                  summary: Código inválido o expirado
+                  value:
+                    type: https://api.bandadau.com/problems/handoff-code-invalid
+                    title: Código de acceso inválido
+                    status: 401
+                    detail: El enlace de acceso expiró o ya fue usado. Vuelve a abrir el panel desde la app.
+                    instance: /api/v1/auth/handoff/exchange
+                    code: HANDOFF_CODE_INVALID
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /auth/service-token:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [auth]
+      operationId: issueServiceToken
+      summary: Emitir token de servicio
+      description: |
+        Flujo *client credentials* para servicios internos (`admin-gateway`,
+        `insights-service`, n8n). Devuelve un JWT `typ=service` usado en `serviceAuth`.
+        **Solo red interna**: debe invocarse contra `identity-service:7001`; no se publica en
+        el gateway. *Propuesta*: que Traefik bloquee `/api/v1/auth/service-token` igual que `/internal/**`.
+      servers:
+        - url: http://identity-service:7001/api/v1
+          description: Red interna (Docker/VPC)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceTokenRequest'
+            examples:
+              gateway:
+                summary: admin-gateway
+                value:
+                  clientId: admin-gateway
+                  clientSecret: '<secreto-desde-variables-de-entorno>'
+                  scopes: [users:read, users:write, universities:write]
+      responses:
+        '200':
+          description: Token de servicio emitido.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceToken'
+              examples:
+                token:
+                  summary: Token de servicio
+                  value:
+                    accessToken: eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhZG1pbi1nYXRld2F5In0.c2lnbmF0dXJh
+                    tokenType: Bearer
+                    expiresIn: 300
+                    scopes: [users:read, users:write, universities:write]
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          description: Credenciales de cliente inválidas (`INVALID_CLIENT`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                clienteInvalido:
+                  summary: Cliente inválido
+                  value:
+                    type: https://api.bandadau.com/problems/invalid-client
+                    title: Cliente inválido
+                    status: 401
+                    detail: Las credenciales del servicio no son válidas.
+                    instance: /api/v1/auth/service-token
+                    code: INVALID_CLIENT
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  /auth/mcp-tokens:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [auth]
+      operationId: createMcpToken
+      summary: Crear token MCP para clientes externos
+      description: |
+        Emite un token dedicado para que un cliente MCP externo (p. ej. Claude Desktop) consulte el
+        servidor MCP de `insights-service` (UC-22, D9, D15, ADR-0016). Solo rol `ADMIN`; se emite
+        desde el panel (`createMcpToken` en GraphQL).
+
+        - JWT RS256 con `aud = mcp`, `scope = mcp:tools`, `typ = mcp` y vigencia de **8 h**
+          (28 800 s); no tiene refresh token.
+        - Su `jti` (= `id`) queda registrado en `identity_db` para poder revocarlo con `revokeMcpToken`.
+        - El token se devuelve **una sola vez** en esta respuesta; no se puede volver a consultar.
+      x-idempotency-exempt: Cada llamada debe emitir un token nuevo (con su propio `jti`) que se muestra una sola vez; repetirla no tiene efectos acumulativos sobre otros recursos.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMcpTokenRequest'
+            examples:
+              claudeDesktop:
+                summary: Token para Claude Desktop
+                value:
+                  label: Claude Desktop — laptop de Ana
+      responses:
+        '201':
+          description: Token MCP emitido. Se muestra una sola vez.
+          headers:
+            Cache-Control:
+              description: Las respuestas con tokens no se cachean.
+              schema:
+                type: string
+              example: no-store
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpToken'
+              examples:
+                token:
+                  summary: Token MCP de 8 h
+                  value:
+                    id: 0192f6c1-8a2b-7c3d-9e4f-5a6b7c8d9e0f
+                    accessToken: eyJhbGciOiJSUzI1NiIsImtpZCI6ImJhbmRhZGEtMjAyNi0xMCIsInR5cCI6Im1jcCJ9.eyJzdWIiOiIwMTkyZjFhMiIsImF1ZCI6Im1jcCJ9.c2lnbmF0dXJh
+                    tokenType: Bearer
+                    audience: mcp
+                    scopes: [mcp:tools]
+                    label: Claude Desktop — laptop de Ana
+                    expiresIn: 28800
+                    expiresAt: '2026-10-14T23:04:05Z'
+                    createdAt: '2026-10-14T15:04:05Z'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /auth/mcp-tokens/{tokenId}:
+    parameters:
+      - name: tokenId
+        in: path
+        required: true
+        description: Identificador del token MCP (su `jti`).
+        schema:
+          type: string
+          format: uuid
+        example: 0192f6c1-8a2b-7c3d-9e4f-5a6b7c8d9e0f
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    delete:
+      tags: [auth]
+      operationId: revokeMcpToken
+      summary: Revocar un token MCP
+      description: |
+        Revoca un token MCP antes de que expire (UC-22, ADR-0016). Solo rol `ADMIN`. El servidor MCP
+        rechaza el `jti` revocado desde la siguiente petición. Idempotente por naturaleza: revocar un
+        token ya revocado o expirado también responde `204`.
+      responses:
+        '204':
+          description: Token revocado.
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /users/me:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [users]
+      operationId: getMe
+      summary: Obtener mi usuario
+      description: Devuelve el usuario autenticado, incluidos roles y preferencias de idioma y tema (D13, D14).
+      responses:
+        '200':
+          description: Usuario autenticado.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+              examples:
+                ana:
+                  $ref: '#/components/examples/UserAna'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+
+  /users/me/preferences:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    patch:
+      tags: [users]
+      operationId: updateMyPreferences
+      summary: Actualizar mis preferencias
+      description: |
+        Actualiza idioma (`locale`) y/o tema (`theme`) del usuario. Solo se modifican los campos
+        presentes. Idempotente por naturaleza. Publica
+        `bandada.identity.user.preferences-changed.v1` si algo cambió (D13, D14).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePreferencesRequest'
+            examples:
+              ingles:
+                summary: Cambiar a inglés y tema oscuro
+                value:
+                  locale: en
+                  theme: DARK
+      responses:
+        '200':
+          description: Usuario con las preferencias actualizadas.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+              examples:
+                actualizado:
+                  summary: Preferencias actualizadas
+                  value:
+                    id: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                    email: ana.quispe@umsa.bo
+                    universityId: 0191c0de-1111-7aaa-8bbb-000000000001
+                    status: ACTIVE
+                    roles: [STUDENT]
+                    locale: en
+                    theme: DARK
+                    emailVerifiedAt: '2026-10-01T14:12:00Z'
+                    createdAt: '2026-10-01T14:05:00Z'
+                    updatedAt: '2026-10-14T15:04:05Z'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+
+  /universities:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [universities]
+      operationId: listUniversities
+      summary: Listar universidades habilitadas
+      description: Lista pública de universidades habilitadas para el registro, ordenadas por nombre (UC-01).
+      security: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de universidades.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UniversityPage'
+              examples:
+                pagina:
+                  summary: Universidades
+                  value:
+                    items:
+                      - id: 0191c0de-1111-7aaa-8bbb-000000000001
+                        name: Universidad Mayor de San Andrés
+                        allowedDomains: [umsa.bo]
+                        enabled: true
+                      - id: 0191c0de-2222-7aaa-8bbb-000000000002
+                        name: Universidad Católica Boliviana
+                        allowedDomains: [ucb.edu.bo]
+                        enabled: true
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+
+  /.well-known/jwks.json:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [jwks]
+      operationId: getJwks
+      summary: Obtener las llaves públicas (JWKS)
+      description: |
+        Llaves públicas RSA (RFC 7517) para validar los JWT RS256. Se sirve en la raíz del host
+        (fuera de `/api/v1`). Los servicios la cachean y la refrescan cuando aparece un `kid`
+        desconocido (rotación de llaves).
+      servers:
+        - url: http://api.bandada.localhost
+          description: Desarrollo local (Traefik)
+        - url: https://api.bandadau.com
+          description: Producción
+      security: []
+      responses:
+        '200':
+          description: Conjunto de llaves.
+          headers:
+            Cache-Control:
+              description: Política de caché.
+              schema:
+                type: string
+              example: public, max-age=3600
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Jwks'
+              examples:
+                llaves:
+                  summary: Una llave activa
+                  value:
+                    keys:
+                      - kty: RSA
+                        kid: bandada-2026-10
+                        use: sig
+                        alg: RS256
+                        n: 0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw
+                        e: AQAB
+
+  /internal/v1/users:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: searchUsers
+      summary: Buscar usuarios (interno)
+      description: Búsqueda paginada de usuarios para el panel (UC-21, RF-25). `query` busca por prefijo de correo.
+      servers:
+        - url: http://identity-service:7001
+          description: Red interna (Docker/VPC); el gateway bloquea /internal/**
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: query
+          in: query
+          required: false
+          description: Texto a buscar (prefijo del correo, sin distinguir mayúsculas).
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 100
+          example: ana.q
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/UserStatus'
+        - name: role
+          in: query
+          required: false
+          schema:
+            $ref: './shared/components.yaml#/components/schemas/Role'
+        - name: universityId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de usuarios.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPage'
+              examples:
+                resultado:
+                  summary: Un resultado
+                  value:
+                    items:
+                      - id: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                        email: ana.quispe@umsa.bo
+                        universityId: 0191c0de-1111-7aaa-8bbb-000000000001
+                        status: ACTIVE
+                        roles: [STUDENT, ORGANIZER]
+                        locale: es
+                        theme: SYSTEM
+                        emailVerifiedAt: '2026-10-01T14:12:00Z'
+                        createdAt: '2026-10-01T14:05:00Z'
+                        updatedAt: '2026-10-10T09:00:00Z'
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+  /internal/v1/users/{userId}/roles:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    patch:
+      tags: [internal]
+      operationId: updateUserRoles
+      summary: Cambiar roles de un usuario (interno)
+      description: |
+        Reemplaza el conjunto de roles del usuario (UC-21, RF-25). Idempotente por naturaleza.
+        Publica `bandada.identity.user.role-changed.v1`. Los tokens vigentes conservan los roles
+        anteriores hasta su expiración (15 min). No se permite quitar el último `ADMIN`
+        (`LAST_ADMIN`).
+      servers:
+        - url: http://identity-service:7001
+          description: Red interna (Docker/VPC); el gateway bloquea /internal/**
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/ActorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRolesRequest'
+            examples:
+              organizador:
+                summary: Hacer organizador
+                value:
+                  roles: [STUDENT, ORGANIZER]
+      responses:
+        '200':
+          description: Usuario actualizado.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+              examples:
+                ana:
+                  $ref: '#/components/examples/UserAna'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '422':
+          description: Regla de negocio violada (`LAST_ADMIN`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                ultimoAdmin:
+                  summary: Último administrador
+                  value:
+                    type: https://api.bandadau.com/problems/last-admin
+                    title: No se puede quitar el rol
+                    status: 422
+                    detail: Debe existir al menos un administrador en la plataforma.
+                    instance: /internal/v1/users/0192f1a2-3b4c-7d5e-8f60-718293a4b5c6/roles
+                    code: LAST_ADMIN
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  /internal/v1/users/{userId}/status:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    patch:
+      tags: [internal]
+      operationId: updateUserStatus
+      summary: Suspender o reactivar un usuario (interno)
+      description: |
+        Cambia el estado a `SUSPENDED` (requiere `reason`) o `ACTIVE` (UC-18, UC-21, RF-22, RF-25).
+        Al suspender se revocan todos los refresh tokens y se publica
+        `bandada.identity.user.suspended.v1`. Idempotente por naturaleza.
+      servers:
+        - url: http://identity-service:7001
+          description: Red interna (Docker/VPC); el gateway bloquea /internal/**
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/ActorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserStatusRequest'
+            examples:
+              suspender:
+                summary: Suspender por contenido inapropiado
+                value:
+                  status: SUSPENDED
+                  reason: Publicación reiterada de contenido inapropiado.
+      responses:
+        '200':
+          description: Usuario actualizado.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+              examples:
+                suspendido:
+                  summary: Usuario suspendido
+                  value:
+                    id: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                    email: luis.mamani@umsa.bo
+                    universityId: 0191c0de-1111-7aaa-8bbb-000000000001
+                    status: SUSPENDED
+                    roles: [STUDENT]
+                    locale: es
+                    theme: SYSTEM
+                    emailVerifiedAt: '2026-09-20T10:00:00Z'
+                    createdAt: '2026-09-20T09:55:00Z'
+                    updatedAt: '2026-10-14T15:04:05Z'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          description: Transición inválida (`INVALID_STATUS_TRANSITION`, p. ej. reactivar una cuenta `PENDING_VERIFICATION` o `DELETED`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                transicion:
+                  summary: Transición inválida
+                  value:
+                    type: https://api.bandadau.com/problems/invalid-status-transition
+                    title: Cambio de estado no permitido
+                    status: 409
+                    detail: No se puede pasar de PENDING_VERIFICATION a SUSPENDED.
+                    instance: /internal/v1/users/0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7/status
+                    code: INVALID_STATUS_TRANSITION
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  /internal/v1/universities:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [internal]
+      operationId: createUniversity
+      summary: Crear universidad (interno)
+      description: Registra una universidad y sus dominios de correo permitidos (UC-21, RF-25). Un dominio solo puede pertenecer a una universidad.
+      x-idempotency-exempt: La unicidad de los dominios hace que un reintento devuelva 409 UNIVERSITY_DOMAIN_TAKEN sin duplicar.
+      servers:
+        - url: http://identity-service:7001
+          description: Red interna (Docker/VPC); el gateway bloquea /internal/**
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/ActorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUniversityRequest'
+            examples:
+              upsa:
+                summary: Nueva universidad
+                value:
+                  name: Universidad Privada de Santa Cruz de la Sierra
+                  allowedDomains: [upsa.edu.bo]
+      responses:
+        '201':
+          description: Universidad creada.
+          headers:
+            Location:
+              $ref: './shared/components.yaml#/components/headers/Location'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/University'
+              examples:
+                creada:
+                  summary: Universidad creada
+                  value:
+                    id: 0192f3d0-0a1b-7c2d-8e3f-405162738495
+                    name: Universidad Privada de Santa Cruz de la Sierra
+                    allowedDomains: [upsa.edu.bo]
+                    enabled: true
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/UniversityDomainTaken'
+
+  /internal/v1/universities/{universityId}:
+    parameters:
+      - name: universityId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 0191c0de-1111-7aaa-8bbb-000000000001
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    patch:
+      tags: [internal]
+      operationId: updateUniversity
+      summary: Actualizar universidad (interno)
+      description: Modifica nombre, dominios permitidos o habilitación. Solo se cambian los campos presentes. Deshabilitar no afecta a usuarios existentes; solo impide nuevos registros.
+      servers:
+        - url: http://identity-service:7001
+          description: Red interna (Docker/VPC); el gateway bloquea /internal/**
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/ActorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUniversityRequest'
+            examples:
+              agregarDominio:
+                summary: Agregar un dominio
+                value:
+                  allowedDomains: [umsa.bo, est.umsa.bo]
+      responses:
+        '200':
+          description: Universidad actualizada.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/University'
+              examples:
+                actualizada:
+                  summary: Universidad actualizada
+                  value:
+                    id: 0191c0de-1111-7aaa-8bbb-000000000001
+                    name: Universidad Mayor de San Andrés
+                    allowedDomains: [umsa.bo, est.umsa.bo]
+                    enabled: true
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/UniversityDomainTaken'
+
+components:
+  parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+
+  responses:
+    AuthTokens:
+      description: Sesión iniciada; tokens emitidos.
+      headers:
+        Cache-Control:
+          description: Las respuestas con tokens no se cachean.
+          schema:
+            type: string
+          example: no-store
+        Content-Language:
+          $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AuthTokens'
+          examples:
+            sesion:
+              summary: Sesión de estudiante
+              value:
+                accessToken: eyJhbGciOiJSUzI1NiIsImtpZCI6ImJhbmRhZGEtMjAyNi0xMCIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwMTkyZjFhMiJ9.c2lnbmF0dXJh
+                refreshToken: rt_9mQ2xY7kL1pZ4vB8nC3sD6fG0hJ5wE2r
+                tokenType: Bearer
+                expiresIn: 900
+                refreshExpiresIn: 2592000
+                user:
+                  id: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                  email: ana.quispe@umsa.bo
+                  universityId: 0191c0de-1111-7aaa-8bbb-000000000001
+                  status: ACTIVE
+                  roles: [STUDENT]
+                  locale: es
+                  theme: SYSTEM
+                  emailVerifiedAt: '2026-10-01T14:12:00Z'
+                  createdAt: '2026-10-01T14:05:00Z'
+                  updatedAt: '2026-10-01T14:12:00Z'
+
+    UniversityDomainTaken:
+      description: Algún dominio ya pertenece a otra universidad (`UNIVERSITY_DOMAIN_TAKEN`).
+      content:
+        application/problem+json:
+          schema:
+            $ref: './shared/components.yaml#/components/schemas/Problem'
+          examples:
+            dominioOcupado:
+              summary: Dominio ocupado
+              value:
+                type: https://api.bandadau.com/problems/university-domain-taken
+                title: Dominio ya registrado
+                status: 409
+                detail: El dominio umsa.bo ya pertenece a otra universidad.
+                instance: /internal/v1/universities
+                code: UNIVERSITY_DOMAIN_TAKEN
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  examples:
+    UserAna:
+      summary: Estudiante organizadora
+      value:
+        id: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+        email: ana.quispe@umsa.bo
+        universityId: 0191c0de-1111-7aaa-8bbb-000000000001
+        status: ACTIVE
+        roles: [STUDENT, ORGANIZER]
+        locale: es
+        theme: SYSTEM
+        emailVerifiedAt: '2026-10-01T14:12:00Z'
+        createdAt: '2026-10-01T14:05:00Z'
+        updatedAt: '2026-10-10T09:00:00Z'
+
+  schemas:
+    UserStatus:
+      type: string
+      enum: [PENDING_VERIFICATION, ACTIVE, SUSPENDED, DELETED]
+
+    HandoffTargetApp:
+      type: string
+      enum: [ADMIN, APP]
+      description: App destino del traspaso SSO.
+
+    Email:
+      type: string
+      format: email
+      maxLength: 254
+      examples: [ana.quispe@umsa.bo]
+
+    Password:
+      type: string
+      minLength: 8
+      maxLength: 128
+      writeOnly: true
+      description: Contraseña (se guarda con Argon2id). Mínimo 8 caracteres.
+
+    User:
+      type: object
+      required: [id, email, universityId, status, roles, locale, theme, emailVerifiedAt, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          $ref: '#/components/schemas/Email'
+        universityId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/UserStatus'
+        roles:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: './shared/components.yaml#/components/schemas/Role'
+        locale:
+          $ref: './shared/components.yaml#/components/schemas/Locale'
+        theme:
+          $ref: './shared/components.yaml#/components/schemas/ThemePreference'
+        emailVerifiedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    UserPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/User'
+
+    RegisterUserRequest:
+      type: object
+      required: [email, password, universityId]
+      properties:
+        email:
+          $ref: '#/components/schemas/Email'
+        password:
+          $ref: '#/components/schemas/Password'
+        universityId:
+          type: string
+          format: uuid
+        locale:
+          $ref: './shared/components.yaml#/components/schemas/Locale'
+
+    RegisterUserResponse:
+      type: object
+      required: [userId, email, status, verificationExpiresIn]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          $ref: '#/components/schemas/Email'
+        status:
+          $ref: '#/components/schemas/UserStatus'
+        verificationExpiresIn:
+          type: integer
+          description: Segundos de validez del código enviado (900).
+
+    VerifyEmailRequest:
+      type: object
+      required: [email, code]
+      properties:
+        email:
+          $ref: '#/components/schemas/Email'
+        code:
+          type: string
+          pattern: '^[0-9]{6}$'
+          description: Código de 6 dígitos.
+
+    ResendVerificationCodeRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          $ref: '#/components/schemas/Email'
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          $ref: '#/components/schemas/Email'
+        password:
+          $ref: '#/components/schemas/Password'
+
+    RefreshTokenRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+          minLength: 16
+          maxLength: 512
+
+    LogoutRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+          minLength: 16
+          maxLength: 512
+
+    AuthTokens:
+      type: object
+      required: [accessToken, refreshToken, tokenType, expiresIn, refreshExpiresIn, user]
+      properties:
+        accessToken:
+          type: string
+          description: JWT RS256 de acceso.
+        refreshToken:
+          type: string
+          description: Refresh token opaco y rotativo.
+        tokenType:
+          type: string
+          const: Bearer
+        expiresIn:
+          type: integer
+          description: Segundos de vida del access token (900).
+        refreshExpiresIn:
+          type: integer
+          description: Segundos de vida del refresh token (2 592 000 = 30 días).
+        user:
+          $ref: '#/components/schemas/User'
+
+    CreateHandoffCodeRequest:
+      type: object
+      required: [targetApp, codeChallenge, codeChallengeMethod]
+      properties:
+        targetApp:
+          $ref: '#/components/schemas/HandoffTargetApp'
+        codeChallenge:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{43,128}$'
+          description: '`BASE64URL(SHA256(codeVerifier))` (PKCE).'
+        codeChallengeMethod:
+          type: string
+          const: S256
+
+    HandoffCode:
+      type: object
+      required: [code, redirectUrl, expiresIn]
+      properties:
+        code:
+          type: string
+          description: Código de un solo uso.
+        redirectUrl:
+          type: string
+          format: uri
+          description: URL de callback de la app destino con el código (`/sso/callback?code=…`).
+        expiresIn:
+          type: integer
+          const: 60
+          description: Segundos de validez.
+
+    ExchangeHandoffCodeRequest:
+      type: object
+      required: [code, codeVerifier]
+      properties:
+        code:
+          type: string
+          minLength: 16
+          maxLength: 256
+        codeVerifier:
+          type: string
+          pattern: '^[A-Za-z0-9._~-]{43,128}$'
+          description: Verificador PKCE (RFC 7636).
+
+    ServiceTokenRequest:
+      type: object
+      required: [clientId, clientSecret]
+      properties:
+        clientId:
+          type: string
+          description: Nombre del servicio cliente.
+          examples: [admin-gateway]
+        clientSecret:
+          type: string
+          writeOnly: true
+        scopes:
+          type: array
+          items:
+            type: string
+
+    ServiceToken:
+      type: object
+      required: [accessToken, tokenType, expiresIn, scopes]
+      properties:
+        accessToken:
+          type: string
+        tokenType:
+          type: string
+          const: Bearer
+        expiresIn:
+          type: integer
+        scopes:
+          type: array
+          items:
+            type: string
+
+    CreateMcpTokenRequest:
+      type: object
+      properties:
+        label:
+          type: string
+          maxLength: 80
+          description: Nombre descriptivo para reconocer el token en el panel (opcional).
+
+    McpToken:
+      type: object
+      required: [id, accessToken, tokenType, audience, scopes, label, expiresIn, expiresAt, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador del token (`jti`); se usa para revocarlo.
+        accessToken:
+          type: string
+          description: JWT RS256 (`typ=mcp`). Se devuelve una sola vez.
+        tokenType:
+          type: string
+          const: Bearer
+        audience:
+          type: string
+          const: mcp
+        scopes:
+          type: array
+          items:
+            type: string
+            enum: [mcp:tools]
+        label:
+          type: [string, 'null']
+        expiresIn:
+          type: integer
+          const: 28800
+          description: Segundos de vida (8 h).
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    UpdatePreferencesRequest:
+      type: object
+      minProperties: 1
+      properties:
+        locale:
+          $ref: './shared/components.yaml#/components/schemas/Locale'
+        theme:
+          $ref: './shared/components.yaml#/components/schemas/ThemePreference'
+
+    UpdateUserRolesRequest:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: './shared/components.yaml#/components/schemas/Role'
+
+    UpdateUserStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ACTIVE, SUSPENDED]
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+          description: Obligatorio cuando `status = SUSPENDED`.
+      if:
+        properties:
+          status:
+            const: SUSPENDED
+      then:
+        required: [reason]
+
+    University:
+      type: object
+      required: [id, name, allowedDomains, enabled]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 3
+          maxLength: 150
+        allowedDomains:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/Domain'
+        enabled:
+          type: boolean
+          description: Si admite registros nuevos ("universidad habilitada", RF-01). Aceptado en el modelo de dominio por ADR-0016.
+
+    UniversityPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/University'
+
+    Domain:
+      type: string
+      pattern: '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$'
+      description: Dominio de correo en minúsculas (sin `@`).
+
+    CreateUniversityRequest:
+      type: object
+      required: [name, allowedDomains]
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 150
+        allowedDomains:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/Domain'
+
+    UpdateUniversityRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 150
+        allowedDomains:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/Domain'
+        enabled:
+          type: boolean
+
+    Jwk:
+      type: object
+      required: [kty, kid, use, alg, n, e]
+      properties:
+        kty:
+          type: string
+          const: RSA
+        kid:
+          type: string
+        use:
+          type: string
+          const: sig
+        alg:
+          type: string
+          const: RS256
+        n:
+          type: string
+        e:
+          type: string
+
+    Jwks:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: '#/components/schemas/Jwk'
+
+  securitySchemes:
+    bearerAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/bearerAuth'
+    serviceAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/serviceAuth'

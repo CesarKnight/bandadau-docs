@@ -1,0 +1,1315 @@
+openapi: 3.1.0
+info:
+  title: Bandada U — insights-service
+  version: 1.1.1
+  summary: Reportes generativos, alertas, ejecuciones de agentes y servidor MCP.
+  description: |
+    API REST del bounded context **Insights** (`insights-service`, TypeScript + NestJS 11,
+    Clean Architecture, DynamoDB `bandada-insights` + S3 para audio).
+
+    - `ReportAgent` (bajo demanda) y `MonitoringAgent` (cron 5 min) son **clientes MCP** del
+      servidor MCP de este mismo servicio (D8). Todo queda registrado en un `AgentRun`.
+    - Reporte = `{ markdown, dataset, chart (Vega-Lite), audioUrl }`; el audio es un resumen
+      narrado de ≤ 90 s.
+    - **i18n (D14):** `requestReport` acepta `locale` (`es|en`, por defecto el del usuario); el
+      texto, los títulos de columnas del dataset/gráfico y el audio (voz TTS por idioma) se
+      generan en ese idioma. Problem Details localizados según `Accept-Language`.
+    - Acceso: rol `ADMIN` (el panel llega vía `admin-gateway`; `mfe-insights` usa este REST para
+      reproducir el audio).
+    - El servidor **MCP** vive en `/mcp` (fuera de `/api/v1`), transporte Streamable HTTP. Se
+      documenta aquí solo como operación HTTP; el contrato de herramientas, recursos y prompts
+      está en [`bandadau-docs/contracts/mcp/tools.md`](../mcp/tools.md) y
+      [`bandadau-docs/contracts/mcp/tools.schema.json`](../mcp/tools.schema.json).
+
+    ## Changelog
+    - 1.1.1 (2026-10-14): ejemplo de `audioUrl` con el bucket `bandada-reports` y la clave
+      `reports/<reportId>/summary.<locale>.mp3` (catálogo §3, `agentes-y-reportes-generativos.md`).
+    - 1.1.0 (2026-10-14): ADR-0016/D15 — enums e internos aceptados (sin `x-proposal`, salvo
+      `AlertSource`); `GeneratedReportStatus` usa `READY` en lugar de `COMPLETED`; `AgentKind` agrega
+      `EXTERNAL_MCP`; `AlertKind` usa `MODERATION_ESCALATION`; `Alert.resource/fingerprint/occurrences`
+      y `AgentRun.stopReason`; `requestReportInternal` y `getReportInternal` (n8n `wf-04`);
+      `runMonitoringNow` pasa a `POST /internal/v1/agents/monitoring/runs`; `/mcp` documenta el token
+      MCP de 8 h y corrige errores de lint.
+    - 1.0.0 (2026-10-14): versión inicial contract-first (D1, D8, D9, D14).
+  contact:
+    name: Grupo 24 — Ingeniería de Software II
+servers:
+  - url: http://api.bandada.localhost/api/v1
+    description: Desarrollo local (Traefik)
+  - url: https://api.bandadau.com/api/v1
+    description: Producción
+tags:
+  - name: reports
+    description: Reportes generativos a partir de preguntas en lenguaje natural (UC-19).
+  - name: alerts
+    description: Alertas del agente de monitoreo (UC-20).
+  - name: agent-runs
+    description: Trazabilidad de ejecuciones de agentes.
+  - name: mcp
+    description: Servidor MCP (Streamable HTTP). Solo documental; ver `bandadau-docs/contracts/mcp/tools.md`.
+  - name: internal
+    description: Endpoints internos (`/internal/v1`), solo con token de servicio.
+security:
+  - bearerAuth: []
+paths:
+  /insights/reports:
+    post:
+      tags: [reports]
+      operationId: requestReport
+      summary: Solicitar un reporte generativo
+      description: |
+        Encola la generación de un reporte por el `ReportAgent` (UC-19, RF-23) y responde
+        **202** de inmediato. El cliente hace polling a `getReport` o se suscribe a
+        `reportReady(id)` en GraphQL; al terminar se publica `bandada.insights.report.ready.v1`.
+        Requiere rol `ADMIN`. **Idempotente** con `Idempotency-Key` (D3).
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestReportRequest'
+            examples:
+              mensual:
+                value:
+                  question: ¿Cómo evolucionaron las inscripciones a eventos y el uso de créditos en septiembre comparado con agosto?
+                  locale: es
+              ingles:
+                value:
+                  question: Summarize last week's moderation backlog and failed registrations.
+                  locale: en
+      responses:
+        '202':
+          description: Reporte aceptado.
+          headers:
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+            Location:
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestReportResponse'
+              examples:
+                aceptado:
+                  value:
+                    reportId: 0192a3e0-0000-7000-8000-000000000901
+                    agentRunId: 0192a3e0-0000-7000-8000-000000000902
+                    status: PENDING
+                    locale: es
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '409':
+          $ref: './shared/components.yaml#/components/responses/Conflict'
+        '422':
+          $ref: './shared/components.yaml#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /insights/reports/{reportId}:
+    get:
+      tags: [reports]
+      operationId: getReport
+      summary: Obtener un reporte
+      description: |
+        Devuelve el estado y, cuando `status = READY`, el `markdown`, el `dataset`, el
+        `chart` (Vega-Lite v5) y una `audioUrl` prefirmada (expira en 15 min). Requiere `ADMIN`.
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Reporte.
+          headers:
+            Content-Language:
+              description: Idioma del contenido del reporte (`locale` con el que se generó).
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedReport'
+              examples:
+                listo:
+                  $ref: '#/components/examples/ReportReady'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /insights/alerts:
+    get:
+      tags: [alerts]
+      operationId: listAlerts
+      summary: Listar alertas
+      description: Alertas del agente de monitoreo, de la más reciente a la más antigua. Requiere `ADMIN`.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/AlertStatus'
+        - name: severity
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/AlertSeverity'
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Página de alertas.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertPage'
+              examples:
+                abiertas:
+                  value:
+                    items:
+                      - id: 0192a3e5-0000-7000-8000-000000000a01
+                        severity: CRITICAL
+                        kind: SAGA_FAILURES
+                        message: 12 inscripciones compensadas en los últimos 15 minutos (umbral 5). Posible falla en ticketing-service.
+                        details:
+                          window: 15m
+                          compensatedSagas: 12
+                          threshold: 5
+                          suspectedService: ticketing-service
+                        status: OPEN
+                        source: MONITORING_AGENT
+                        agentRunId: 0192a3e5-0000-7000-8000-000000000a00
+                        raisedAt: '2026-10-14T15:00:12Z'
+                        acknowledgedAt: null
+                        acknowledgedBy: null
+                    nextCursor: null
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+  /insights/alerts/{alertId}/ack:
+    post:
+      tags: [alerts]
+      operationId: acknowledgeAlert
+      summary: Reconocer una alerta
+      description: Pasa la alerta a `ACKNOWLEDGED`. Idempotente (reconocer dos veces no cambia nada).
+      parameters:
+        - name: alertId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                note:
+                  type: string
+                  maxLength: 500
+            examples:
+              nota:
+                value:
+                  note: Revisando ticketing-service; se activó CHAOS_TICKETING_FAIL en la demo.
+      responses:
+        '200':
+          description: Alerta actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          $ref: './shared/components.yaml#/components/responses/Conflict'
+
+  /insights/agent-runs/{agentRunId}:
+    get:
+      tags: [agent-runs]
+      operationId: getAgentRun
+      summary: Obtener una ejecución de agente
+      description: Pasos, herramientas MCP usadas, tokens y resultado de una ejecución. Requiere `ADMIN`.
+      parameters:
+        - $ref: '#/components/parameters/AgentRunId'
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Ejecución.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRun'
+              examples:
+                reporte:
+                  $ref: '#/components/examples/AgentRunReport'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /mcp:
+    servers:
+      - url: http://api.bandada.localhost
+        description: Desarrollo local (fuera de /api/v1)
+      - url: https://api.bandadau.com
+        description: Producción
+    post:
+      tags: [mcp]
+      operationId: mcpPost
+      summary: Endpoint MCP (Streamable HTTP) — documental
+      description: |
+        **Operación documental.** Endpoint del servidor MCP (`@modelcontextprotocol/sdk`,
+        transporte Streamable HTTP). Recibe mensajes JSON-RPC 2.0 (`initialize`, `tools/list`,
+        `tools/call`, `resources/read`, `prompts/get`…). Responde `application/json` o un stream
+        `text/event-stream`. La sesión se identifica con la cabecera `Mcp-Session-Id` devuelta en
+        `initialize`. Autenticación (D9, ADR-0016): **token MCP** de 8 h emitido por identity
+        (`createMcpToken`: `aud=mcp`, scope `mcp:tools`, solo `ADMIN`) para clientes externos, o
+        token de servicio (`typ=service`) para los agentes internos. Un access token de usuario de
+        15 min **no** se acepta. Contrato completo de herramientas, recursos y prompts:
+        `bandadau-docs/contracts/mcp/tools.md` y `bandadau-docs/contracts/mcp/tools.schema.json`.
+      x-idempotency-exempt: Transporte JSON-RPC del protocolo MCP; las herramientas de escritura (`generate_report`, `raise_alert`) aplican su propia idempotencia (ver bandadau-docs/contracts/mcp/tools.md).
+      externalDocs:
+        description: Especificación MCP — transporte Streamable HTTP
+        url: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
+      parameters:
+        - name: Mcp-Session-Id
+          in: header
+          required: false
+          description: Obligatoria tras `initialize`.
+          schema:
+            type: string
+        - name: MCP-Protocol-Version
+          in: header
+          required: false
+          schema:
+            type: string
+          example: '2025-06-18'
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Mensaje (o lote) JSON-RPC 2.0.
+              required: [jsonrpc]
+              properties:
+                jsonrpc:
+                  const: '2.0'
+                id:
+                  type: [string, integer]
+                method:
+                  type: string
+                params:
+                  type: object
+            examples:
+              listarHerramientas:
+                value:
+                  jsonrpc: '2.0'
+                  id: 2
+                  method: tools/list
+      responses:
+        '200':
+          description: Respuesta JSON-RPC (JSON) o stream SSE.
+          content:
+            application/json:
+              schema:
+                type: object
+            text/event-stream:
+              schema:
+                type: string
+        '202':
+          description: Notificación/respuesta aceptada sin cuerpo.
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          description: Sesión MCP inexistente o expirada (`MCP_SESSION_NOT_FOUND`; el cliente debe reinicializar).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                sesion:
+                  summary: Sesión expirada
+                  value:
+                    type: https://api.bandadau.com/problems/mcp-session-not-found
+                    title: Sesión MCP no encontrada
+                    status: 404
+                    detail: La sesión MCP no existe o expiró. Vuelve a enviar initialize.
+                    instance: /mcp
+                    code: MCP_SESSION_NOT_FOUND
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    get:
+      tags: [mcp]
+      operationId: mcpOpenStream
+      summary: Abrir stream SSE de servidor a cliente — documental
+      description: |
+        **Operación documental.** Abre un stream `text/event-stream` para mensajes iniciados por el
+        servidor (notificaciones de progreso o de cambio de recursos) dentro de una sesión MCP
+        existente. Misma autenticación que `mcpPost`. Si el servidor no ofrece este stream
+        responde `405`.
+      parameters:
+        - name: Mcp-Session-Id
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Stream SSE.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '405':
+          description: El servidor no ofrece stream iniciado por GET (`METHOD_NOT_ALLOWED`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                noPermitido:
+                  summary: Stream GET no disponible
+                  value:
+                    type: https://api.bandadau.com/problems/method-not-allowed
+                    title: Método no permitido
+                    status: 405
+                    detail: Este servidor MCP no abre streams iniciados por GET.
+                    instance: /mcp
+                    code: METHOD_NOT_ALLOWED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    delete:
+      tags: [mcp]
+      operationId: mcpTerminateSession
+      summary: Terminar sesión MCP — documental
+      description: |
+        **Operación documental.** El cliente cierra explícitamente su sesión MCP (`Mcp-Session-Id`).
+        Idempotente: cerrar una sesión ya cerrada responde `204`.
+      parameters:
+        - name: Mcp-Session-Id
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Sesión terminada.
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+
+  /internal/v1/reports:
+    get:
+      tags: [internal]
+      operationId: listReports
+      summary: Listar reportes (interno)
+      description: Reportes generativos, más recientes primero (D15). Lo usa `Query.reports(after)` del panel (D11).
+      servers:
+        - url: http://insights-service:7008
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/GeneratedReportStatus'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Página de reportes (sin `dataset`/`chart` para aligerar).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedReportSummaryPage'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+    post:
+      tags: [internal]
+      operationId: requestReportInternal
+      summary: Solicitar un reporte generativo (interno)
+      description: |
+        Variante interna de `requestReport` para procesos de servicio (D15): n8n
+        `wf-04-resumen-semanal` pide el "Resumen de la semana" con token de servicio (los tokens
+        `typ=service` no se aceptan en `/api/v1`). Mismo caso de uso (UC-19); `requestedBy` queda
+        como `system:<clientId>`. Responde **202**; el resultado se consulta con `getReportInternal`
+        o se recibe en `bandada.insights.report.ready.v1`. **Idempotente** con `Idempotency-Key`.
+      servers:
+        - url: http://insights-service:7008
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestReportRequest'
+            examples:
+              semanal:
+                summary: Resumen semanal de n8n
+                value:
+                  question: Resume la actividad de la semana pasada en la plataforma (usuarios, publicaciones, inscripciones, créditos y moderación).
+                  locale: es
+      responses:
+        '202':
+          description: Reporte aceptado.
+          headers:
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestReportResponse'
+              examples:
+                aceptado:
+                  summary: Reporte en cola
+                  value:
+                    reportId: 0192a3e0-0000-7000-8000-000000000911
+                    agentRunId: 0192a3e0-0000-7000-8000-000000000912
+                    status: PENDING
+                    locale: es
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '409':
+          $ref: './shared/components.yaml#/components/responses/Conflict'
+        '422':
+          $ref: './shared/components.yaml#/components/responses/UnprocessableEntity'
+
+  /internal/v1/reports/{reportId}:
+    get:
+      tags: [internal]
+      operationId: getReportInternal
+      summary: Obtener un reporte (interno)
+      description: |
+        Variante interna de `getReport` (D15): n8n `wf-04-resumen-semanal` hace polling hasta
+        `status = READY` (o `FAILED`) y arma el correo con el `markdown` y el enlace al audio.
+      servers:
+        - url: http://insights-service:7008
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Reporte.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedReport'
+              examples:
+                listo:
+                  $ref: '#/components/examples/ReportReady'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /internal/v1/agent-runs:
+    get:
+      tags: [internal]
+      operationId: listAgentRuns
+      summary: Listar ejecuciones de agentes (interno)
+      description: Ejecuciones de agentes, más recientes primero (D15). Lo usa `Query.agentRuns(after)` del panel (D11).
+      servers:
+        - url: http://insights-service:7008
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+        - name: agent
+          in: query
+          schema:
+            $ref: '#/components/schemas/AgentKind'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Página de ejecuciones (sin el detalle de `steps`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunPage'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+  /internal/v1/agents/monitoring/runs:
+    post:
+      tags: [internal]
+      operationId: runMonitoringNow
+      summary: Ejecutar el agente de monitoreo ahora (interno)
+      description: |
+        Lanza una ejecución del `MonitoringAgent` fuera del cron (D15, UC-20); la usa `Mutation.runMonitoringNow` (D11).
+        Si ya hay una en curso devuelve esa misma (`409` no aplica; responde `202` con el run activo).
+      servers:
+        - url: http://insights-service:7008
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                requestedBy:
+                  type: string
+                  format: uuid
+                  description: Usuario ADMIN que lo solicitó desde el panel.
+      responses:
+        '202':
+          description: Ejecución lanzada.
+          headers:
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agentRunId, status]
+                properties:
+                  agentRunId:
+                    type: string
+                    format: uuid
+                  status:
+                    $ref: '#/components/schemas/AgentRunStatus'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+  /internal/v1/alerts:
+    post:
+      tags: [internal]
+      operationId: raiseAlert
+      summary: Crear una alerta (interno)
+      description: |
+        Usado por n8n (`wf-03-escalamiento-moderacion`, "crea alerta (REST insights)", D10).
+        Mismo caso de uso que la herramienta MCP `raise_alert`. Publica
+        `bandada.insights.alert.raised.v1`. Idempotente con `Idempotency-Key`.
+      servers:
+        - url: http://insights-service:7008
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RaiseAlertRequest'
+            examples:
+              escalamiento:
+                value:
+                  severity: WARNING
+                  kind: MODERATION_ESCALATION
+                  message: El autor 0192a3b4… acumula 3 contenidos marcados en 24 h.
+                  details:
+                    authorId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+                    flaggedCount24h: 3
+                  source: N8N
+      responses:
+        '201':
+          description: Alerta creada.
+          headers:
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '409':
+          $ref: './shared/components.yaml#/components/responses/Conflict'
+        '422':
+          $ref: './shared/components.yaml#/components/responses/UnprocessableEntity'
+
+  /internal/v1/kpis:
+    get:
+      tags: [internal]
+      operationId: getPlatformKpis
+      summary: KPIs de la plataforma (interno)
+      description: |
+        Proyección de métricas (`METRIC#<name>`) construida desde la cola
+        `insights-service.analytics`. La usan `Query.dashboard(range)` (D11) y la herramienta MCP
+        `get_platform_kpis`.
+      servers:
+        - url: http://insights-service:7008
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: KPIs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformKpis'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+  /internal/v1/service-health:
+    get:
+      tags: [internal]
+      operationId: getServiceHealth
+      summary: Salud agregada de servicios, colas y DLQ (interno)
+      description: |
+        Consulta `GET /health/ready` de cada servicio y la API de management de RabbitMQ.
+        La usan `Query.serviceHealth` (D11) y la herramienta MCP `get_service_health`.
+      servers:
+        - url: http://insights-service:7008
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Estado agregado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceHealthReport'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+components:
+  parameters:
+    ReportId:
+      name: reportId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AgentRunId:
+      name: agentRunId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    AlertSeverity:
+      type: string
+      enum: [INFO, WARNING, CRITICAL]
+    GeneratedReportStatus:
+      type: string
+      description: Estado de un reporte generativo (`GeneratedReportStatus`, ADR-0016). No confundir con `ReportStatus` (denuncias).
+      enum: [PENDING, RUNNING, READY, FAILED]
+    AgentKind:
+      type: string
+      description: Valores de `AgentRun.agent` (`AgentKind`, ADR-0016). `EXTERNAL_MCP` = sesión de un cliente MCP externo con token MCP.
+      enum: [MONITORING, REPORT, EXTERNAL_MCP]
+    AgentRunStatus:
+      type: string
+      description: Valores de `AgentRun.status` (`AgentRunStatus`, ADR-0016). `ABORTED` = cortado por guardarraíles (8 pasos / tokens).
+      enum: [RUNNING, SUCCEEDED, FAILED, ABORTED]
+    AlertStatus:
+      type: string
+      description: Valores de `Alert.status` (`AlertStatus`, ADR-0016).
+      enum: [OPEN, ACKNOWLEDGED, RESOLVED]
+    AlertKind:
+      type: string
+      description: Valores de `Alert.kind` (`AlertKind`, ADR-0016), derivados de RF-24 y D10 (`wf-03`).
+      enum: [SERVICE_DOWN, SAGA_FAILURES, DLQ_BACKLOG, MODERATION_BACKLOG, METRIC_ANOMALY, MODERATION_ESCALATION]
+    AlertSource:
+      x-proposal: true
+      type: string
+      description: '**PROPUESTA** (no figura en el modelo de dominio ni en ADR-0016): origen de la alerta.'
+      enum: [MONITORING_AGENT, N8N, MANUAL]
+    ServiceStatus:
+      type: string
+      description: Estado de salud (`ServiceStatus`, ADR-0016).
+      enum: [UP, DEGRADED, DOWN]
+    RequestReportRequest:
+      type: object
+      additionalProperties: false
+      required: [question]
+      properties:
+        question:
+          type: string
+          minLength: 10
+          maxLength: 1000
+          description: Pregunta en lenguaje natural.
+        locale:
+          $ref: './shared/components.yaml#/components/schemas/Locale'
+          description: Idioma del reporte y del audio. Por defecto, `User.locale` del solicitante.
+    RequestReportResponse:
+      type: object
+      required: [reportId, agentRunId, status, locale]
+      properties:
+        reportId:
+          type: string
+          format: uuid
+        agentRunId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/GeneratedReportStatus'
+        locale:
+          $ref: './shared/components.yaml#/components/schemas/Locale'
+    ReportDataset:
+      type: object
+      description: Datos tabulares del reporte (agregados, sin datos personales).
+      required: [columns, rows]
+      properties:
+        columns:
+          type: array
+          items:
+            type: object
+            required: [name, type]
+            properties:
+              name:
+                type: string
+                description: Identificador de la columna (inglés, camelCase).
+              label:
+                type: string
+                description: Etiqueta en el idioma del reporte.
+              type:
+                type: string
+                enum: [string, integer, number, date, datetime, boolean]
+        rows:
+          type: array
+          maxItems: 5000
+          items:
+            type: array
+            items:
+              type: [string, number, integer, boolean, 'null']
+    GeneratedReportSummary:
+      type: object
+      required: [id, question, locale, status, requestedBy, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: [string, 'null']
+        question:
+          type: string
+        locale:
+          $ref: './shared/components.yaml#/components/schemas/Locale'
+        status:
+          $ref: '#/components/schemas/GeneratedReportStatus'
+        requestedBy:
+          type: string
+          description: UUID del usuario ADMIN o `system:n8n` / `system:monitoring-agent`.
+        agentRunId:
+          type: [string, 'null']
+          format: uuid
+        hasAudio:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: [string, 'null']
+          format: date-time
+          description: Momento en que el reporte pasó a `READY` o `FAILED`.
+    GeneratedReport:
+      allOf:
+        - $ref: '#/components/schemas/GeneratedReportSummary'
+        - type: object
+          properties:
+            markdown:
+              type: [string, 'null']
+            dataset:
+              oneOf:
+                - $ref: '#/components/schemas/ReportDataset'
+                - type: 'null'
+            chart:
+              type: [object, 'null']
+              description: Especificación Vega-Lite v5 (colores derivados de tokens, D13).
+              additionalProperties: true
+            audioUrl:
+              type: [string, 'null']
+              format: uri
+              description: URL prefirmada de S3/MinIO (MP3), expira en 15 min.
+            audioDurationSeconds:
+              type: [integer, 'null']
+              maximum: 90
+            failureReason:
+              type: [string, 'null']
+              description: Motivo del fallo cuando `status = FAILED`.
+    GeneratedReportSummaryPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/GeneratedReportSummary'
+    Alert:
+      type: object
+      required: [id, severity, kind, message, status, source, raisedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        severity:
+          $ref: '#/components/schemas/AlertSeverity'
+        kind:
+          $ref: '#/components/schemas/AlertKind'
+        message:
+          type: string
+          description: Mensaje legible (generado en `es`, idioma operativo del equipo).
+        details:
+          type: object
+          additionalProperties: true
+        status:
+          $ref: '#/components/schemas/AlertStatus'
+        source:
+          $ref: '#/components/schemas/AlertSource'
+        agentRunId:
+          type: [string, 'null']
+          format: uuid
+        raisedAt:
+          type: string
+          format: date-time
+        acknowledgedAt:
+          type: [string, 'null']
+          format: date-time
+        acknowledgedBy:
+          type: [string, 'null']
+          format: uuid
+        note:
+          type: [string, 'null']
+        resource:
+          type: [string, 'null']
+          description: Recurso afectado (servicio, cola o autor), p. ej. `ticketing-service` (ADR-0016).
+        fingerprint:
+          type: string
+          description: Huella `kind + resource` para deduplicar; una alerta `OPEN` con la misma huella incrementa `occurrences` en lugar de crear otra (ADR-0016).
+        occurrences:
+          type: integer
+          minimum: 1
+          description: Veces que se detectó mientras seguía abierta (ADR-0016).
+    AlertPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Alert'
+    RaiseAlertRequest:
+      type: object
+      additionalProperties: false
+      required: [severity, kind, message]
+      properties:
+        severity:
+          $ref: '#/components/schemas/AlertSeverity'
+        kind:
+          $ref: '#/components/schemas/AlertKind'
+        message:
+          type: string
+          maxLength: 1000
+        details:
+          type: object
+          additionalProperties: true
+        source:
+          $ref: '#/components/schemas/AlertSource'
+    AgentRunStep:
+      type: object
+      required: [index, kind, startedAt, durationMs]
+      properties:
+        index:
+          type: integer
+          minimum: 1
+          maximum: 8
+        kind:
+          type: string
+          enum: [LLM, TOOL_CALL]
+        toolName:
+          type: [string, 'null']
+        input:
+          type: [object, 'null']
+          additionalProperties: true
+        outputSummary:
+          type: [string, 'null']
+          description: Resumen truncado del resultado (nunca datos personales).
+        isError:
+          type: boolean
+        startedAt:
+          type: string
+          format: date-time
+        durationMs:
+          type: integer
+          minimum: 0
+    AgentRunSummary:
+      type: object
+      required: [id, agent, trigger, status, startedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        agent:
+          $ref: '#/components/schemas/AgentKind'
+        trigger:
+          type: string
+          enum: [SCHEDULE, MANUAL, REPORT_REQUEST]
+        status:
+          $ref: '#/components/schemas/AgentRunStatus'
+        model:
+          type: string
+          example: claude-sonnet-5-5
+        toolsUsed:
+          type: array
+          items:
+            type: string
+        tokens:
+          type: object
+          properties:
+            input:
+              type: integer
+              format: int64
+            output:
+              type: integer
+              format: int64
+            total:
+              type: integer
+              format: int64
+        reportId:
+          type: [string, 'null']
+          format: uuid
+        alertIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        error:
+          type: [string, 'null']
+        stopReason:
+          type: [string, 'null']
+          description: Por qué terminó la ejecución (p. ej. `COMPLETED`, `MAX_STEPS`, `MAX_TOKENS`, `ERROR`) (ADR-0016).
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: [string, 'null']
+          format: date-time
+    AgentRun:
+      allOf:
+        - $ref: '#/components/schemas/AgentRunSummary'
+        - type: object
+          required: [steps]
+          properties:
+            steps:
+              type: array
+              maxItems: 8
+              items:
+                $ref: '#/components/schemas/AgentRunStep'
+    AgentRunPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/AgentRunSummary'
+    PlatformKpis:
+      type: object
+      required: [from, to, activeUsers, newUsers, posts, comments, reactions, registrationsConfirmed, registrationsFailed, creditsToppedUp, creditsSpent, flaggedContent, openAlerts]
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        activeUsers:
+          type: integer
+          format: int64
+        newUsers:
+          type: integer
+          format: int64
+        posts:
+          type: integer
+          format: int64
+        comments:
+          type: integer
+          format: int64
+        reactions:
+          type: integer
+          format: int64
+        registrationsConfirmed:
+          type: integer
+          format: int64
+        registrationsFailed:
+          type: integer
+          format: int64
+        registrationsCancelled:
+          type: integer
+          format: int64
+        creditsToppedUp:
+          type: integer
+          format: int64
+        creditsSpent:
+          type: integer
+          format: int64
+        flaggedContent:
+          type: integer
+          format: int64
+        openAlerts:
+          type: integer
+          format: int64
+        series:
+          type: array
+          description: Serie diaria de las métricas principales.
+          items:
+            type: object
+            required: [date]
+            properties:
+              date:
+                type: string
+                format: date
+              activeUsers:
+                type: integer
+                format: int64
+              posts:
+                type: integer
+                format: int64
+              registrationsConfirmed:
+                type: integer
+                format: int64
+              creditsSpent:
+                type: integer
+                format: int64
+    ServiceHealthReport:
+      type: object
+      required: [checkedAt, overall, services, queues]
+      properties:
+        checkedAt:
+          type: string
+          format: date-time
+        overall:
+          $ref: '#/components/schemas/ServiceStatus'
+        services:
+          type: array
+          items:
+            type: object
+            required: [name, status]
+            properties:
+              name:
+                type: string
+                example: wallet-service
+              status:
+                $ref: '#/components/schemas/ServiceStatus'
+              latencyMs:
+                type: [integer, 'null']
+              checks:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/ServiceStatus'
+              error:
+                type: [string, 'null']
+        queues:
+          type: array
+          items:
+            type: object
+            required: [name, messagesReady, messagesUnacked, consumers, isDeadLetter]
+            properties:
+              name:
+                type: string
+                example: events-service.saga-replies
+              messagesReady:
+                type: integer
+                format: int64
+              messagesUnacked:
+                type: integer
+                format: int64
+              consumers:
+                type: integer
+              isDeadLetter:
+                type: boolean
+  examples:
+    ReportReady:
+      summary: Reporte listo
+      value:
+        id: 0192a3e0-0000-7000-8000-000000000901
+        title: Inscripciones y créditos — septiembre vs. agosto 2026
+        question: ¿Cómo evolucionaron las inscripciones a eventos y el uso de créditos en septiembre comparado con agosto?
+        locale: es
+        status: READY
+        requestedBy: 0192a3b4-0000-7000-8000-00000000ad01
+        agentRunId: 0192a3e0-0000-7000-8000-000000000902
+        hasAudio: true
+        createdAt: '2026-10-14T15:04:05Z'
+        completedAt: '2026-10-14T15:04:52Z'
+        markdown: |
+          ## Resumen
+          En septiembre se confirmaron **1 284 inscripciones** (+38 % frente a agosto), impulsadas por la semana de talleres de la FCPN.
+          El gasto de créditos subió a **9 870** (+41 %) y las recargas a **11 200**.
+        dataset:
+          columns:
+            - name: month
+              label: Mes
+              type: string
+            - name: registrationsConfirmed
+              label: Inscripciones confirmadas
+              type: integer
+            - name: creditsSpent
+              label: Créditos gastados
+              type: integer
+          rows:
+            - ['2026-08', 930, 7000]
+            - ['2026-09', 1284, 9870]
+        chart:
+          $schema: https://vega.github.io/schema/vega-lite/v5.json
+          mark: bar
+          encoding:
+            x:
+              field: month
+              type: ordinal
+              title: Mes
+            y:
+              field: registrationsConfirmed
+              type: quantitative
+              title: Inscripciones confirmadas
+        audioUrl: http://minio.bandada.localhost/bandada-reports/reports/0192a3e0-0000-7000-8000-000000000901/summary.es.mp3?X-Amz-Expires=900&X-Amz-Signature=3f2a
+        audioDurationSeconds: 74
+        failureReason: null
+    AgentRunReport:
+      value:
+        id: 0192a3e0-0000-7000-8000-000000000902
+        agent: REPORT
+        trigger: REPORT_REQUEST
+        status: SUCCEEDED
+        model: claude-sonnet-5-5
+        toolsUsed: [get_registration_stats, get_credit_stats, generate_report]
+        tokens:
+          input: 18420
+          output: 2310
+          total: 20730
+        reportId: 0192a3e0-0000-7000-8000-000000000901
+        alertIds: []
+        error: null
+        startedAt: '2026-10-14T15:04:06Z'
+        finishedAt: '2026-10-14T15:04:52Z'
+        steps:
+          - index: 1
+            kind: TOOL_CALL
+            toolName: get_registration_stats
+            input:
+              from: '2026-08-01'
+              to: '2026-09-30'
+              groupBy: day
+            outputSummary: 2 filas (agosto, septiembre)
+            isError: false
+            startedAt: '2026-10-14T15:04:08Z'
+            durationMs: 142
+          - index: 2
+            kind: TOOL_CALL
+            toolName: get_credit_stats
+            input:
+              from: '2026-08-01'
+              to: '2026-09-30'
+              groupBy: day
+            outputSummary: totales y 2 puntos de serie
+            isError: false
+            startedAt: '2026-10-14T15:04:09Z'
+            durationMs: 97
+  securitySchemes:
+    bearerAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/bearerAuth'
+    serviceAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/serviceAuth'

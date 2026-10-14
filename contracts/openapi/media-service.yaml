@@ -1,0 +1,859 @@
+openapi: 3.1.0
+info:
+  title: Bandada U — media-service
+  version: 1.1.0
+  summary: Multimedia (subida directa a S3, pipeline de moderación ML/DL, etiquetado y OCR).
+  description: |
+    API del bounded context **Media** (`media-service`, TypeScript + NestJS 11 con
+    onnxruntime-node y ffmpeg, Clean Architecture, MongoDB `media` + S3/MinIO).
+
+    Flujo de subida (UC-05, RF-06, RF-07):
+    1. `POST /media/uploads` → `{ mediaId, uploadUrl, expiresIn }` (URL prefirmada de S3 para `PUT`).
+    2. El cliente hace `PUT` del archivo directamente a `uploadUrl` con el `Content-Type` declarado.
+    3. `POST /media/{mediaId}/complete` → dispara el pipeline: clasificadores `nsfw-classifier` y
+       `violence-classifier`, `clip-zero-shot` (etiquetas), `ocr`, y para video 1 frame cada 2 s
+       (máx. 30) + miniatura (D7).
+    4. Decisión: `score ≥ 0.85` → `BLOCK` (`REJECTED`), `0.5–0.85` → `REVIEW` (`FLAGGED`),
+       `< 0.5` → `ALLOW` (`APPROVED`). Publica `bandada.media.asset.approved|flagged|rejected.v1`.
+
+    Límites: imágenes `image/jpeg|png|webp|heic` (≤ 10 MB, ADR-0016); video `video/mp4|quicktime`
+    (≤ 50 MB y ≤ 60 s, RF-06). Los medios son privados y se sirven con URLs prefirmadas de 15 min (RNF-08).
+
+    Errores RFC 9457 (`application/problem+json`); `title`/`detail` localizados según
+    `Accept-Language` (`es` por defecto) y respuesta con `Content-Language`. Todas las respuestas
+    devuelven `X-Correlation-Id`. Rutas `/internal/v1/**` (tag `internal`): solo red interna con `serviceAuth`.
+
+    ## Changelog
+    - 1.1.0 (2026-10-14): ADR-0016/D15 — `purpose` (`MediaPurpose`: `POST`, `AVATAR`, `EVENT_COVER`) en
+      `createUpload` y `MediaAsset`; `completeUpload` responde 202; `getMediaInternal` y `getMediaUrls`;
+      filtros `ownerId` y `since` en `listFlaggedMedia`; imágenes ≤ 10 MB y video ≤ 50 MB confirmados.
+    - 1.0.0 (2026-10-14): versión inicial contract-first (D1, D3, D7, D14).
+  contact:
+    name: Grupo 24 — Ingeniería de Software II
+servers:
+  - url: http://api.bandada.localhost/api/v1
+    description: Desarrollo local (Traefik)
+  - url: https://api.bandadau.com/api/v1
+    description: Producción
+tags:
+  - name: media
+    description: Subida y consulta de medios.
+  - name: internal
+    description: Endpoints internos (`/internal/v1`), solo con token de servicio (cola de moderación).
+security:
+  - bearerAuth: []
+paths:
+  /media/uploads:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [media]
+      operationId: createUpload
+      summary: Solicitar una URL de subida
+      description: |
+        Registra un `MediaAsset` en estado `PENDING_UPLOAD` y devuelve una URL prefirmada de S3
+        para subir el archivo con `PUT` (válida `expiresIn` segundos). Valida tipo, tamaño y,
+        para video, duración declarada (se vuelve a verificar con ffmpeg al procesar).
+        Un asset `PENDING_UPLOAD` no completado en 24 h se elimina.
+        `purpose` (`MediaPurpose`, D15) indica el uso del medio: `POST` (por defecto), `AVATAR`
+        (UC-04) o `EVENT_COVER` (UC-11); `AVATAR` y `EVENT_COVER` solo admiten `IMAGE`.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUploadRequest'
+            examples:
+              imagen:
+                summary: Foto de apuntes
+                value:
+                  kind: IMAGE
+                  purpose: POST
+                  mimeType: image/jpeg
+                  sizeBytes: 2457600
+                  fileName: apuntes-calculo.jpg
+              video:
+                summary: Video corto
+                value:
+                  kind: VIDEO
+                  purpose: POST
+                  mimeType: video/mp4
+                  sizeBytes: 31457280
+                  durationSeconds: 42
+                  fileName: feria-ingenieria.mp4
+              avatar:
+                summary: Foto de perfil
+                value:
+                  kind: IMAGE
+                  purpose: AVATAR
+                  mimeType: image/webp
+                  sizeBytes: 512000
+                  fileName: avatar.webp
+      responses:
+        '201':
+          description: Asset registrado; URL de subida emitida.
+          headers:
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+            X-Correlation-Id:
+              $ref: './shared/components.yaml#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadTicket'
+              examples:
+                subida:
+                  summary: URL prefirmada
+                  value:
+                    mediaId: 0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d
+                    uploadUrl: http://minio.bandada.localhost/bandada-media/u/0192f1a2/0192f29f.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=900&X-Amz-Signature=abc123
+                    uploadMethod: PUT
+                    uploadHeaders:
+                      Content-Type: image/jpeg
+                    expiresIn: 900
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '409':
+          $ref: './shared/components.yaml#/components/responses/Conflict'
+        '422':
+          description: |
+            `UNSUPPORTED_MEDIA_TYPE` (tipo no permitido o no coincide con `kind`),
+            `MEDIA_TOO_LARGE`, `VIDEO_TOO_LONG` o `IDEMPOTENCY_KEY_REUSED`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                muyGrande:
+                  summary: Video demasiado grande
+                  value:
+                    type: https://api.bandadau.com/problems/media-too-large
+                    title: Archivo demasiado grande
+                    status: 422
+                    detail: El video supera el máximo de 50 MB.
+                    instance: /api/v1/media/uploads
+                    code: MEDIA_TOO_LARGE
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+                muyLargo:
+                  summary: Video demasiado largo
+                  value:
+                    type: https://api.bandadau.com/problems/video-too-long
+                    title: Video demasiado largo
+                    status: 422
+                    detail: El video no puede durar más de 60 segundos.
+                    instance: /api/v1/media/uploads
+                    code: VIDEO_TOO_LONG
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /media/{mediaId}/complete:
+    parameters:
+      - $ref: '#/components/parameters/MediaId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [media]
+      operationId: completeUpload
+      summary: Confirmar la subida
+      description: |
+        Responde **202 Accepted** (D15): el procesamiento es asíncrono.
+        El dueño confirma que terminó el `PUT` a S3. El servicio verifica que el objeto exista
+        y coincida en tipo/tamaño, pasa el asset a `PROCESSING` y encola el pipeline de
+        moderación (asíncrono). Consultar el resultado con `GET /media/{mediaId}`.
+        Idempotente por naturaleza: si el asset ya está `PROCESSING` o en un estado final, se
+        devuelve su estado actual sin reprocesar.
+      x-idempotency-exempt: Idempotente por naturaleza (transición única PENDING_UPLOAD → PROCESSING).
+      responses:
+        '202':
+          description: Procesamiento iniciado (o ya en curso/terminado).
+          headers:
+            Location:
+              $ref: './shared/components.yaml#/components/headers/Location'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaAsset'
+              examples:
+                procesando:
+                  summary: En procesamiento
+                  value:
+                    id: 0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d
+                    ownerId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                    kind: IMAGE
+                    purpose: POST
+                    mimeType: image/jpeg
+                    sizeBytes: 2457600
+                    durationSeconds: null
+                    status: PROCESSING
+                    url: null
+                    thumbnailUrl: null
+                    tags: []
+                    ocrText: null
+                    createdAt: '2026-10-14T12:59:30Z'
+                    updatedAt: '2026-10-14T12:59:50Z'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '422':
+          description: El objeto no está en S3 o no coincide con lo declarado (`UPLOAD_MISSING`, `UPLOAD_MISMATCH`), o la URL de subida expiró (`UPLOAD_EXPIRED`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                faltante:
+                  summary: Archivo no subido
+                  value:
+                    type: https://api.bandadau.com/problems/upload-missing
+                    title: Archivo no encontrado
+                    status: 422
+                    detail: No encontramos el archivo subido. Vuelve a intentarlo.
+                    instance: /api/v1/media/0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d/complete
+                    code: UPLOAD_MISSING
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  /media/{mediaId}:
+    parameters:
+      - $ref: '#/components/parameters/MediaId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [media]
+      operationId: getMedia
+      summary: Consultar un medio
+      description: |
+        Estado del medio, URL prefirmada (15 min, solo si `APPROVED` o para su dueño),
+        miniatura, etiquetas automáticas y texto OCR. Visible para el dueño o si está `APPROVED`.
+      responses:
+        '200':
+          description: Medio.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaAsset'
+              examples:
+                aprobado:
+                  $ref: '#/components/examples/MediaApproved'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /internal/v1/media:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: listFlaggedMedia
+      summary: Cola de medios marcados (interno)
+      description: |
+        Medios por estado (por defecto `FLAGGED`), del más antiguo al más reciente, con los
+        resultados de moderación (puntajes, etiquetas, versión del modelo) (UC-18, RF-22).
+        Usado por `admin-gateway` (`moderationQueue`), MCP `list_flagged_content` y n8n
+        `wf-03-escalamiento-moderacion` (filtros `ownerId` y `since`, D15).
+      servers:
+        - url: http://media-service:7003
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/MediaStatus'
+            default: FLAGGED
+        - name: ownerId
+          in: query
+          required: false
+          description: Solo medios de este dueño (n8n `wf-03` cuenta flags del mismo autor; D15).
+          schema:
+            type: string
+            format: uuid
+          example: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+        - name: since
+          in: query
+          required: false
+          description: Solo medios cuyo estado cambió desde este instante (UTC), p. ej. últimas 24 h.
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-13T11:00:00Z'
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de medios con moderación.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModeratedMediaPage'
+              examples:
+                cola:
+                  summary: Un medio marcado
+                  value:
+                    items:
+                      - id: 0192f2d1-3e4f-7a50-8b61-c72d83e94fa0
+                        ownerId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                        kind: IMAGE
+                        purpose: POST
+                        mimeType: image/png
+                        sizeBytes: 1048576
+                        durationSeconds: null
+                        status: FLAGGED
+                        url: http://minio.bandada.localhost/bandada-media/u/0192f2d1.png?X-Amz-Signature=abc123
+                        thumbnailUrl: http://minio.bandada.localhost/bandada-media/u/0192f2d1-thumb.webp?X-Amz-Signature=def456
+                        tags: [meme]
+                        ocrText: null
+                        createdAt: '2026-10-14T11:00:00Z'
+                        updatedAt: '2026-10-14T11:00:08Z'
+                        moderationResults:
+                          - model: nsfw-classifier
+                            modelVersion: 1.2.0
+                            labels: [suggestive]
+                            scores:
+                              nsfw: 0.71
+                              safe: 0.29
+                            decision: REVIEW
+                            frameIndex: null
+                            createdAt: '2026-10-14T11:00:07Z'
+                        finalDecision: null
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+  /internal/v1/media/urls:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: getMediaUrls
+      summary: Obtener URLs prefirmadas en lote (interno)
+      description: |
+        Resuelve en una sola llamada las URLs prefirmadas (15 min) de varios medios, para que
+        `social-service` arme el feed y los posts (UC-06), `events-service` la portada de eventos
+        (UC-11) y `admin-gateway` las vistas previas de moderación (UC-18) (D15). Los ids
+        inexistentes se omiten del resultado; `url`/`thumbnailUrl` son `null` si el medio no está
+        `APPROVED` (salvo que la llamada venga de `admin-gateway` con `includeUnapproved=true`).
+        Esta ruta concreta tiene prioridad sobre `/internal/v1/media/{mediaId}`.
+      servers:
+        - url: http://media-service:7003
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          description: Ids de medios separados por coma (máx. 50).
+          style: form
+          explode: false
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 50
+            items:
+              type: string
+              format: uuid
+          example: [0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d, 0192f2d1-3e4f-7a50-8b61-c72d83e94fa0]
+        - name: includeUnapproved
+          in: query
+          required: false
+          description: Si `true`, también firma URLs de medios no aprobados (solo para moderación).
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: URLs de los medios encontrados.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaUrlList'
+              examples:
+                lote:
+                  summary: Un medio aprobado y uno en revisión
+                  value:
+                    items:
+                      - mediaId: 0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d
+                        kind: IMAGE
+                        purpose: POST
+                        status: APPROVED
+                        url: http://minio.bandada.localhost/bandada-media/u/0192f29f.jpg?X-Amz-Signature=abc123
+                        thumbnailUrl: http://minio.bandada.localhost/bandada-media/u/0192f29f-thumb.webp?X-Amz-Signature=def456
+                        expiresAt: '2026-10-14T15:19:05Z'
+                      - mediaId: 0192f2d1-3e4f-7a50-8b61-c72d83e94fa0
+                        kind: IMAGE
+                        purpose: POST
+                        status: FLAGGED
+                        url: null
+                        thumbnailUrl: null
+                        expiresAt: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+  /internal/v1/media/{mediaId}:
+    parameters:
+      - $ref: '#/components/parameters/MediaId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: getMediaInternal
+      summary: Consultar un medio con su moderación (interno)
+      description: |
+        Medio en cualquier estado, con URL prefirmada (15 min) aunque no esté aprobado, resultados
+        de moderación y decisión humana (D15). Lo usan `admin-gateway` para la vista previa de
+        moderación (UC-18), `social-service` para validar el avatar (UC-04) y `events-service` para
+        validar la portada de un evento (UC-11, `purpose = EVENT_COVER`).
+      servers:
+        - url: http://media-service:7003
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      responses:
+        '200':
+          description: Medio con su moderación.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModeratedMedia'
+              examples:
+                marcado:
+                  summary: Portada de evento en revisión
+                  value:
+                    id: 0192f2d1-3e4f-7a50-8b61-c72d83e94fa0
+                    ownerId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                    kind: IMAGE
+                    purpose: EVENT_COVER
+                    mimeType: image/png
+                    sizeBytes: 1048576
+                    durationSeconds: null
+                    status: FLAGGED
+                    url: http://minio.bandada.localhost/bandada-media/u/0192f2d1.png?X-Amz-Signature=abc123
+                    thumbnailUrl: http://minio.bandada.localhost/bandada-media/u/0192f2d1-thumb.webp?X-Amz-Signature=def456
+                    tags: [evento]
+                    ocrText: Feria de Ingeniería 2026
+                    createdAt: '2026-10-14T11:00:00Z'
+                    updatedAt: '2026-10-14T11:00:08Z'
+                    moderationResults:
+                      - model: violence-classifier
+                        modelVersion: 1.0.3
+                        labels: [crowd]
+                        scores:
+                          violence: 0.55
+                          safe: 0.45
+                        decision: REVIEW
+                        frameIndex: null
+                        createdAt: '2026-10-14T11:00:07Z'
+                    finalDecision: null
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /internal/v1/media/{mediaId}/decision:
+    parameters:
+      - $ref: '#/components/parameters/MediaId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [internal]
+      operationId: decideMedia
+      summary: Decidir sobre un medio marcado (interno)
+      description: |
+        Decisión humana de moderación sobre un medio `FLAGGED` (UC-18, RF-22): `APPROVE` →
+        `APPROVED` (publica `bandada.media.asset.approved.v1`), `REJECT` → `REJECTED` (publica
+        `bandada.media.asset.rejected.v1`). Repetir la misma decisión responde `200` sin cambios.
+      servers:
+        - url: http://media-service:7003
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/ActorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecideMediaRequest'
+            examples:
+              rechazar:
+                summary: Rechazar
+                value:
+                  decision: REJECT
+                  note: Contenido sexual explícito.
+      responses:
+        '200':
+          description: Decisión aplicada.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModeratedMedia'
+              examples:
+                rechazado:
+                  summary: Medio rechazado
+                  value:
+                    id: 0192f2d1-3e4f-7a50-8b61-c72d83e94fa0
+                    ownerId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                    kind: IMAGE
+                    purpose: POST
+                    mimeType: image/png
+                    sizeBytes: 1048576
+                    durationSeconds: null
+                    status: REJECTED
+                    url: null
+                    thumbnailUrl: null
+                    tags: [meme]
+                    ocrText: null
+                    createdAt: '2026-10-14T11:00:00Z'
+                    updatedAt: '2026-10-14T16:00:00Z'
+                    moderationResults: []
+                    finalDecision:
+                      decision: REJECT
+                      note: Contenido sexual explícito.
+                      decidedBy: 0192f1a2-6e7f-7a81-9b23-a4b5c6d7e8f9
+                      decidedAt: '2026-10-14T16:00:00Z'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          description: El medio no está marcado para revisión o ya tiene la decisión contraria (`MEDIA_NOT_FLAGGED`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                noMarcado:
+                  summary: No está en revisión
+                  value:
+                    type: https://api.bandadau.com/problems/media-not-flagged
+                    title: Medio no está en revisión
+                    status: 409
+                    detail: Este medio ya fue resuelto o no fue marcado para revisión.
+                    instance: /internal/v1/media/0192f2d1-3e4f-7a50-8b61-c72d83e94fa0/decision
+                    code: MEDIA_NOT_FLAGGED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+components:
+  parameters:
+    MediaId:
+      name: mediaId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d
+
+  examples:
+    MediaApproved:
+      summary: Imagen aprobada con etiquetas y OCR
+      value:
+        id: 0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d
+        ownerId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+        kind: IMAGE
+        purpose: POST
+        mimeType: image/jpeg
+        sizeBytes: 2457600
+        durationSeconds: null
+        status: APPROVED
+        url: http://minio.bandada.localhost/bandada-media/u/0192f29f.jpg?X-Amz-Signature=abc123
+        thumbnailUrl: http://minio.bandada.localhost/bandada-media/u/0192f29f-thumb.webp?X-Amz-Signature=def456
+        tags: [apuntes]
+        ocrText: 'Integrales por partes: ∫u dv = uv − ∫v du'
+        createdAt: '2026-10-14T12:59:30Z'
+        updatedAt: '2026-10-14T13:00:04Z'
+
+  schemas:
+    MediaKind:
+      type: string
+      enum: [IMAGE, VIDEO]
+    MediaStatus:
+      type: string
+      enum: [PENDING_UPLOAD, PROCESSING, APPROVED, FLAGGED, REJECTED]
+    MediaPurpose:
+      type: string
+      enum: [POST, AVATAR, EVENT_COVER]
+      description: Uso del medio (`MediaPurpose`, ADR-0016).
+    ModerationDecision:
+      type: string
+      enum: [ALLOW, REVIEW, BLOCK]
+      description: Decisión automática del modelo.
+    HumanDecision:
+      type: string
+      enum: [APPROVE, REJECT]
+      description: Decisión del moderador.
+
+    CreateUploadRequest:
+      type: object
+      required: [kind, mimeType, sizeBytes]
+      properties:
+        kind:
+          $ref: '#/components/schemas/MediaKind'
+        purpose:
+          allOf:
+            - $ref: '#/components/schemas/MediaPurpose'
+          default: POST
+          description: Uso del medio. `AVATAR` y `EVENT_COVER` solo admiten `IMAGE` (si no, `422 UNSUPPORTED_MEDIA_TYPE`).
+        mimeType:
+          type: string
+          enum: [image/jpeg, image/png, image/webp, image/heic, video/mp4, video/quicktime]
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 52428800
+          description: Tamaño en bytes. Video ≤ 50 MB (52 428 800); imagen ≤ 10 MB (10 485 760) (RF-06, ADR-0016).
+        durationSeconds:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 60
+          description: Obligatorio para `VIDEO` (≤ 60 s).
+        fileName:
+          type: string
+          maxLength: 255
+      allOf:
+        - if:
+            properties:
+              kind:
+                const: VIDEO
+          then:
+            required: [durationSeconds]
+        - if:
+            properties:
+              kind:
+                const: IMAGE
+          then:
+            properties:
+              sizeBytes:
+                maximum: 10485760
+
+    UploadTicket:
+      type: object
+      required: [mediaId, uploadUrl, uploadMethod, uploadHeaders, expiresIn]
+      properties:
+        mediaId:
+          type: string
+          format: uuid
+        uploadUrl:
+          type: string
+          format: uri
+          description: URL prefirmada de S3/MinIO para `PUT`.
+        uploadMethod:
+          type: string
+          const: PUT
+        uploadHeaders:
+          type: object
+          description: Cabeceras que el cliente debe enviar en el `PUT` (forman parte de la firma).
+          additionalProperties:
+            type: string
+        expiresIn:
+          type: integer
+          description: Segundos de validez de `uploadUrl` (900).
+
+    MediaAsset:
+      type: object
+      required: [id, ownerId, kind, purpose, mimeType, sizeBytes, durationSeconds, status, url, thumbnailUrl, tags, ocrText, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        ownerId:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/MediaKind'
+        purpose:
+          $ref: '#/components/schemas/MediaPurpose'
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+        durationSeconds:
+          type: [number, 'null']
+        status:
+          $ref: '#/components/schemas/MediaStatus'
+        url:
+          type: [string, 'null']
+          format: uri
+          description: URL prefirmada de lectura (15 min).
+        thumbnailUrl:
+          type: [string, 'null']
+          format: uri
+        tags:
+          type: array
+          items:
+            type: string
+          description: Etiquetas de `clip-zero-shot` (`apuntes`, `evento`, `deporte`, `meme`…).
+        ocrText:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ModerationResult:
+      type: object
+      required: [model, modelVersion, labels, scores, decision, frameIndex, createdAt]
+      properties:
+        model:
+          type: string
+          examples: [nsfw-classifier]
+        modelVersion:
+          type: string
+        labels:
+          type: array
+          items:
+            type: string
+        scores:
+          type: object
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 1
+        decision:
+          $ref: '#/components/schemas/ModerationDecision'
+        frameIndex:
+          type: [integer, 'null']
+          description: Índice del frame analizado (solo video).
+        createdAt:
+          type: string
+          format: date-time
+
+    ModeratedMedia:
+      allOf:
+        - $ref: '#/components/schemas/MediaAsset'
+        - type: object
+          required: [moderationResults, finalDecision]
+          properties:
+            moderationResults:
+              type: array
+              items:
+                $ref: '#/components/schemas/ModerationResult'
+            finalDecision:
+              oneOf:
+                - type: object
+                  required: [decision, decidedBy, decidedAt]
+                  properties:
+                    decision:
+                      $ref: '#/components/schemas/HumanDecision'
+                    note:
+                      type: [string, 'null']
+                    decidedBy:
+                      type: string
+                      format: uuid
+                    decidedAt:
+                      type: string
+                      format: date-time
+                - type: 'null'
+
+    ModeratedMediaPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ModeratedMedia'
+
+    MediaUrl:
+      type: object
+      required: [mediaId, kind, purpose, status, url, thumbnailUrl, expiresAt]
+      properties:
+        mediaId:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/MediaKind'
+        purpose:
+          $ref: '#/components/schemas/MediaPurpose'
+        status:
+          $ref: '#/components/schemas/MediaStatus'
+        url:
+          type: [string, 'null']
+          format: uri
+        thumbnailUrl:
+          type: [string, 'null']
+          format: uri
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: Vencimiento de las URLs prefirmadas (15 min).
+
+    MediaUrlList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MediaUrl'
+
+    DecideMediaRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          $ref: '#/components/schemas/HumanDecision'
+        note:
+          type: string
+          maxLength: 500
+
+  securitySchemes:
+    bearerAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/bearerAuth'
+    serviceAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/serviceAuth'

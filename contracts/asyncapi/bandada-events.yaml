@@ -1,0 +1,5395 @@
+# Generado a partir del catálogo (catalogo-servicios.md §5) y D2/D12/D14. Editar con cuidado:
+# toda routing key nueva debe agregarse también a sus canales de cola.
+asyncapi: 3.0.0
+id: urn:com:bandadau:events
+info:
+  title: Bandada U — Catálogo de eventos y comandos (RabbitMQ)
+  version: 1.1.0
+  description: |
+    Contrato asíncrono de **Bandada U** (fuente: `bandadau-docs/docs/03-arquitectura/catalogo-servicios.md` §5, `decisiones-clave.md` D2/D3/D12/D14).
+
+    ## Topología
+    | Exchange | Tipo | Uso |
+    |---|---|---|
+    | `bandada.events` | topic, durable | Eventos de dominio y respuestas de la SAGA (`bandada.<contexto>.<entidad>.<verbo-pasado>.v<n>`) |
+    | `bandada.commands` | topic, durable | Comandos dirigidos (`bandada.<contexto>.cmd.<verbo>.v<n>`) |
+    | `bandada.dlx` | topic, durable | Dead letters |
+
+    Cada **canal de routing key** (`address` = routing key) describe un mensaje publicado en su exchange; cada **canal de cola** (`address` = nombre de cola) describe lo que recibe un consumidor según sus bindings.
+
+    ## Sobre CloudEvents 1.0 (modo estructurado)
+    Cuerpo JSON con `content-type: application/cloudevents+json`: `specversion`, `id` (UUIDv7), `source` (`/services/<servicio>`), `type` (= routing key), `time`, `subject`, `datacontenttype: application/json`, `data` y extensiones `correlationid`, `causationid`, `sagaid` (obligatoria en comandos y respuestas de la SAGA) y `traceparent` (W3C). Propiedades AMQP: `message_id` = `id`, `correlation_id` = `correlationid`, `type` = `type`, `content_type` = `application/cloudevents+json`, `delivery_mode` = 2 (persistente).
+
+    ## Garantías
+    - Publicación con **outbox** transaccional y *publisher confirms*; entrega *at-least-once*.
+    - Consumo con **inbox** (`processed_messages` / `ConditionExpression`) deduplicando por `id`; ack manual.
+    - Comandos con `idempotencyKey = <sagaId>:<step>`; los receptores responden lo mismo ante repeticiones.
+    - Reintentos: 3 con backoff exponencial (1 s, 5 s, 25 s) vía *retry* en el consumidor; luego `nack(requeue=false)` → DLX.
+    - Consumidores toleran campos nuevos; cambios incompatibles → nueva versión `.v2` publicada en paralelo.
+
+    ## Dead letters (`bandada.dlx`)
+    Cada cola declara `x-dead-letter-exchange: bandada.dlx` y `x-dead-letter-routing-key: <nombre-de-cola>`. Por cada cola existe `<nombre-de-cola>.dlq` (durable, `x-queue-type: quorum`) enlazada a `bandada.dlx` con routing key `<nombre-de-cola>`. Los mensajes conservan la cabecera `x-death`. El agente de monitoreo (`get_service_health`) alerta `DLQ_BACKLOG` si alguna DLQ tiene mensajes; se re-encolan manualmente desde la UI de RabbitMQ tras corregir la causa.
+
+    ## Propuestas (`x-proposal: true`)
+    - Valor `AUTHOR_SUSPENDED` en `PostHiddenData.reason` (no figura en `HiddenReason` del modelo de dominio).
+
+    ## Changelog
+    - 1.1.0 (2026-10-14): ADR-0016/D15 — eventos `bandada.ticketing.ticket-void-failed.v1`,
+      `bandada.social.comment.hidden.v1` y `bandada.social.post.removed.v1`; motivos `SAGA_ABORTED`
+      (`credits-debit-failed`) y `ALREADY_VOIDED` (`ticket-issue-failed`); `credits-refunded` con
+      `amountCredits: 0` (*tombstone*); cola `admin-gateway.subscriptions.<instanceId>`; binding
+      `bandada.events.event.cancelled.v1` en `notification-service.events`; `user.reactivated.v1`,
+      `preferences-changed` y los enums dejan de ser propuestas; enums alineados con el modelo
+      (`READY`, `MODERATION_ESCALATION`, `RegistrationFailureReason`, `ReportReason`, `HiddenReason`).
+    - 1.0.0 (2026-10-14): versión inicial (D12 + D2 + D14).
+  contact:
+    name: Grupo 24 — Ingeniería de Software II
+  tags:
+  - name: identity-service
+  - name: social-service
+  - name: media-service
+  - name: events-service
+  - name: wallet-service
+  - name: ticketing-service
+  - name: notification-service
+  - name: insights-service
+  - name: n8n
+  - name: admin-gateway
+  - name: saga
+defaultContentType: application/cloudevents+json
+servers:
+  rabbitmq-dev:
+    host: rabbitmq:5672
+    protocol: amqp
+    protocolVersion: 0.9.1
+    pathname: /
+    title: RabbitMQ local (Docker Compose)
+    description: 'Desde el host: `localhost:5672`; UI de management en `:15672`. vhost `/`.'
+    security:
+    - $ref: '#/components/securitySchemes/rabbitUserPassword'
+  rabbitmq-prod:
+    host: mq.internal.bandadau.com:5671
+    protocol: amqps
+    protocolVersion: 0.9.1
+    pathname: /
+    title: RabbitMQ producción (red privada, TLS)
+    security:
+    - $ref: '#/components/securitySchemes/rabbitUserPassword'
+channels:
+  identityUserRegisteredV1:
+    address: bandada.identity.user.registered.v1
+    title: Usuario registrado y verificado
+    description: Routing key `bandada.identity.user.registered.v1` en el exchange `bandada.events`.
+    messages:
+      IdentityUserRegisteredV1:
+        $ref: '#/components/messages/IdentityUserRegisteredV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  identityUserRoleChangedV1:
+    address: bandada.identity.user.role-changed.v1
+    title: Roles de usuario cambiados
+    description: Routing key `bandada.identity.user.role-changed.v1` en el exchange `bandada.events`.
+    messages:
+      IdentityUserRoleChangedV1:
+        $ref: '#/components/messages/IdentityUserRoleChangedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  identityUserSuspendedV1:
+    address: bandada.identity.user.suspended.v1
+    title: Usuario suspendido
+    description: Routing key `bandada.identity.user.suspended.v1` en el exchange `bandada.events`.
+    messages:
+      IdentityUserSuspendedV1:
+        $ref: '#/components/messages/IdentityUserSuspendedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  identityUserReactivatedV1:
+    address: bandada.identity.user.reactivated.v1
+    title: Usuario reactivado
+    description: Routing key `bandada.identity.user.reactivated.v1` en el exchange `bandada.events`.
+    messages:
+      IdentityUserReactivatedV1:
+        $ref: '#/components/messages/IdentityUserReactivatedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  identityUserPreferencesChangedV1:
+    address: bandada.identity.user.preferences-changed.v1
+    title: Preferencias de usuario cambiadas
+    description: Routing key `bandada.identity.user.preferences-changed.v1` en el exchange `bandada.events`.
+    messages:
+      IdentityUserPreferencesChangedV1:
+        $ref: '#/components/messages/IdentityUserPreferencesChangedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  socialPostCreatedV1:
+    address: bandada.social.post.created.v1
+    title: Post creado
+    description: Routing key `bandada.social.post.created.v1` en el exchange `bandada.events`.
+    messages:
+      SocialPostCreatedV1:
+        $ref: '#/components/messages/SocialPostCreatedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  socialPostPublishedV1:
+    address: bandada.social.post.published.v1
+    title: Post publicado
+    description: Routing key `bandada.social.post.published.v1` en el exchange `bandada.events`.
+    messages:
+      SocialPostPublishedV1:
+        $ref: '#/components/messages/SocialPostPublishedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  socialPostHiddenV1:
+    address: bandada.social.post.hidden.v1
+    title: Post ocultado
+    description: Routing key `bandada.social.post.hidden.v1` en el exchange `bandada.events`.
+    messages:
+      SocialPostHiddenV1:
+        $ref: '#/components/messages/SocialPostHiddenV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  socialPostDeletedV1:
+    address: bandada.social.post.deleted.v1
+    title: Post eliminado
+    description: Routing key `bandada.social.post.deleted.v1` en el exchange `bandada.events`.
+    messages:
+      SocialPostDeletedV1:
+        $ref: '#/components/messages/SocialPostDeletedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  socialPostRemovedV1:
+    address: bandada.social.post.removed.v1
+    title: Post retirado por moderación
+    description: Routing key `bandada.social.post.removed.v1` en el exchange `bandada.events`.
+    messages:
+      SocialPostRemovedV1:
+        $ref: '#/components/messages/SocialPostRemovedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  socialCommentCreatedV1:
+    address: bandada.social.comment.created.v1
+    title: Comentario creado
+    description: Routing key `bandada.social.comment.created.v1` en el exchange `bandada.events`.
+    messages:
+      SocialCommentCreatedV1:
+        $ref: '#/components/messages/SocialCommentCreatedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  socialCommentHiddenV1:
+    address: bandada.social.comment.hidden.v1
+    title: Comentario ocultado
+    description: Routing key `bandada.social.comment.hidden.v1` en el exchange `bandada.events`.
+    messages:
+      SocialCommentHiddenV1:
+        $ref: '#/components/messages/SocialCommentHiddenV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  socialReactionSetV1:
+    address: bandada.social.reaction.set.v1
+    title: Reacción establecida
+    description: Routing key `bandada.social.reaction.set.v1` en el exchange `bandada.events`.
+    messages:
+      SocialReactionSetV1:
+        $ref: '#/components/messages/SocialReactionSetV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  socialFollowCreatedV1:
+    address: bandada.social.follow.created.v1
+    title: Nuevo seguidor
+    description: Routing key `bandada.social.follow.created.v1` en el exchange `bandada.events`.
+    messages:
+      SocialFollowCreatedV1:
+        $ref: '#/components/messages/SocialFollowCreatedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  socialGroupJoinRequestedV1:
+    address: bandada.social.group.join-requested.v1
+    title: Solicitud de ingreso a grupo
+    description: Routing key `bandada.social.group.join-requested.v1` en el exchange `bandada.events`.
+    messages:
+      SocialGroupJoinRequestedV1:
+        $ref: '#/components/messages/SocialGroupJoinRequestedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  socialContentReportedV1:
+    address: bandada.social.content.reported.v1
+    title: Contenido denunciado
+    description: Routing key `bandada.social.content.reported.v1` en el exchange `bandada.events`.
+    messages:
+      SocialContentReportedV1:
+        $ref: '#/components/messages/SocialContentReportedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  mediaAssetApprovedV1:
+    address: bandada.media.asset.approved.v1
+    title: Medio aprobado
+    description: Routing key `bandada.media.asset.approved.v1` en el exchange `bandada.events`.
+    messages:
+      MediaAssetApprovedV1:
+        $ref: '#/components/messages/MediaAssetApprovedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  mediaAssetFlaggedV1:
+    address: bandada.media.asset.flagged.v1
+    title: Medio marcado para revisión
+    description: Routing key `bandada.media.asset.flagged.v1` en el exchange `bandada.events`.
+    messages:
+      MediaAssetFlaggedV1:
+        $ref: '#/components/messages/MediaAssetFlaggedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  mediaAssetRejectedV1:
+    address: bandada.media.asset.rejected.v1
+    title: Medio rechazado
+    description: Routing key `bandada.media.asset.rejected.v1` en el exchange `bandada.events`.
+    messages:
+      MediaAssetRejectedV1:
+        $ref: '#/components/messages/MediaAssetRejectedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  eventsEventPublishedV1:
+    address: bandada.events.event.published.v1
+    title: Evento publicado
+    description: Routing key `bandada.events.event.published.v1` en el exchange `bandada.events`.
+    messages:
+      EventsEventPublishedV1:
+        $ref: '#/components/messages/EventsEventPublishedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  eventsEventCancelledV1:
+    address: bandada.events.event.cancelled.v1
+    title: Evento cancelado
+    description: Routing key `bandada.events.event.cancelled.v1` en el exchange `bandada.events`.
+    messages:
+      EventsEventCancelledV1:
+        $ref: '#/components/messages/EventsEventCancelledV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  eventsRegistrationConfirmedV1:
+    address: bandada.events.registration.confirmed.v1
+    title: Inscripción confirmada
+    description: Routing key `bandada.events.registration.confirmed.v1` en el exchange `bandada.events`.
+    messages:
+      EventsRegistrationConfirmedV1:
+        $ref: '#/components/messages/EventsRegistrationConfirmedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  eventsRegistrationFailedV1:
+    address: bandada.events.registration.failed.v1
+    title: Inscripción fallida
+    description: Routing key `bandada.events.registration.failed.v1` en el exchange `bandada.events`.
+    messages:
+      EventsRegistrationFailedV1:
+        $ref: '#/components/messages/EventsRegistrationFailedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  eventsRegistrationCancelledV1:
+    address: bandada.events.registration.cancelled.v1
+    title: Inscripción cancelada
+    description: Routing key `bandada.events.registration.cancelled.v1` en el exchange `bandada.events`.
+    messages:
+      EventsRegistrationCancelledV1:
+        $ref: '#/components/messages/EventsRegistrationCancelledV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  walletTopupPaidV1:
+    address: bandada.wallet.topup.paid.v1
+    title: Recarga pagada
+    description: Routing key `bandada.wallet.topup.paid.v1` en el exchange `bandada.events`.
+    messages:
+      WalletTopupPaidV1:
+        $ref: '#/components/messages/WalletTopupPaidV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  walletCreditsDebitedV1:
+    address: bandada.wallet.credits-debited.v1
+    title: Créditos debitados (respuesta SAGA)
+    description: Routing key `bandada.wallet.credits-debited.v1` en el exchange `bandada.events`.
+    messages:
+      WalletCreditsDebitedV1:
+        $ref: '#/components/messages/WalletCreditsDebitedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  walletCreditsDebitFailedV1:
+    address: bandada.wallet.credits-debit-failed.v1
+    title: Débito fallido (respuesta SAGA)
+    description: Routing key `bandada.wallet.credits-debit-failed.v1` en el exchange `bandada.events`.
+    messages:
+      WalletCreditsDebitFailedV1:
+        $ref: '#/components/messages/WalletCreditsDebitFailedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  walletCreditsRefundedV1:
+    address: bandada.wallet.credits-refunded.v1
+    title: Créditos reembolsados (respuesta SAGA)
+    description: Routing key `bandada.wallet.credits-refunded.v1` en el exchange `bandada.events`.
+    messages:
+      WalletCreditsRefundedV1:
+        $ref: '#/components/messages/WalletCreditsRefundedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  ticketingTicketIssuedV1:
+    address: bandada.ticketing.ticket-issued.v1
+    title: Ticket emitido (respuesta SAGA)
+    description: Routing key `bandada.ticketing.ticket-issued.v1` en el exchange `bandada.events`.
+    messages:
+      TicketingTicketIssuedV1:
+        $ref: '#/components/messages/TicketingTicketIssuedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  ticketingTicketIssueFailedV1:
+    address: bandada.ticketing.ticket-issue-failed.v1
+    title: Emisión de ticket fallida (respuesta SAGA)
+    description: Routing key `bandada.ticketing.ticket-issue-failed.v1` en el exchange `bandada.events`.
+    messages:
+      TicketingTicketIssueFailedV1:
+        $ref: '#/components/messages/TicketingTicketIssueFailedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  ticketingTicketVoidedV1:
+    address: bandada.ticketing.ticket-voided.v1
+    title: Ticket anulado (respuesta SAGA)
+    description: Routing key `bandada.ticketing.ticket-voided.v1` en el exchange `bandada.events`.
+    messages:
+      TicketingTicketVoidedV1:
+        $ref: '#/components/messages/TicketingTicketVoidedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  ticketingTicketVoidFailedV1:
+    address: bandada.ticketing.ticket-void-failed.v1
+    title: Anulación de ticket fallida (respuesta SAGA)
+    description: Routing key `bandada.ticketing.ticket-void-failed.v1` en el exchange `bandada.events`.
+    messages:
+      TicketingTicketVoidFailedV1:
+        $ref: '#/components/messages/TicketingTicketVoidFailedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  ticketingTicketUsedV1:
+    address: bandada.ticketing.ticket.used.v1
+    title: Ticket usado
+    description: Routing key `bandada.ticketing.ticket.used.v1` en el exchange `bandada.events`.
+    messages:
+      TicketingTicketUsedV1:
+        $ref: '#/components/messages/TicketingTicketUsedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  insightsAlertRaisedV1:
+    address: bandada.insights.alert.raised.v1
+    title: Alerta generada
+    description: Routing key `bandada.insights.alert.raised.v1` en el exchange `bandada.events`.
+    messages:
+      InsightsAlertRaisedV1:
+        $ref: '#/components/messages/InsightsAlertRaisedV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  insightsReportReadyV1:
+    address: bandada.insights.report.ready.v1
+    title: Reporte listo
+    description: Routing key `bandada.insights.report.ready.v1` en el exchange `bandada.events`.
+    messages:
+      InsightsReportReadyV1:
+        $ref: '#/components/messages/InsightsReportReadyV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.events
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  walletCmdDebitCreditsV1:
+    address: bandada.wallet.cmd.debit-credits.v1
+    title: 'Comando: debitar créditos'
+    description: Routing key `bandada.wallet.cmd.debit-credits.v1` en el exchange `bandada.commands`.
+    messages:
+      WalletCmdDebitCreditsV1:
+        $ref: '#/components/messages/WalletCmdDebitCreditsV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.commands
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  walletCmdRefundCreditsV1:
+    address: bandada.wallet.cmd.refund-credits.v1
+    title: 'Comando: reembolsar créditos'
+    description: Routing key `bandada.wallet.cmd.refund-credits.v1` en el exchange `bandada.commands`.
+    messages:
+      WalletCmdRefundCreditsV1:
+        $ref: '#/components/messages/WalletCmdRefundCreditsV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.commands
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  ticketingCmdIssueTicketV1:
+    address: bandada.ticketing.cmd.issue-ticket.v1
+    title: 'Comando: emitir ticket'
+    description: Routing key `bandada.ticketing.cmd.issue-ticket.v1` en el exchange `bandada.commands`.
+    messages:
+      TicketingCmdIssueTicketV1:
+        $ref: '#/components/messages/TicketingCmdIssueTicketV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.commands
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  ticketingCmdVoidTicketV1:
+    address: bandada.ticketing.cmd.void-ticket.v1
+    title: 'Comando: anular ticket'
+    description: Routing key `bandada.ticketing.cmd.void-ticket.v1` en el exchange `bandada.commands`.
+    messages:
+      TicketingCmdVoidTicketV1:
+        $ref: '#/components/messages/TicketingCmdVoidTicketV1'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.commands
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  qEventsServiceSagaRepliesQueue:
+    address: events-service.saga-replies
+    title: Cola events-service.saga-replies
+    description: |-
+      Respuestas de la SAGA para `RegistrationSagaOrchestrator` (inbox `processed_messages`).
+
+      Dueño: `events-service`. Bindings sobre `bandada.events`: `bandada.wallet.credits-debited.v1`, `bandada.wallet.credits-debit-failed.v1`, `bandada.wallet.credits-refunded.v1`, `bandada.ticketing.ticket-issued.v1`, `bandada.ticketing.ticket-issue-failed.v1`, `bandada.ticketing.ticket-voided.v1` y `bandada.ticketing.ticket-void-failed.v1` (respuesta de fallo de `void-ticket`, D15/ADR-0016; pendiente de reflejar en el catálogo §5). DLQ: `events-service.saga-replies.dlq`.
+    messages:
+      WalletCreditsDebitedV1:
+        $ref: '#/components/messages/WalletCreditsDebitedV1'
+      WalletCreditsDebitFailedV1:
+        $ref: '#/components/messages/WalletCreditsDebitFailedV1'
+      WalletCreditsRefundedV1:
+        $ref: '#/components/messages/WalletCreditsRefundedV1'
+      TicketingTicketIssuedV1:
+        $ref: '#/components/messages/TicketingTicketIssuedV1'
+      TicketingTicketIssueFailedV1:
+        $ref: '#/components/messages/TicketingTicketIssueFailedV1'
+      TicketingTicketVoidedV1:
+        $ref: '#/components/messages/TicketingTicketVoidedV1'
+      TicketingTicketVoidFailedV1:
+        $ref: '#/components/messages/TicketingTicketVoidFailedV1'
+    x-owner: events-service
+    x-bindings:
+    - exchange: bandada.events
+      routingKey: bandada.wallet.credits-debited.v1
+    - exchange: bandada.events
+      routingKey: bandada.wallet.credits-debit-failed.v1
+    - exchange: bandada.events
+      routingKey: bandada.wallet.credits-refunded.v1
+    - exchange: bandada.events
+      routingKey: bandada.ticketing.ticket-issued.v1
+    - exchange: bandada.events
+      routingKey: bandada.ticketing.ticket-issue-failed.v1
+    - exchange: bandada.events
+      routingKey: bandada.ticketing.ticket-voided.v1
+    - exchange: bandada.events
+      routingKey: bandada.ticketing.ticket-void-failed.v1
+    x-queue-arguments:
+      x-queue-type: quorum
+      x-dead-letter-exchange: bandada.dlx
+      x-dead-letter-routing-key: events-service.saga-replies
+      x-delivery-limit: 4
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: events-service.saga-replies
+          durable: true
+          exclusive: false
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  qWalletServiceCommandsQueue:
+    address: wallet-service.commands
+    title: Cola wallet-service.commands
+    description: |-
+      Comandos dirigidos a la billetera.
+
+      Dueño: `wallet-service`. Bindings sobre `bandada.commands`: `bandada.wallet.cmd.#`. DLQ: `wallet-service.commands.dlq`.
+    messages:
+      WalletCmdDebitCreditsV1:
+        $ref: '#/components/messages/WalletCmdDebitCreditsV1'
+      WalletCmdRefundCreditsV1:
+        $ref: '#/components/messages/WalletCmdRefundCreditsV1'
+    x-owner: wallet-service
+    x-bindings:
+    - exchange: bandada.commands
+      routingKey: bandada.wallet.cmd.#
+    x-queue-arguments:
+      x-queue-type: quorum
+      x-dead-letter-exchange: bandada.dlx
+      x-dead-letter-routing-key: wallet-service.commands
+      x-delivery-limit: 4
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: wallet-service.commands
+          durable: true
+          exclusive: false
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  qTicketingServiceCommandsQueue:
+    address: ticketing-service.commands
+    title: Cola ticketing-service.commands
+    description: |-
+      Comandos dirigidos a entradas.
+
+      Dueño: `ticketing-service`. Bindings sobre `bandada.commands`: `bandada.ticketing.cmd.#`. DLQ: `ticketing-service.commands.dlq`.
+    messages:
+      TicketingCmdIssueTicketV1:
+        $ref: '#/components/messages/TicketingCmdIssueTicketV1'
+      TicketingCmdVoidTicketV1:
+        $ref: '#/components/messages/TicketingCmdVoidTicketV1'
+    x-owner: ticketing-service
+    x-bindings:
+    - exchange: bandada.commands
+      routingKey: bandada.ticketing.cmd.#
+    x-queue-arguments:
+      x-queue-type: quorum
+      x-dead-letter-exchange: bandada.dlx
+      x-dead-letter-routing-key: ticketing-service.commands
+      x-delivery-limit: 4
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: ticketing-service.commands
+          durable: true
+          exclusive: false
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  qSocialServiceEventsQueue:
+    address: social-service.events
+    title: Cola social-service.events
+    description: |-
+      Resultado de moderación de medios y ciclo de vida de usuarios (eventos no usados se reconocen y descartan).
+
+      Dueño: `social-service`. Bindings sobre `bandada.events`: `bandada.media.asset.#`, `bandada.identity.user.#`. DLQ: `social-service.events.dlq`.
+    messages:
+      IdentityUserRegisteredV1:
+        $ref: '#/components/messages/IdentityUserRegisteredV1'
+      IdentityUserRoleChangedV1:
+        $ref: '#/components/messages/IdentityUserRoleChangedV1'
+      IdentityUserSuspendedV1:
+        $ref: '#/components/messages/IdentityUserSuspendedV1'
+      IdentityUserReactivatedV1:
+        $ref: '#/components/messages/IdentityUserReactivatedV1'
+      IdentityUserPreferencesChangedV1:
+        $ref: '#/components/messages/IdentityUserPreferencesChangedV1'
+      MediaAssetApprovedV1:
+        $ref: '#/components/messages/MediaAssetApprovedV1'
+      MediaAssetFlaggedV1:
+        $ref: '#/components/messages/MediaAssetFlaggedV1'
+      MediaAssetRejectedV1:
+        $ref: '#/components/messages/MediaAssetRejectedV1'
+    x-owner: social-service
+    x-bindings:
+    - exchange: bandada.events
+      routingKey: bandada.media.asset.#
+    - exchange: bandada.events
+      routingKey: bandada.identity.user.#
+    x-queue-arguments:
+      x-queue-type: quorum
+      x-dead-letter-exchange: bandada.dlx
+      x-dead-letter-routing-key: social-service.events
+      x-delivery-limit: 4
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: social-service.events
+          durable: true
+          exclusive: false
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  qMediaServiceEventsQueue:
+    address: media-service.events
+    title: Cola media-service.events
+    description: |-
+      Limpieza de medios de posts eliminados.
+
+      Dueño: `media-service`. Bindings sobre `bandada.events`: `bandada.social.post.deleted.v1`. DLQ: `media-service.events.dlq`.
+    messages:
+      SocialPostDeletedV1:
+        $ref: '#/components/messages/SocialPostDeletedV1'
+    x-owner: media-service
+    x-bindings:
+    - exchange: bandada.events
+      routingKey: bandada.social.post.deleted.v1
+    x-queue-arguments:
+      x-queue-type: quorum
+      x-dead-letter-exchange: bandada.dlx
+      x-dead-letter-routing-key: media-service.events
+      x-delivery-limit: 4
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: media-service.events
+          durable: true
+          exclusive: false
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  qNotificationServiceEventsQueue:
+    address: notification-service.events
+    title: Cola notification-service.events
+    description: |-
+      Origen de notificaciones push/email/in-app.
+
+      Dueño: `notification-service`. Bindings sobre `bandada.events` (catálogo §5, ADR-0016): `bandada.events.registration.#`, `bandada.events.event.cancelled.v1`, `bandada.social.#`, `bandada.wallet.topup.#`, `bandada.insights.alert.#`, `bandada.identity.user.registered.v1`, `bandada.identity.user.preferences-changed.v1`. DLQ: `notification-service.events.dlq`.
+    messages:
+      IdentityUserRegisteredV1:
+        $ref: '#/components/messages/IdentityUserRegisteredV1'
+      IdentityUserPreferencesChangedV1:
+        $ref: '#/components/messages/IdentityUserPreferencesChangedV1'
+      SocialPostCreatedV1:
+        $ref: '#/components/messages/SocialPostCreatedV1'
+      SocialPostPublishedV1:
+        $ref: '#/components/messages/SocialPostPublishedV1'
+      SocialPostHiddenV1:
+        $ref: '#/components/messages/SocialPostHiddenV1'
+      SocialPostDeletedV1:
+        $ref: '#/components/messages/SocialPostDeletedV1'
+      SocialPostRemovedV1:
+        $ref: '#/components/messages/SocialPostRemovedV1'
+      SocialCommentCreatedV1:
+        $ref: '#/components/messages/SocialCommentCreatedV1'
+      SocialCommentHiddenV1:
+        $ref: '#/components/messages/SocialCommentHiddenV1'
+      SocialReactionSetV1:
+        $ref: '#/components/messages/SocialReactionSetV1'
+      SocialFollowCreatedV1:
+        $ref: '#/components/messages/SocialFollowCreatedV1'
+      SocialGroupJoinRequestedV1:
+        $ref: '#/components/messages/SocialGroupJoinRequestedV1'
+      SocialContentReportedV1:
+        $ref: '#/components/messages/SocialContentReportedV1'
+      EventsEventCancelledV1:
+        $ref: '#/components/messages/EventsEventCancelledV1'
+      EventsRegistrationConfirmedV1:
+        $ref: '#/components/messages/EventsRegistrationConfirmedV1'
+      EventsRegistrationFailedV1:
+        $ref: '#/components/messages/EventsRegistrationFailedV1'
+      EventsRegistrationCancelledV1:
+        $ref: '#/components/messages/EventsRegistrationCancelledV1'
+      WalletTopupPaidV1:
+        $ref: '#/components/messages/WalletTopupPaidV1'
+      InsightsAlertRaisedV1:
+        $ref: '#/components/messages/InsightsAlertRaisedV1'
+    x-owner: notification-service
+    x-bindings:
+    - exchange: bandada.events
+      routingKey: bandada.events.registration.#
+    - exchange: bandada.events
+      routingKey: bandada.events.event.cancelled.v1
+    - exchange: bandada.events
+      routingKey: bandada.social.#
+    - exchange: bandada.events
+      routingKey: bandada.wallet.topup.#
+    - exchange: bandada.events
+      routingKey: bandada.insights.alert.#
+    - exchange: bandada.events
+      routingKey: bandada.identity.user.registered.v1
+    - exchange: bandada.events
+      routingKey: bandada.identity.user.preferences-changed.v1
+    x-queue-arguments:
+      x-queue-type: quorum
+      x-dead-letter-exchange: bandada.dlx
+      x-dead-letter-routing-key: notification-service.events
+      x-delivery-limit: 4
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: notification-service.events
+          durable: true
+          exclusive: false
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  qInsightsServiceAnalyticsQueue:
+    address: insights-service.analytics
+    title: Cola insights-service.analytics
+    description: |-
+      Proyección de métricas (`METRIC#<name>`) a partir de todos los eventos de dominio.
+
+      Dueño: `insights-service`. Bindings sobre `bandada.events`: `bandada.#`. DLQ: `insights-service.analytics.dlq`.
+    messages:
+      IdentityUserRegisteredV1:
+        $ref: '#/components/messages/IdentityUserRegisteredV1'
+      IdentityUserRoleChangedV1:
+        $ref: '#/components/messages/IdentityUserRoleChangedV1'
+      IdentityUserSuspendedV1:
+        $ref: '#/components/messages/IdentityUserSuspendedV1'
+      IdentityUserReactivatedV1:
+        $ref: '#/components/messages/IdentityUserReactivatedV1'
+      IdentityUserPreferencesChangedV1:
+        $ref: '#/components/messages/IdentityUserPreferencesChangedV1'
+      SocialPostCreatedV1:
+        $ref: '#/components/messages/SocialPostCreatedV1'
+      SocialPostPublishedV1:
+        $ref: '#/components/messages/SocialPostPublishedV1'
+      SocialPostHiddenV1:
+        $ref: '#/components/messages/SocialPostHiddenV1'
+      SocialPostDeletedV1:
+        $ref: '#/components/messages/SocialPostDeletedV1'
+      SocialPostRemovedV1:
+        $ref: '#/components/messages/SocialPostRemovedV1'
+      SocialCommentCreatedV1:
+        $ref: '#/components/messages/SocialCommentCreatedV1'
+      SocialCommentHiddenV1:
+        $ref: '#/components/messages/SocialCommentHiddenV1'
+      SocialReactionSetV1:
+        $ref: '#/components/messages/SocialReactionSetV1'
+      SocialFollowCreatedV1:
+        $ref: '#/components/messages/SocialFollowCreatedV1'
+      SocialGroupJoinRequestedV1:
+        $ref: '#/components/messages/SocialGroupJoinRequestedV1'
+      SocialContentReportedV1:
+        $ref: '#/components/messages/SocialContentReportedV1'
+      MediaAssetApprovedV1:
+        $ref: '#/components/messages/MediaAssetApprovedV1'
+      MediaAssetFlaggedV1:
+        $ref: '#/components/messages/MediaAssetFlaggedV1'
+      MediaAssetRejectedV1:
+        $ref: '#/components/messages/MediaAssetRejectedV1'
+      EventsEventPublishedV1:
+        $ref: '#/components/messages/EventsEventPublishedV1'
+      EventsEventCancelledV1:
+        $ref: '#/components/messages/EventsEventCancelledV1'
+      EventsRegistrationConfirmedV1:
+        $ref: '#/components/messages/EventsRegistrationConfirmedV1'
+      EventsRegistrationFailedV1:
+        $ref: '#/components/messages/EventsRegistrationFailedV1'
+      EventsRegistrationCancelledV1:
+        $ref: '#/components/messages/EventsRegistrationCancelledV1'
+      WalletTopupPaidV1:
+        $ref: '#/components/messages/WalletTopupPaidV1'
+      WalletCreditsDebitedV1:
+        $ref: '#/components/messages/WalletCreditsDebitedV1'
+      WalletCreditsDebitFailedV1:
+        $ref: '#/components/messages/WalletCreditsDebitFailedV1'
+      WalletCreditsRefundedV1:
+        $ref: '#/components/messages/WalletCreditsRefundedV1'
+      TicketingTicketIssuedV1:
+        $ref: '#/components/messages/TicketingTicketIssuedV1'
+      TicketingTicketIssueFailedV1:
+        $ref: '#/components/messages/TicketingTicketIssueFailedV1'
+      TicketingTicketVoidedV1:
+        $ref: '#/components/messages/TicketingTicketVoidedV1'
+      TicketingTicketVoidFailedV1:
+        $ref: '#/components/messages/TicketingTicketVoidFailedV1'
+      TicketingTicketUsedV1:
+        $ref: '#/components/messages/TicketingTicketUsedV1'
+      InsightsAlertRaisedV1:
+        $ref: '#/components/messages/InsightsAlertRaisedV1'
+      InsightsReportReadyV1:
+        $ref: '#/components/messages/InsightsReportReadyV1'
+    x-owner: insights-service
+    x-bindings:
+    - exchange: bandada.events
+      routingKey: bandada.#
+    x-queue-arguments:
+      x-queue-type: quorum
+      x-dead-letter-exchange: bandada.dlx
+      x-dead-letter-routing-key: insights-service.analytics
+      x-delivery-limit: 4
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: insights-service.analytics
+          durable: true
+          exclusive: false
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  qN8nAutomationQueue:
+    address: n8n.automation
+    title: Cola n8n.automation
+    description: |-
+      Disparadores de workflows n8n (D10).
+
+      Dueño: `n8n`. Bindings sobre `bandada.events`: `bandada.identity.user.registered.v1`, `bandada.events.registration.confirmed.v1`, `bandada.media.asset.flagged.v1`, `bandada.insights.alert.raised.v1`, `bandada.events.event.published.v1`. DLQ: `n8n.automation.dlq`.
+    messages:
+      IdentityUserRegisteredV1:
+        $ref: '#/components/messages/IdentityUserRegisteredV1'
+      MediaAssetFlaggedV1:
+        $ref: '#/components/messages/MediaAssetFlaggedV1'
+      EventsEventPublishedV1:
+        $ref: '#/components/messages/EventsEventPublishedV1'
+      EventsRegistrationConfirmedV1:
+        $ref: '#/components/messages/EventsRegistrationConfirmedV1'
+      InsightsAlertRaisedV1:
+        $ref: '#/components/messages/InsightsAlertRaisedV1'
+    x-owner: n8n
+    x-bindings:
+    - exchange: bandada.events
+      routingKey: bandada.identity.user.registered.v1
+    - exchange: bandada.events
+      routingKey: bandada.events.registration.confirmed.v1
+    - exchange: bandada.events
+      routingKey: bandada.media.asset.flagged.v1
+    - exchange: bandada.events
+      routingKey: bandada.insights.alert.raised.v1
+    - exchange: bandada.events
+      routingKey: bandada.events.event.published.v1
+    x-queue-arguments:
+      x-queue-type: quorum
+      x-dead-letter-exchange: bandada.dlx
+      x-dead-letter-routing-key: n8n.automation
+      x-delivery-limit: 4
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: n8n.automation
+          durable: true
+          exclusive: false
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+  qAdminGatewaySubscriptionsQueue:
+    address: admin-gateway.subscriptions.{instanceId}
+    title: Cola admin-gateway.subscriptions.<instanceId>
+    description: |-
+      Fuente de las subscriptions GraphQL del panel (`alertRaised`, `moderationQueueChanged`, `reportReady`; D11, ADR-0016). Cada réplica de `admin-gateway` declara su **propia** cola exclusiva y *auto-delete* (`instanceId` = id de la réplica, p. ej. hostname del contenedor), de modo que todas las réplicas reciben todos los eventos y los reenvían a sus clientes WebSocket. Al reiniciar la réplica la cola desaparece; no hay DLQ (los eventos perdidos se recuperan con las queries del panel).
+
+      Dueño: `admin-gateway`. Bindings sobre `bandada.events` (catálogo §5): `bandada.media.asset.#`, `bandada.social.content.reported.v1`, `bandada.social.post.hidden.v1`, `bandada.insights.alert.raised.v1`, `bandada.insights.report.ready.v1`.
+    parameters:
+      instanceId:
+        description: Identificador de la réplica de admin-gateway (hostname del contenedor o UUID generado al arrancar).
+        examples:
+        - admin-gateway-7f9c4d
+    messages:
+      MediaAssetApprovedV1:
+        $ref: '#/components/messages/MediaAssetApprovedV1'
+      MediaAssetFlaggedV1:
+        $ref: '#/components/messages/MediaAssetFlaggedV1'
+      MediaAssetRejectedV1:
+        $ref: '#/components/messages/MediaAssetRejectedV1'
+      SocialContentReportedV1:
+        $ref: '#/components/messages/SocialContentReportedV1'
+      SocialPostHiddenV1:
+        $ref: '#/components/messages/SocialPostHiddenV1'
+      InsightsAlertRaisedV1:
+        $ref: '#/components/messages/InsightsAlertRaisedV1'
+      InsightsReportReadyV1:
+        $ref: '#/components/messages/InsightsReportReadyV1'
+    x-owner: admin-gateway
+    x-bindings:
+    - exchange: bandada.events
+      routingKey: bandada.media.asset.#
+    - exchange: bandada.events
+      routingKey: bandada.social.content.reported.v1
+    - exchange: bandada.events
+      routingKey: bandada.social.post.hidden.v1
+    - exchange: bandada.events
+      routingKey: bandada.insights.alert.raised.v1
+    - exchange: bandada.events
+      routingKey: bandada.insights.report.ready.v1
+    x-queue-arguments:
+      x-queue-type: classic
+      x-message-ttl: 60000
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: admin-gateway.subscriptions.{instanceId}
+          durable: false
+          exclusive: true
+          autoDelete: true
+          vhost: /
+        bindingVersion: 0.3.0
+  deadLetterExchange:
+    address: bandada.dlx
+    title: Dead letter exchange
+    description: Exchange `bandada.dlx` (topic, durable). Recibe los mensajes rechazados (`nack` sin requeue), expirados o
+      que superan `x-delivery-limit` en cualquier cola; la routing key es el nombre de la cola de origen y el destino es `<cola>.dlq`.
+      Puede contener cualquier mensaje de este catálogo.
+    x-dlq-queues:
+    - events-service.saga-replies.dlq
+    - wallet-service.commands.dlq
+    - ticketing-service.commands.dlq
+    - social-service.events.dlq
+    - media-service.events.dlq
+    - notification-service.events.dlq
+    - insights-service.analytics.dlq
+    - n8n.automation.dlq
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: bandada.dlx
+          type: topic
+          durable: true
+          autoDelete: false
+          vhost: /
+        bindingVersion: 0.3.0
+operations:
+  publishIdentityUserRegisteredV1:
+    action: send
+    title: identity-service publica bandada.identity.user.registered.v1
+    summary: Usuario registrado y verificado
+    channel:
+      $ref: '#/channels/identityUserRegisteredV1'
+    messages:
+    - $ref: '#/channels/identityUserRegisteredV1/messages/IdentityUserRegisteredV1'
+    tags:
+    - name: identity-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishIdentityUserRoleChangedV1:
+    action: send
+    title: identity-service publica bandada.identity.user.role-changed.v1
+    summary: Roles de usuario cambiados
+    channel:
+      $ref: '#/channels/identityUserRoleChangedV1'
+    messages:
+    - $ref: '#/channels/identityUserRoleChangedV1/messages/IdentityUserRoleChangedV1'
+    tags:
+    - name: identity-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishIdentityUserSuspendedV1:
+    action: send
+    title: identity-service publica bandada.identity.user.suspended.v1
+    summary: Usuario suspendido
+    channel:
+      $ref: '#/channels/identityUserSuspendedV1'
+    messages:
+    - $ref: '#/channels/identityUserSuspendedV1/messages/IdentityUserSuspendedV1'
+    tags:
+    - name: identity-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishIdentityUserReactivatedV1:
+    action: send
+    title: identity-service publica bandada.identity.user.reactivated.v1
+    summary: Usuario reactivado
+    channel:
+      $ref: '#/channels/identityUserReactivatedV1'
+    messages:
+    - $ref: '#/channels/identityUserReactivatedV1/messages/IdentityUserReactivatedV1'
+    tags:
+    - name: identity-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishIdentityUserPreferencesChangedV1:
+    action: send
+    title: identity-service publica bandada.identity.user.preferences-changed.v1
+    summary: Preferencias de usuario cambiadas
+    channel:
+      $ref: '#/channels/identityUserPreferencesChangedV1'
+    messages:
+    - $ref: '#/channels/identityUserPreferencesChangedV1/messages/IdentityUserPreferencesChangedV1'
+    tags:
+    - name: identity-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishSocialPostCreatedV1:
+    action: send
+    title: social-service publica bandada.social.post.created.v1
+    summary: Post creado
+    channel:
+      $ref: '#/channels/socialPostCreatedV1'
+    messages:
+    - $ref: '#/channels/socialPostCreatedV1/messages/SocialPostCreatedV1'
+    tags:
+    - name: social-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishSocialPostPublishedV1:
+    action: send
+    title: social-service publica bandada.social.post.published.v1
+    summary: Post publicado
+    channel:
+      $ref: '#/channels/socialPostPublishedV1'
+    messages:
+    - $ref: '#/channels/socialPostPublishedV1/messages/SocialPostPublishedV1'
+    tags:
+    - name: social-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishSocialPostHiddenV1:
+    action: send
+    title: social-service publica bandada.social.post.hidden.v1
+    summary: Post ocultado
+    channel:
+      $ref: '#/channels/socialPostHiddenV1'
+    messages:
+    - $ref: '#/channels/socialPostHiddenV1/messages/SocialPostHiddenV1'
+    tags:
+    - name: social-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishSocialPostDeletedV1:
+    action: send
+    title: social-service publica bandada.social.post.deleted.v1
+    summary: Post eliminado
+    channel:
+      $ref: '#/channels/socialPostDeletedV1'
+    messages:
+    - $ref: '#/channels/socialPostDeletedV1/messages/SocialPostDeletedV1'
+    tags:
+    - name: social-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishSocialPostRemovedV1:
+    action: send
+    title: social-service publica bandada.social.post.removed.v1
+    summary: Post retirado por moderación
+    channel:
+      $ref: '#/channels/socialPostRemovedV1'
+    messages:
+    - $ref: '#/channels/socialPostRemovedV1/messages/SocialPostRemovedV1'
+    tags:
+    - name: social-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishSocialCommentCreatedV1:
+    action: send
+    title: social-service publica bandada.social.comment.created.v1
+    summary: Comentario creado
+    channel:
+      $ref: '#/channels/socialCommentCreatedV1'
+    messages:
+    - $ref: '#/channels/socialCommentCreatedV1/messages/SocialCommentCreatedV1'
+    tags:
+    - name: social-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishSocialCommentHiddenV1:
+    action: send
+    title: social-service publica bandada.social.comment.hidden.v1
+    summary: Comentario ocultado
+    channel:
+      $ref: '#/channels/socialCommentHiddenV1'
+    messages:
+    - $ref: '#/channels/socialCommentHiddenV1/messages/SocialCommentHiddenV1'
+    tags:
+    - name: social-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishSocialReactionSetV1:
+    action: send
+    title: social-service publica bandada.social.reaction.set.v1
+    summary: Reacción establecida
+    channel:
+      $ref: '#/channels/socialReactionSetV1'
+    messages:
+    - $ref: '#/channels/socialReactionSetV1/messages/SocialReactionSetV1'
+    tags:
+    - name: social-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishSocialFollowCreatedV1:
+    action: send
+    title: social-service publica bandada.social.follow.created.v1
+    summary: Nuevo seguidor
+    channel:
+      $ref: '#/channels/socialFollowCreatedV1'
+    messages:
+    - $ref: '#/channels/socialFollowCreatedV1/messages/SocialFollowCreatedV1'
+    tags:
+    - name: social-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishSocialGroupJoinRequestedV1:
+    action: send
+    title: social-service publica bandada.social.group.join-requested.v1
+    summary: Solicitud de ingreso a grupo
+    channel:
+      $ref: '#/channels/socialGroupJoinRequestedV1'
+    messages:
+    - $ref: '#/channels/socialGroupJoinRequestedV1/messages/SocialGroupJoinRequestedV1'
+    tags:
+    - name: social-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishSocialContentReportedV1:
+    action: send
+    title: social-service publica bandada.social.content.reported.v1
+    summary: Contenido denunciado
+    channel:
+      $ref: '#/channels/socialContentReportedV1'
+    messages:
+    - $ref: '#/channels/socialContentReportedV1/messages/SocialContentReportedV1'
+    tags:
+    - name: social-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishMediaAssetApprovedV1:
+    action: send
+    title: media-service publica bandada.media.asset.approved.v1
+    summary: Medio aprobado
+    channel:
+      $ref: '#/channels/mediaAssetApprovedV1'
+    messages:
+    - $ref: '#/channels/mediaAssetApprovedV1/messages/MediaAssetApprovedV1'
+    tags:
+    - name: media-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishMediaAssetFlaggedV1:
+    action: send
+    title: media-service publica bandada.media.asset.flagged.v1
+    summary: Medio marcado para revisión
+    channel:
+      $ref: '#/channels/mediaAssetFlaggedV1'
+    messages:
+    - $ref: '#/channels/mediaAssetFlaggedV1/messages/MediaAssetFlaggedV1'
+    tags:
+    - name: media-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishMediaAssetRejectedV1:
+    action: send
+    title: media-service publica bandada.media.asset.rejected.v1
+    summary: Medio rechazado
+    channel:
+      $ref: '#/channels/mediaAssetRejectedV1'
+    messages:
+    - $ref: '#/channels/mediaAssetRejectedV1/messages/MediaAssetRejectedV1'
+    tags:
+    - name: media-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishEventsEventPublishedV1:
+    action: send
+    title: events-service publica bandada.events.event.published.v1
+    summary: Evento publicado
+    channel:
+      $ref: '#/channels/eventsEventPublishedV1'
+    messages:
+    - $ref: '#/channels/eventsEventPublishedV1/messages/EventsEventPublishedV1'
+    tags:
+    - name: events-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishEventsEventCancelledV1:
+    action: send
+    title: events-service publica bandada.events.event.cancelled.v1
+    summary: Evento cancelado
+    channel:
+      $ref: '#/channels/eventsEventCancelledV1'
+    messages:
+    - $ref: '#/channels/eventsEventCancelledV1/messages/EventsEventCancelledV1'
+    tags:
+    - name: events-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishEventsRegistrationConfirmedV1:
+    action: send
+    title: events-service publica bandada.events.registration.confirmed.v1
+    summary: Inscripción confirmada
+    channel:
+      $ref: '#/channels/eventsRegistrationConfirmedV1'
+    messages:
+    - $ref: '#/channels/eventsRegistrationConfirmedV1/messages/EventsRegistrationConfirmedV1'
+    tags:
+    - name: events-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishEventsRegistrationFailedV1:
+    action: send
+    title: events-service publica bandada.events.registration.failed.v1
+    summary: Inscripción fallida
+    channel:
+      $ref: '#/channels/eventsRegistrationFailedV1'
+    messages:
+    - $ref: '#/channels/eventsRegistrationFailedV1/messages/EventsRegistrationFailedV1'
+    tags:
+    - name: events-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishEventsRegistrationCancelledV1:
+    action: send
+    title: events-service publica bandada.events.registration.cancelled.v1
+    summary: Inscripción cancelada
+    channel:
+      $ref: '#/channels/eventsRegistrationCancelledV1'
+    messages:
+    - $ref: '#/channels/eventsRegistrationCancelledV1/messages/EventsRegistrationCancelledV1'
+    tags:
+    - name: events-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishWalletTopupPaidV1:
+    action: send
+    title: wallet-service publica bandada.wallet.topup.paid.v1
+    summary: Recarga pagada
+    channel:
+      $ref: '#/channels/walletTopupPaidV1'
+    messages:
+    - $ref: '#/channels/walletTopupPaidV1/messages/WalletTopupPaidV1'
+    tags:
+    - name: wallet-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishWalletCreditsDebitedV1:
+    action: send
+    title: wallet-service publica bandada.wallet.credits-debited.v1
+    summary: Créditos debitados (respuesta SAGA)
+    channel:
+      $ref: '#/channels/walletCreditsDebitedV1'
+    messages:
+    - $ref: '#/channels/walletCreditsDebitedV1/messages/WalletCreditsDebitedV1'
+    tags:
+    - name: wallet-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishWalletCreditsDebitFailedV1:
+    action: send
+    title: wallet-service publica bandada.wallet.credits-debit-failed.v1
+    summary: Débito fallido (respuesta SAGA)
+    channel:
+      $ref: '#/channels/walletCreditsDebitFailedV1'
+    messages:
+    - $ref: '#/channels/walletCreditsDebitFailedV1/messages/WalletCreditsDebitFailedV1'
+    tags:
+    - name: wallet-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishWalletCreditsRefundedV1:
+    action: send
+    title: wallet-service publica bandada.wallet.credits-refunded.v1
+    summary: Créditos reembolsados (respuesta SAGA)
+    channel:
+      $ref: '#/channels/walletCreditsRefundedV1'
+    messages:
+    - $ref: '#/channels/walletCreditsRefundedV1/messages/WalletCreditsRefundedV1'
+    tags:
+    - name: wallet-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishTicketingTicketIssuedV1:
+    action: send
+    title: ticketing-service publica bandada.ticketing.ticket-issued.v1
+    summary: Ticket emitido (respuesta SAGA)
+    channel:
+      $ref: '#/channels/ticketingTicketIssuedV1'
+    messages:
+    - $ref: '#/channels/ticketingTicketIssuedV1/messages/TicketingTicketIssuedV1'
+    tags:
+    - name: ticketing-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishTicketingTicketIssueFailedV1:
+    action: send
+    title: ticketing-service publica bandada.ticketing.ticket-issue-failed.v1
+    summary: Emisión de ticket fallida (respuesta SAGA)
+    channel:
+      $ref: '#/channels/ticketingTicketIssueFailedV1'
+    messages:
+    - $ref: '#/channels/ticketingTicketIssueFailedV1/messages/TicketingTicketIssueFailedV1'
+    tags:
+    - name: ticketing-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishTicketingTicketVoidedV1:
+    action: send
+    title: ticketing-service publica bandada.ticketing.ticket-voided.v1
+    summary: Ticket anulado (respuesta SAGA)
+    channel:
+      $ref: '#/channels/ticketingTicketVoidedV1'
+    messages:
+    - $ref: '#/channels/ticketingTicketVoidedV1/messages/TicketingTicketVoidedV1'
+    tags:
+    - name: ticketing-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishTicketingTicketVoidFailedV1:
+    action: send
+    title: ticketing-service publica bandada.ticketing.ticket-void-failed.v1
+    summary: Anulación de ticket fallida (respuesta SAGA)
+    channel:
+      $ref: '#/channels/ticketingTicketVoidFailedV1'
+    messages:
+    - $ref: '#/channels/ticketingTicketVoidFailedV1/messages/TicketingTicketVoidFailedV1'
+    tags:
+    - name: ticketing-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishTicketingTicketUsedV1:
+    action: send
+    title: ticketing-service publica bandada.ticketing.ticket.used.v1
+    summary: Ticket usado
+    channel:
+      $ref: '#/channels/ticketingTicketUsedV1'
+    messages:
+    - $ref: '#/channels/ticketingTicketUsedV1/messages/TicketingTicketUsedV1'
+    tags:
+    - name: ticketing-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishInsightsAlertRaisedV1:
+    action: send
+    title: insights-service publica bandada.insights.alert.raised.v1
+    summary: Alerta generada
+    channel:
+      $ref: '#/channels/insightsAlertRaisedV1'
+    messages:
+    - $ref: '#/channels/insightsAlertRaisedV1/messages/InsightsAlertRaisedV1'
+    tags:
+    - name: insights-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishInsightsReportReadyV1:
+    action: send
+    title: insights-service publica bandada.insights.report.ready.v1
+    summary: Reporte listo
+    channel:
+      $ref: '#/channels/insightsReportReadyV1'
+    messages:
+    - $ref: '#/channels/insightsReportReadyV1/messages/InsightsReportReadyV1'
+    tags:
+    - name: insights-service
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+  publishWalletCmdDebitCreditsV1:
+    action: send
+    title: events-service publica bandada.wallet.cmd.debit-credits.v1
+    summary: 'Comando: debitar créditos'
+    channel:
+      $ref: '#/channels/walletCmdDebitCreditsV1'
+    messages:
+    - $ref: '#/channels/walletCmdDebitCreditsV1/messages/WalletCmdDebitCreditsV1'
+    tags:
+    - name: events-service
+    - name: saga
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+    reply:
+      channel:
+        $ref: '#/channels/qEventsServiceSagaRepliesQueue'
+      messages:
+      - $ref: '#/channels/qEventsServiceSagaRepliesQueue/messages/WalletCreditsDebitedV1'
+      - $ref: '#/channels/qEventsServiceSagaRepliesQueue/messages/WalletCreditsDebitFailedV1'
+  publishWalletCmdRefundCreditsV1:
+    action: send
+    title: events-service publica bandada.wallet.cmd.refund-credits.v1
+    summary: 'Comando: reembolsar créditos'
+    channel:
+      $ref: '#/channels/walletCmdRefundCreditsV1'
+    messages:
+    - $ref: '#/channels/walletCmdRefundCreditsV1/messages/WalletCmdRefundCreditsV1'
+    tags:
+    - name: events-service
+    - name: saga
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+    reply:
+      channel:
+        $ref: '#/channels/qEventsServiceSagaRepliesQueue'
+      messages:
+      - $ref: '#/channels/qEventsServiceSagaRepliesQueue/messages/WalletCreditsRefundedV1'
+  publishTicketingCmdIssueTicketV1:
+    action: send
+    title: events-service publica bandada.ticketing.cmd.issue-ticket.v1
+    summary: 'Comando: emitir ticket'
+    channel:
+      $ref: '#/channels/ticketingCmdIssueTicketV1'
+    messages:
+    - $ref: '#/channels/ticketingCmdIssueTicketV1/messages/TicketingCmdIssueTicketV1'
+    tags:
+    - name: events-service
+    - name: saga
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+    reply:
+      channel:
+        $ref: '#/channels/qEventsServiceSagaRepliesQueue'
+      messages:
+      - $ref: '#/channels/qEventsServiceSagaRepliesQueue/messages/TicketingTicketIssuedV1'
+      - $ref: '#/channels/qEventsServiceSagaRepliesQueue/messages/TicketingTicketIssueFailedV1'
+  publishTicketingCmdVoidTicketV1:
+    action: send
+    title: events-service publica bandada.ticketing.cmd.void-ticket.v1
+    summary: 'Comando: anular ticket'
+    channel:
+      $ref: '#/channels/ticketingCmdVoidTicketV1'
+    messages:
+    - $ref: '#/channels/ticketingCmdVoidTicketV1/messages/TicketingCmdVoidTicketV1'
+    tags:
+    - name: events-service
+    - name: saga
+    bindings:
+      $ref: '#/components/operationBindings/publishPersistent'
+    reply:
+      channel:
+        $ref: '#/channels/qEventsServiceSagaRepliesQueue'
+      messages:
+      - $ref: '#/channels/qEventsServiceSagaRepliesQueue/messages/TicketingTicketVoidedV1'
+  consumeQEventsServiceSagaRepliesQueue:
+    action: receive
+    title: events-service consume events-service.saga-replies
+    summary: Respuestas de la SAGA para `RegistrationSagaOrchestrator` (inbox `processed_messages`).
+    channel:
+      $ref: '#/channels/qEventsServiceSagaRepliesQueue'
+    messages:
+    - $ref: '#/channels/qEventsServiceSagaRepliesQueue/messages/WalletCreditsDebitedV1'
+    - $ref: '#/channels/qEventsServiceSagaRepliesQueue/messages/WalletCreditsDebitFailedV1'
+    - $ref: '#/channels/qEventsServiceSagaRepliesQueue/messages/WalletCreditsRefundedV1'
+    - $ref: '#/channels/qEventsServiceSagaRepliesQueue/messages/TicketingTicketIssuedV1'
+    - $ref: '#/channels/qEventsServiceSagaRepliesQueue/messages/TicketingTicketIssueFailedV1'
+    - $ref: '#/channels/qEventsServiceSagaRepliesQueue/messages/TicketingTicketVoidedV1'
+    - $ref: '#/channels/qEventsServiceSagaRepliesQueue/messages/TicketingTicketVoidFailedV1'
+    tags:
+    - name: events-service
+    bindings:
+      $ref: '#/components/operationBindings/consumeAck'
+  consumeQWalletServiceCommandsQueue:
+    action: receive
+    title: wallet-service consume wallet-service.commands
+    summary: Comandos dirigidos a la billetera.
+    channel:
+      $ref: '#/channels/qWalletServiceCommandsQueue'
+    messages:
+    - $ref: '#/channels/qWalletServiceCommandsQueue/messages/WalletCmdDebitCreditsV1'
+    - $ref: '#/channels/qWalletServiceCommandsQueue/messages/WalletCmdRefundCreditsV1'
+    tags:
+    - name: wallet-service
+    bindings:
+      $ref: '#/components/operationBindings/consumeAck'
+  consumeQTicketingServiceCommandsQueue:
+    action: receive
+    title: ticketing-service consume ticketing-service.commands
+    summary: Comandos dirigidos a entradas.
+    channel:
+      $ref: '#/channels/qTicketingServiceCommandsQueue'
+    messages:
+    - $ref: '#/channels/qTicketingServiceCommandsQueue/messages/TicketingCmdIssueTicketV1'
+    - $ref: '#/channels/qTicketingServiceCommandsQueue/messages/TicketingCmdVoidTicketV1'
+    tags:
+    - name: ticketing-service
+    bindings:
+      $ref: '#/components/operationBindings/consumeAck'
+  consumeQSocialServiceEventsQueue:
+    action: receive
+    title: social-service consume social-service.events
+    summary: Resultado de moderación de medios y ciclo de vida de usuarios (eventos no usados se reconocen y descartan).
+    channel:
+      $ref: '#/channels/qSocialServiceEventsQueue'
+    messages:
+    - $ref: '#/channels/qSocialServiceEventsQueue/messages/IdentityUserRegisteredV1'
+    - $ref: '#/channels/qSocialServiceEventsQueue/messages/IdentityUserRoleChangedV1'
+    - $ref: '#/channels/qSocialServiceEventsQueue/messages/IdentityUserSuspendedV1'
+    - $ref: '#/channels/qSocialServiceEventsQueue/messages/IdentityUserReactivatedV1'
+    - $ref: '#/channels/qSocialServiceEventsQueue/messages/IdentityUserPreferencesChangedV1'
+    - $ref: '#/channels/qSocialServiceEventsQueue/messages/MediaAssetApprovedV1'
+    - $ref: '#/channels/qSocialServiceEventsQueue/messages/MediaAssetFlaggedV1'
+    - $ref: '#/channels/qSocialServiceEventsQueue/messages/MediaAssetRejectedV1'
+    tags:
+    - name: social-service
+    bindings:
+      $ref: '#/components/operationBindings/consumeAck'
+  consumeQMediaServiceEventsQueue:
+    action: receive
+    title: media-service consume media-service.events
+    summary: Limpieza de medios de posts eliminados.
+    channel:
+      $ref: '#/channels/qMediaServiceEventsQueue'
+    messages:
+    - $ref: '#/channels/qMediaServiceEventsQueue/messages/SocialPostDeletedV1'
+    tags:
+    - name: media-service
+    bindings:
+      $ref: '#/components/operationBindings/consumeAck'
+  consumeQNotificationServiceEventsQueue:
+    action: receive
+    title: notification-service consume notification-service.events
+    summary: Origen de notificaciones push/email/in-app.
+    channel:
+      $ref: '#/channels/qNotificationServiceEventsQueue'
+    messages:
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/IdentityUserRegisteredV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/IdentityUserPreferencesChangedV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/SocialPostCreatedV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/SocialPostPublishedV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/SocialPostHiddenV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/SocialPostDeletedV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/SocialPostRemovedV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/SocialCommentCreatedV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/SocialCommentHiddenV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/SocialReactionSetV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/SocialFollowCreatedV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/SocialGroupJoinRequestedV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/SocialContentReportedV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/EventsEventCancelledV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/EventsRegistrationConfirmedV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/EventsRegistrationFailedV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/EventsRegistrationCancelledV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/WalletTopupPaidV1'
+    - $ref: '#/channels/qNotificationServiceEventsQueue/messages/InsightsAlertRaisedV1'
+    tags:
+    - name: notification-service
+    bindings:
+      $ref: '#/components/operationBindings/consumeAck'
+  consumeQInsightsServiceAnalyticsQueue:
+    action: receive
+    title: insights-service consume insights-service.analytics
+    summary: Proyección de métricas (`METRIC#<name>`) a partir de todos los eventos de dominio.
+    channel:
+      $ref: '#/channels/qInsightsServiceAnalyticsQueue'
+    messages:
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/IdentityUserRegisteredV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/IdentityUserRoleChangedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/IdentityUserSuspendedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/IdentityUserReactivatedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/IdentityUserPreferencesChangedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/SocialPostCreatedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/SocialPostPublishedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/SocialPostHiddenV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/SocialPostDeletedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/SocialPostRemovedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/SocialCommentCreatedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/SocialCommentHiddenV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/SocialReactionSetV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/SocialFollowCreatedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/SocialGroupJoinRequestedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/SocialContentReportedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/MediaAssetApprovedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/MediaAssetFlaggedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/MediaAssetRejectedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/EventsEventPublishedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/EventsEventCancelledV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/EventsRegistrationConfirmedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/EventsRegistrationFailedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/EventsRegistrationCancelledV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/WalletTopupPaidV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/WalletCreditsDebitedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/WalletCreditsDebitFailedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/WalletCreditsRefundedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/TicketingTicketIssuedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/TicketingTicketIssueFailedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/TicketingTicketVoidedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/TicketingTicketVoidFailedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/TicketingTicketUsedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/InsightsAlertRaisedV1'
+    - $ref: '#/channels/qInsightsServiceAnalyticsQueue/messages/InsightsReportReadyV1'
+    tags:
+    - name: insights-service
+    bindings:
+      $ref: '#/components/operationBindings/consumeAck'
+  consumeQN8nAutomationQueue:
+    action: receive
+    title: n8n consume n8n.automation
+    summary: Disparadores de workflows n8n (D10).
+    channel:
+      $ref: '#/channels/qN8nAutomationQueue'
+    messages:
+    - $ref: '#/channels/qN8nAutomationQueue/messages/IdentityUserRegisteredV1'
+    - $ref: '#/channels/qN8nAutomationQueue/messages/MediaAssetFlaggedV1'
+    - $ref: '#/channels/qN8nAutomationQueue/messages/EventsEventPublishedV1'
+    - $ref: '#/channels/qN8nAutomationQueue/messages/EventsRegistrationConfirmedV1'
+    - $ref: '#/channels/qN8nAutomationQueue/messages/InsightsAlertRaisedV1'
+    tags:
+    - name: n8n
+    bindings:
+      $ref: '#/components/operationBindings/consumeAck'
+  consumeQAdminGatewaySubscriptionsQueue:
+    action: receive
+    title: admin-gateway consume admin-gateway.subscriptions.<instanceId>
+    summary: Eventos que alimentan las subscriptions GraphQL del panel (una cola exclusiva por réplica).
+    channel:
+      $ref: '#/channels/qAdminGatewaySubscriptionsQueue'
+    messages:
+    - $ref: '#/channels/qAdminGatewaySubscriptionsQueue/messages/MediaAssetApprovedV1'
+    - $ref: '#/channels/qAdminGatewaySubscriptionsQueue/messages/MediaAssetFlaggedV1'
+    - $ref: '#/channels/qAdminGatewaySubscriptionsQueue/messages/MediaAssetRejectedV1'
+    - $ref: '#/channels/qAdminGatewaySubscriptionsQueue/messages/SocialContentReportedV1'
+    - $ref: '#/channels/qAdminGatewaySubscriptionsQueue/messages/SocialPostHiddenV1'
+    - $ref: '#/channels/qAdminGatewaySubscriptionsQueue/messages/InsightsAlertRaisedV1'
+    - $ref: '#/channels/qAdminGatewaySubscriptionsQueue/messages/InsightsReportReadyV1'
+    tags:
+    - name: admin-gateway
+    bindings:
+      $ref: '#/components/operationBindings/consumeAck'
+components:
+  schemas:
+    CloudEventEnvelope:
+      type: object
+      description: Sobre CloudEvents 1.0 (modo estructurado JSON) con extensiones de Bandada U.
+      required:
+      - specversion
+      - id
+      - source
+      - type
+      - time
+      - datacontenttype
+      - correlationid
+      - data
+      properties:
+        specversion:
+          type: string
+          const: '1.0'
+        id:
+          type: string
+          format: uuid
+          description: UUIDv7 único del mensaje (clave del inbox).
+        source:
+          type: string
+          pattern: ^/services/[a-z0-9-]+$
+          examples:
+          - /services/events-service
+        type:
+          type: string
+          pattern: ^bandada\.[a-z]+\.[a-z0-9.-]+\.v[0-9]+$
+          description: Igual a la routing key.
+        time:
+          type: string
+          format: date-time
+        subject:
+          type: string
+          description: Recurso afectado, p. ej. `registrations/<id>`.
+        datacontenttype:
+          type: string
+          const: application/json
+        dataschema:
+          type: string
+          format: uri
+        correlationid:
+          type: string
+          description: Id de correlación de extremo a extremo (cabecera `X-Correlation-Id` de la petición original).
+        causationid:
+          type: string
+          format: uuid
+          description: '`id` del mensaje que causó este (ausente si lo originó una petición HTTP o un cron).'
+        sagaid:
+          type: string
+          format: uuid
+          description: Id de la `SagaInstance` (obligatorio en comandos y respuestas de la SAGA).
+        traceparent:
+          type: string
+          pattern: ^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+          description: W3C Trace Context (OpenTelemetry).
+        data:
+          type: object
+    Role:
+      type: string
+      enum:
+      - STUDENT
+      - ORGANIZER
+      - MODERATOR
+      - ADMIN
+    UserStatus:
+      type: string
+      enum:
+      - PENDING_VERIFICATION
+      - ACTIVE
+      - SUSPENDED
+      - DELETED
+    PostVisibility:
+      type: string
+      enum:
+      - PUBLIC
+      - FOLLOWERS
+      - GROUP
+    PostStatus:
+      type: string
+      enum:
+      - PENDING_MEDIA
+      - PUBLISHED
+      - HIDDEN
+      - REMOVED
+    ReactionType:
+      type: string
+      enum:
+      - LIKE
+      - HELPFUL
+      - FUNNY
+      - SUPPORT
+    GroupPrivacy:
+      type: string
+      enum:
+      - PUBLIC
+      - PRIVATE
+    MembershipStatus:
+      type: string
+      enum:
+      - PENDING
+      - ACTIVE
+      - REJECTED
+      - LEFT
+    MediaKind:
+      type: string
+      enum:
+      - IMAGE
+      - VIDEO
+    ModerationDecision:
+      type: string
+      enum:
+      - ALLOW
+      - REVIEW
+      - BLOCK
+    EventStatus:
+      type: string
+      enum:
+      - DRAFT
+      - PUBLISHED
+      - CANCELLED
+      - FINISHED
+    TopUpPackage:
+      type: string
+      enum:
+      - CREDITS_20
+      - CREDITS_50
+      - CREDITS_100
+      description: Paquete de recarga; igual que `TopUpPackage` de `wallet-service.yaml`.
+    AlertSeverity:
+      type: string
+      enum:
+      - INFO
+      - WARNING
+      - CRITICAL
+    Locale:
+      type: string
+      enum:
+      - es
+      - en
+      description: Idioma (D14). Debe coincidir con `Locale` de `bandadau-docs/contracts/openapi/shared/components.yaml`.
+    ThemePreference:
+      type: string
+      enum:
+      - SYSTEM
+      - LIGHT
+      - DARK
+      description: Preferencia de tema (D13). Debe coincidir con `ThemePreference` de `bandadau-docs/contracts/openapi/shared/components.yaml`.
+    ContentReportTargetType:
+      type: string
+      description: Valores de `ContentReport.targetType` (`ReportTargetType`, RF-13, ADR-0016).
+      enum:
+      - POST
+      - COMMENT
+    ReportReason:
+      type: string
+      description: Motivo de una denuncia (`ReportReason`, ADR-0016); igual que en `social-service.yaml`.
+      enum:
+      - SPAM
+      - HARASSMENT
+      - NSFW
+      - VIOLENCE
+      - MISINFORMATION
+      - OTHER
+    HiddenReason:
+      type: string
+      description: Motivo por el que un contenido está oculto (`HiddenReason`, ADR-0016); igual que en `social-service.yaml`.
+      enum:
+      - MEDIA_FLAGGED
+      - REPORTED
+      - MODERATOR
+    CommentStatus:
+      type: string
+      description: Estado de un comentario (`CommentStatus`, ADR-0016).
+      enum:
+      - VISIBLE
+      - HIDDEN
+      - REMOVED
+    RegistrationFailureReason:
+      type: string
+      description: Valores de `Registration.failureReason` (`RegistrationFailureReason`, ADR-0016); igual que en `events-service.yaml`.
+      enum:
+      - EVENT_FULL
+      - INSUFFICIENT_FUNDS
+      - WALLET_NOT_FOUND
+      - TICKET_ISSUE_FAILED
+      - TIMEOUT
+      - SAGA_ABORTED
+    AlertKind:
+      type: string
+      description: Valores de `Alert.kind` (`AlertKind`, RF-24, D10, ADR-0016); igual que en `insights-service.yaml`.
+      enum:
+      - SERVICE_DOWN
+      - SAGA_FAILURES
+      - DLQ_BACKLOG
+      - MODERATION_BACKLOG
+      - METRIC_ANOMALY
+      - MODERATION_ESCALATION
+    GeneratedReportStatus:
+      type: string
+      description: Valores de `GeneratedReport.status` (`GeneratedReportStatus`, ADR-0016); igual que en `insights-service.yaml`.
+      enum:
+      - PENDING
+      - RUNNING
+      - READY
+      - FAILED
+    UserRegisteredData:
+      type: object
+      required:
+      - userId
+      - email
+      - universityId
+      - displayName
+      - roles
+      - locale
+      - occurredAt
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        universityId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+          maxLength: 80
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+          minItems: 1
+        locale:
+          $ref: '#/components/schemas/Locale'
+        occurredAt:
+          type: string
+          format: date-time
+    UserRoleChangedData:
+      type: object
+      required:
+      - userId
+      - previousRoles
+      - roles
+      - changedBy
+      - occurredAt
+      properties:
+        userId:
+          type: string
+          format: uuid
+        previousRoles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+          minItems: 1
+        changedBy:
+          type: string
+          format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+    UserSuspendedData:
+      type: object
+      required:
+      - userId
+      - reason
+      - suspendedBy
+      - occurredAt
+      properties:
+        userId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          maxLength: 500
+        suspendedBy:
+          type: string
+          format: uuid
+        until:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        occurredAt:
+          type: string
+          format: date-time
+    UserReactivatedData:
+      type: object
+      required:
+      - userId
+      - reactivatedBy
+      - occurredAt
+      properties:
+        userId:
+          type: string
+          format: uuid
+        reactivatedBy:
+          type: string
+          format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+    UserPreferencesChangedData:
+      type: object
+      required:
+      - userId
+      - locale
+      - theme
+      - occurredAt
+      properties:
+        userId:
+          type: string
+          format: uuid
+        locale:
+          $ref: '#/components/schemas/Locale'
+        theme:
+          $ref: '#/components/schemas/ThemePreference'
+        occurredAt:
+          type: string
+          format: date-time
+    PostCreatedData:
+      type: object
+      required:
+      - postId
+      - authorId
+      - clientId
+      - groupId
+      - visibility
+      - status
+      - hashtags
+      - mediaIds
+      - occurredAt
+      properties:
+        postId:
+          type: string
+          format: uuid
+        authorId:
+          type: string
+          format: uuid
+        clientId:
+          type: string
+          format: uuid
+        groupId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        visibility:
+          $ref: '#/components/schemas/PostVisibility'
+        status:
+          $ref: '#/components/schemas/PostStatus'
+        hashtags:
+          type: array
+          items:
+            type: string
+        mediaIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          maxItems: 4
+        occurredAt:
+          type: string
+          format: date-time
+    PostPublishedData:
+      type: object
+      required:
+      - postId
+      - authorId
+      - groupId
+      - visibility
+      - hashtags
+      - mediaIds
+      - occurredAt
+      properties:
+        postId:
+          type: string
+          format: uuid
+        authorId:
+          type: string
+          format: uuid
+        groupId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        visibility:
+          $ref: '#/components/schemas/PostVisibility'
+        hashtags:
+          type: array
+          items:
+            type: string
+        mediaIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+    PostHiddenData:
+      type: object
+      required:
+      - postId
+      - authorId
+      - reason
+      - occurredAt
+      properties:
+        postId:
+          type: string
+          format: uuid
+        authorId:
+          type: string
+          format: uuid
+        reason:
+          description: |-
+            `HiddenReason` (ADR-0016) más `AUTHOR_SUSPENDED` (**propuesta**, no figura en `HiddenReason`: contenido ocultado en bloque al suspender al autor y restaurado con `user.reactivated.v1`).
+          x-proposal: true
+          type: string
+          enum:
+          - MEDIA_FLAGGED
+          - REPORTED
+          - MODERATOR
+          - AUTHOR_SUSPENDED
+        occurredAt:
+          type: string
+          format: date-time
+    PostDeletedData:
+      type: object
+      required:
+      - postId
+      - authorId
+      - mediaIds
+      - deletedBy
+      - reason
+      - occurredAt
+      properties:
+        postId:
+          type: string
+          format: uuid
+        authorId:
+          type: string
+          format: uuid
+        mediaIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        deletedBy:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          enum:
+          - AUTHOR
+          - MODERATOR
+        occurredAt:
+          type: string
+          format: date-time
+    CommentCreatedData:
+      type: object
+      required:
+      - commentId
+      - postId
+      - postAuthorId
+      - authorId
+      - occurredAt
+      properties:
+        commentId:
+          type: string
+          format: uuid
+        postId:
+          type: string
+          format: uuid
+        postAuthorId:
+          type: string
+          format: uuid
+        authorId:
+          type: string
+          format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+    CommentHiddenData:
+      type: object
+      required:
+      - commentId
+      - postId
+      - authorId
+      - status
+      - reason
+      - openReportsCount
+      - occurredAt
+      properties:
+        commentId:
+          type: string
+          format: uuid
+        postId:
+          type: string
+          format: uuid
+        authorId:
+          type: string
+          format: uuid
+        status:
+          description: Nuevo estado del comentario (`HIDDEN` por umbral de denuncias, `REMOVED` por decisión de moderación).
+          type: string
+          enum:
+          - HIDDEN
+          - REMOVED
+        reason:
+          type: string
+          enum:
+          - REPORTED
+          - MODERATOR
+        openReportsCount:
+          type: integer
+          minimum: 0
+        occurredAt:
+          type: string
+          format: date-time
+    PostRemovedData:
+      type: object
+      required:
+      - postId
+      - authorId
+      - mediaIds
+      - removedBy
+      - reportId
+      - note
+      - occurredAt
+      properties:
+        postId:
+          type: string
+          format: uuid
+        authorId:
+          type: string
+          format: uuid
+        mediaIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        removedBy:
+          type: string
+          format: uuid
+          description: Moderador o ADMIN que tomó la decisión (`X-Actor-Id`).
+        reportId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: Denuncia que originó la decisión (`null` si fue `updatePostStatus` directo).
+        note:
+          type:
+          - string
+          - 'null'
+          maxLength: 500
+          description: Motivo comunicado al autor (sin datos del denunciante).
+        occurredAt:
+          type: string
+          format: date-time
+    ReactionSetData:
+      type: object
+      required:
+      - postId
+      - postAuthorId
+      - userId
+      - type
+      - previousType
+      - occurredAt
+      properties:
+        postId:
+          type: string
+          format: uuid
+        postAuthorId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/ReactionType'
+        previousType:
+          oneOf:
+          - $ref: '#/components/schemas/ReactionType'
+          - type: 'null'
+        occurredAt:
+          type: string
+          format: date-time
+    FollowCreatedData:
+      type: object
+      required:
+      - followerId
+      - followeeId
+      - occurredAt
+      properties:
+        followerId:
+          type: string
+          format: uuid
+        followeeId:
+          type: string
+          format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+    GroupJoinRequestedData:
+      type: object
+      required:
+      - groupId
+      - groupName
+      - privacy
+      - userId
+      - membershipStatus
+      - groupAdminIds
+      - occurredAt
+      properties:
+        groupId:
+          type: string
+          format: uuid
+        groupName:
+          type: string
+        privacy:
+          $ref: '#/components/schemas/GroupPrivacy'
+        userId:
+          type: string
+          format: uuid
+        membershipStatus:
+          $ref: '#/components/schemas/MembershipStatus'
+        groupAdminIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          minItems: 1
+        occurredAt:
+          type: string
+          format: date-time
+    ContentReportedData:
+      type: object
+      required:
+      - reportId
+      - targetType
+      - targetId
+      - targetAuthorId
+      - reporterId
+      - reason
+      - openReportsCount
+      - autoHidden
+      - occurredAt
+      properties:
+        reportId:
+          type: string
+          format: uuid
+        targetType:
+          $ref: '#/components/schemas/ContentReportTargetType'
+        targetId:
+          type: string
+          format: uuid
+        targetAuthorId:
+          type: string
+          format: uuid
+        reporterId:
+          type: string
+          format: uuid
+        reason:
+          $ref: '#/components/schemas/ReportReason'
+        details:
+          type:
+          - string
+          - 'null'
+          maxLength: 500
+          description: Explicación opcional del denunciante.
+        openReportsCount:
+          type: integer
+          minimum: 1
+        autoHidden:
+          type: boolean
+        occurredAt:
+          type: string
+          format: date-time
+    MediaAssetApprovedData:
+      type: object
+      required:
+      - mediaId
+      - ownerId
+      - kind
+      - decision
+      - tags
+      - modelVersion
+      - reviewedBy
+      - occurredAt
+      properties:
+        mediaId:
+          type: string
+          format: uuid
+        ownerId:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/MediaKind'
+        decision:
+          $ref: '#/components/schemas/ModerationDecision'
+        tags:
+          type: array
+          items:
+            type: string
+        modelVersion:
+          type: string
+        reviewedBy:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+    MediaAssetFlaggedData:
+      type: object
+      required:
+      - mediaId
+      - ownerId
+      - kind
+      - decision
+      - labels
+      - scores
+      - maxScore
+      - modelVersion
+      - occurredAt
+      properties:
+        mediaId:
+          type: string
+          format: uuid
+        ownerId:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/MediaKind'
+        decision:
+          $ref: '#/components/schemas/ModerationDecision'
+        labels:
+          type: array
+          items:
+            type: string
+        scores:
+          type: object
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 1
+        maxScore:
+          type: number
+          minimum: 0
+          maximum: 1
+        modelVersion:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+    MediaAssetRejectedData:
+      type: object
+      required:
+      - mediaId
+      - ownerId
+      - kind
+      - decision
+      - source
+      - occurredAt
+      properties:
+        mediaId:
+          type: string
+          format: uuid
+        ownerId:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/MediaKind'
+        decision:
+          $ref: '#/components/schemas/ModerationDecision'
+        scores:
+          type: object
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 1
+        source:
+          type: string
+          enum:
+          - AUTOMATIC
+          - MODERATOR
+        reviewedBy:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        note:
+          type:
+          - string
+          - 'null'
+        occurredAt:
+          type: string
+          format: date-time
+    EventPublishedData:
+      type: object
+      required:
+      - eventId
+      - organizerId
+      - title
+      - startsAt
+      - venue
+      - capacity
+      - priceCredits
+      - occurredAt
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        organizerId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          maxLength: 140
+        startsAt:
+          type: string
+          format: date-time
+        venue:
+          type: string
+        capacity:
+          type: integer
+          minimum: 1
+        priceCredits:
+          type: integer
+          format: int64
+          minimum: 0
+        occurredAt:
+          type: string
+          format: date-time
+    EventCancelledData:
+      type: object
+      required:
+      - eventId
+      - organizerId
+      - title
+      - startsAt
+      - reason
+      - confirmedRegistrations
+      - occurredAt
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        organizerId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
+          maxLength: 500
+        confirmedRegistrations:
+          type: integer
+          minimum: 0
+        occurredAt:
+          type: string
+          format: date-time
+    RegistrationConfirmedData:
+      type: object
+      required:
+      - registrationId
+      - eventId
+      - userId
+      - sagaId
+      - eventTitle
+      - eventStartsAt
+      - ticketId
+      - priceCredits
+      - occurredAt
+      properties:
+        registrationId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        sagaId:
+          type: string
+          format: uuid
+        eventTitle:
+          type: string
+        eventStartsAt:
+          type: string
+          format: date-time
+        ticketId:
+          type: string
+          format: uuid
+        priceCredits:
+          type: integer
+          format: int64
+          minimum: 0
+        occurredAt:
+          type: string
+          format: date-time
+    RegistrationFailedData:
+      type: object
+      required:
+      - registrationId
+      - eventId
+      - userId
+      - sagaId
+      - eventTitle
+      - eventStartsAt
+      - reason
+      - occurredAt
+      properties:
+        registrationId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        sagaId:
+          type: string
+          format: uuid
+        eventTitle:
+          type: string
+        eventStartsAt:
+          type: string
+          format: date-time
+        reason:
+          $ref: '#/components/schemas/RegistrationFailureReason'
+        occurredAt:
+          type: string
+          format: date-time
+    RegistrationCancelledData:
+      type: object
+      required:
+      - registrationId
+      - eventId
+      - userId
+      - sagaId
+      - eventTitle
+      - eventStartsAt
+      - refundedCredits
+      - occurredAt
+      properties:
+        registrationId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        sagaId:
+          type: string
+          format: uuid
+        eventTitle:
+          type: string
+        eventStartsAt:
+          type: string
+          format: date-time
+        refundedCredits:
+          type: integer
+          format: int64
+          minimum: 0
+        occurredAt:
+          type: string
+          format: date-time
+    TopUpPaidData:
+      type: object
+      required:
+      - topUpId
+      - userId
+      - package
+      - amountCredits
+      - gatewayRef
+      - ledgerEntryId
+      - balanceCredits
+      - occurredAt
+      properties:
+        topUpId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        package:
+          $ref: '#/components/schemas/TopUpPackage'
+        amountCredits:
+          type: integer
+          format: int64
+          minimum: 1
+        gatewayRef:
+          type: string
+        ledgerEntryId:
+          type: string
+          format: uuid
+        balanceCredits:
+          type: integer
+          format: int64
+          minimum: 0
+        occurredAt:
+          type: string
+          format: date-time
+    CreditsDebitedData:
+      type: object
+      required:
+      - sagaId
+      - registrationId
+      - userId
+      - ledgerEntryId
+      - amountCredits
+      - balanceCredits
+      - occurredAt
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+        registrationId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        ledgerEntryId:
+          type: string
+          format: uuid
+        amountCredits:
+          type: integer
+          format: int64
+          minimum: 1
+        balanceCredits:
+          type: integer
+          format: int64
+          minimum: 0
+        occurredAt:
+          type: string
+          format: date-time
+    CreditsDebitFailedData:
+      type: object
+      required:
+      - sagaId
+      - registrationId
+      - userId
+      - reason
+      - requiredCredits
+      - balanceCredits
+      - occurredAt
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+        registrationId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          description: |-
+            `SAGA_ABORTED` (ADR-0016): el `debit-credits` llegó tarde y ya existe el *tombstone* `REFUND:<registrationId>` (la SAGA ya se compensó); no se debita.
+          enum:
+          - INSUFFICIENT_FUNDS
+          - WALLET_NOT_FOUND
+          - SAGA_ABORTED
+        requiredCredits:
+          type: integer
+          format: int64
+          minimum: 1
+        balanceCredits:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        occurredAt:
+          type: string
+          format: date-time
+    CreditsRefundedData:
+      type: object
+      required:
+      - sagaId
+      - registrationId
+      - userId
+      - ledgerEntryId
+      - amountCredits
+      - balanceCredits
+      - occurredAt
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+        registrationId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        ledgerEntryId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: '`null` cuando `amountCredits = 0`.'
+        amountCredits:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Créditos reembolsados (`refundedCredits` en D15). Puede ser `0` (*tombstone* sin débito previo).
+        balanceCredits:
+          type: integer
+          format: int64
+          minimum: 0
+        occurredAt:
+          type: string
+          format: date-time
+    TicketIssuedData:
+      type: object
+      required:
+      - sagaId
+      - registrationId
+      - ticketId
+      - eventId
+      - userId
+      - occurredAt
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+        registrationId:
+          type: string
+          format: uuid
+        ticketId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+    TicketIssueFailedData:
+      type: object
+      required:
+      - sagaId
+      - registrationId
+      - reason
+      - detail
+      - occurredAt
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+        registrationId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          description: |-
+            `ALREADY_VOIDED` (ADR-0016): el `issue-ticket` llegó después de un `void-ticket` (tombstone `VOIDED` para esa `registrationId`); el orquestador lo ignora.
+          enum:
+          - STORAGE_ERROR
+          - SIGNING_ERROR
+          - CHAOS_INJECTED
+          - ALREADY_VOIDED
+        detail:
+          type:
+          - string
+          - 'null'
+        occurredAt:
+          type: string
+          format: date-time
+    TicketVoidedData:
+      type: object
+      required:
+      - sagaId
+      - registrationId
+      - ticketId
+      - occurredAt
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+        registrationId:
+          type: string
+          format: uuid
+        ticketId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+    TicketVoidFailedData:
+      type: object
+      required:
+      - sagaId
+      - registrationId
+      - ticketId
+      - reason
+      - usedAt
+      - occurredAt
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+        registrationId:
+          type: string
+          format: uuid
+        ticketId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          enum:
+          - TICKET_ALREADY_USED
+        usedAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        occurredAt:
+          type: string
+          format: date-time
+    TicketUsedData:
+      type: object
+      required:
+      - ticketId
+      - registrationId
+      - eventId
+      - userId
+      - validatedBy
+      - occurredAt
+      properties:
+        ticketId:
+          type: string
+          format: uuid
+        registrationId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        validatedBy:
+          type: string
+          format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+    AlertRaisedData:
+      type: object
+      required:
+      - alertId
+      - severity
+      - kind
+      - message
+      - details
+      - agentRunId
+      - occurredAt
+      properties:
+        alertId:
+          type: string
+          format: uuid
+        severity:
+          $ref: '#/components/schemas/AlertSeverity'
+        kind:
+          $ref: '#/components/schemas/AlertKind'
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+        agentRunId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+    ReportReadyData:
+      type: object
+      required:
+      - reportId
+      - requestedBy
+      - status
+      - title
+      - locale
+      - hasAudio
+      - occurredAt
+      properties:
+        reportId:
+          type: string
+          format: uuid
+        requestedBy:
+          type: string
+        status:
+          $ref: '#/components/schemas/GeneratedReportStatus'
+        title:
+          type:
+          - string
+          - 'null'
+        locale:
+          $ref: '#/components/schemas/Locale'
+        hasAudio:
+          type: boolean
+        occurredAt:
+          type: string
+          format: date-time
+    DebitCreditsCommandData:
+      type: object
+      required:
+      - sagaId
+      - registrationId
+      - idempotencyKey
+      - userId
+      - eventId
+      - amountCredits
+      - description
+      - deadlineAt
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+        registrationId:
+          type: string
+          format: uuid
+        idempotencyKey:
+          type: string
+          pattern: ^[0-9a-f-]{36}:[A-Z_]+$
+          description: '`<sagaId>:<step>` (D2).'
+        userId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+        amountCredits:
+          type: integer
+          format: int64
+          minimum: 1
+        description:
+          type: string
+          maxLength: 200
+        deadlineAt:
+          type: string
+          format: date-time
+    RefundCreditsCommandData:
+      type: object
+      required:
+      - sagaId
+      - registrationId
+      - idempotencyKey
+      - userId
+      - amountCredits
+      - reason
+      - deadlineAt
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+        registrationId:
+          type: string
+          format: uuid
+        idempotencyKey:
+          type: string
+          pattern: ^[0-9a-f-]{36}:[A-Z_]+$
+          description: '`<sagaId>:<step>` (D2).'
+        userId:
+          type: string
+          format: uuid
+        amountCredits:
+          type: integer
+          format: int64
+          minimum: 0
+        reason:
+          type: string
+          enum:
+          - SAGA_COMPENSATION
+          - USER_CANCELLATION
+          - EVENT_CANCELLED
+        deadlineAt:
+          type: string
+          format: date-time
+    IssueTicketCommandData:
+      type: object
+      required:
+      - sagaId
+      - registrationId
+      - idempotencyKey
+      - eventId
+      - userId
+      - eventTitle
+      - eventStartsAt
+      - venue
+      - deadlineAt
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+        registrationId:
+          type: string
+          format: uuid
+        idempotencyKey:
+          type: string
+          pattern: ^[0-9a-f-]{36}:[A-Z_]+$
+          description: '`<sagaId>:<step>` (D2).'
+        eventId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        eventTitle:
+          type: string
+        eventStartsAt:
+          type: string
+          format: date-time
+        venue:
+          type: string
+        deadlineAt:
+          type: string
+          format: date-time
+    VoidTicketCommandData:
+      type: object
+      required:
+      - sagaId
+      - registrationId
+      - idempotencyKey
+      - ticketId
+      - reason
+      - deadlineAt
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+        registrationId:
+          type: string
+          format: uuid
+        idempotencyKey:
+          type: string
+          pattern: ^[0-9a-f-]{36}:[A-Z_]+$
+          description: '`<sagaId>:<step>` (D2).'
+        ticketId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        reason:
+          type: string
+          enum:
+          - SAGA_COMPENSATION
+          - USER_CANCELLATION
+          - EVENT_CANCELLED
+        deadlineAt:
+          type: string
+          format: date-time
+  messages:
+    IdentityUserRegisteredV1:
+      name: IdentityUserRegisteredV1
+      title: Usuario registrado y verificado
+      summary: bandada.identity.user.registered.v1
+      description: |-
+        Se emite cuando la cuenta pasa a `ACTIVE` tras verificar el correo institucional (UC-01). social-service crea el `Profile`, notification-service guarda el idioma y envía bienvenida in-app, n8n `wf-01-bienvenida`.
+
+        **Exchange:** `bandada.events` · **Publica:** `identity-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: identity-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.identity.user.registered.v1
+            source:
+              const: /services/identity-service
+            data:
+              $ref: '#/components/schemas/UserRegisteredData'
+      bindings:
+        amqp:
+          messageType: bandada.identity.user.registered.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Usuario registrado y verificado
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-845575754603
+          source: /services/identity-service
+          type: bandada.identity.user.registered.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: users/0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            email: valeria.quispe@umsa.bo
+            universityId: 0192a3a1-0000-7000-8000-000000000001
+            displayName: Valeria Quispe
+            roles:
+            - STUDENT
+            locale: es
+            occurredAt: '2026-10-14T14:00:00Z'
+    IdentityUserRoleChangedV1:
+      name: IdentityUserRoleChangedV1
+      title: Roles de usuario cambiados
+      summary: bandada.identity.user.role-changed.v1
+      description: |-
+        Un ADMIN cambió los roles de un usuario (UC-21).
+
+        **Exchange:** `bandada.events` · **Publica:** `identity-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: identity-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.identity.user.role-changed.v1
+            source:
+              const: /services/identity-service
+            data:
+              $ref: '#/components/schemas/UserRoleChangedData'
+      bindings:
+        amqp:
+          messageType: bandada.identity.user.role-changed.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Roles de usuario cambiados
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-855102336643
+          source: /services/identity-service
+          type: bandada.identity.user.role-changed.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: users/0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            previousRoles:
+            - STUDENT
+            roles:
+            - STUDENT
+            - ORGANIZER
+            changedBy: 0192a3b4-0000-7000-8000-00000000ad01
+            occurredAt: '2026-10-14T14:00:00Z'
+    IdentityUserSuspendedV1:
+      name: IdentityUserSuspendedV1
+      title: Usuario suspendido
+      summary: bandada.identity.user.suspended.v1
+      description: |-
+        La cuenta pasó a `SUSPENDED` (UC-21/UC-18). Se revocan sus refresh tokens; social-service oculta su contenido.
+
+        **Exchange:** `bandada.events` · **Publica:** `identity-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: identity-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.identity.user.suspended.v1
+            source:
+              const: /services/identity-service
+            data:
+              $ref: '#/components/schemas/UserSuspendedData'
+      bindings:
+        amqp:
+          messageType: bandada.identity.user.suspended.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Usuario suspendido
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-338424747070
+          source: /services/identity-service
+          type: bandada.identity.user.suspended.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: users/0192a3b4-9999-7e8f-9a0b-1c2d3e4f0002
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            userId: 0192a3b4-9999-7e8f-9a0b-1c2d3e4f0002
+            reason: Publicación reiterada de contenido inapropiado.
+            suspendedBy: 0192a3b4-0000-7000-8000-00000000ad01
+            until: null
+            occurredAt: '2026-10-14T14:00:00Z'
+    IdentityUserReactivatedV1:
+      name: IdentityUserReactivatedV1
+      title: Usuario reactivado
+      summary: bandada.identity.user.reactivated.v1
+      description: |-
+        Aceptado en D15 (ADR-0016). Lo dispara `Mutation.reactivateUser` (D11, `updateUserStatus` con `status: ACTIVE`): social-service restaura la visibilidad del contenido del autor.
+
+        **Exchange:** `bandada.events` · **Publica:** `identity-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: identity-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.identity.user.reactivated.v1
+            source:
+              const: /services/identity-service
+            data:
+              $ref: '#/components/schemas/UserReactivatedData'
+      bindings:
+        amqp:
+          messageType: bandada.identity.user.reactivated.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Usuario reactivado
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-022736459708
+          source: /services/identity-service
+          type: bandada.identity.user.reactivated.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: users/0192a3b4-9999-7e8f-9a0b-1c2d3e4f0002
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            userId: 0192a3b4-9999-7e8f-9a0b-1c2d3e4f0002
+            reactivatedBy: 0192a3b4-0000-7000-8000-00000000ad01
+            occurredAt: '2026-10-14T14:00:00Z'
+    IdentityUserPreferencesChangedV1:
+      name: IdentityUserPreferencesChangedV1
+      title: Preferencias de usuario cambiadas
+      summary: bandada.identity.user.preferences-changed.v1
+      description: |-
+        El usuario cambió su idioma y/o tema (`PATCH /users/me/preferences`, D13/D14). notification-service actualiza su copia local del idioma para las plantillas.
+
+        **Exchange:** `bandada.events` · **Publica:** `identity-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: identity-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.identity.user.preferences-changed.v1
+            source:
+              const: /services/identity-service
+            data:
+              $ref: '#/components/schemas/UserPreferencesChangedData'
+      bindings:
+        amqp:
+          messageType: bandada.identity.user.preferences-changed.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Preferencias de usuario cambiadas
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-314906450198
+          source: /services/identity-service
+          type: bandada.identity.user.preferences-changed.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: users/0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            locale: en
+            theme: DARK
+            occurredAt: '2026-10-14T14:00:00Z'
+    SocialPostCreatedV1:
+      name: SocialPostCreatedV1
+      title: Post creado
+      summary: bandada.social.post.created.v1
+      description: |-
+        Post aceptado (UC-05). Si tiene medios queda `PENDING_MEDIA` hasta que todos estén `APPROVED`; sin medios nace `PUBLISHED` (y se emite además `post.published`). No incluye el texto del post.
+
+        **Exchange:** `bandada.events` · **Publica:** `social-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: social-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.social.post.created.v1
+            source:
+              const: /services/social-service
+            data:
+              $ref: '#/components/schemas/PostCreatedData'
+      bindings:
+        amqp:
+          messageType: bandada.social.post.created.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Post creado
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-495793409950
+          source: /services/social-service
+          type: bandada.social.post.created.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: posts/0192a3a0-0000-7000-8000-000000000321
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            postId: 0192a3a0-0000-7000-8000-000000000321
+            authorId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            clientId: 0192a39f-1111-7222-8333-444455556666
+            groupId: null
+            visibility: PUBLIC
+            status: PENDING_MEDIA
+            hashtags:
+            - docker
+            - fcpn
+            mediaIds:
+            - 0192a3a2-0000-7000-8000-000000000654
+            occurredAt: '2026-10-14T14:00:00Z'
+    SocialPostPublishedV1:
+      name: SocialPostPublishedV1
+      title: Post publicado
+      summary: bandada.social.post.published.v1
+      description: |-
+        El post pasó a `PUBLISHED` (sin medios o con todos sus medios aprobados).
+
+        **Exchange:** `bandada.events` · **Publica:** `social-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: social-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.social.post.published.v1
+            source:
+              const: /services/social-service
+            data:
+              $ref: '#/components/schemas/PostPublishedData'
+      bindings:
+        amqp:
+          messageType: bandada.social.post.published.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Post publicado
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-384390085064
+          source: /services/social-service
+          type: bandada.social.post.published.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: posts/0192a3a0-0000-7000-8000-000000000321
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            postId: 0192a3a0-0000-7000-8000-000000000321
+            authorId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            groupId: null
+            visibility: PUBLIC
+            hashtags:
+            - docker
+            - fcpn
+            mediaIds:
+            - 0192a3a2-0000-7000-8000-000000000654
+            occurredAt: '2026-10-14T14:00:00Z'
+    SocialPostHiddenV1:
+      name: SocialPostHiddenV1
+      title: Post ocultado
+      summary: bandada.social.post.hidden.v1
+      description: |-
+        El post pasó a `HIDDEN` por medio marcado, umbral de denuncias (3) o decisión de moderación.
+
+        **Exchange:** `bandada.events` · **Publica:** `social-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: social-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.social.post.hidden.v1
+            source:
+              const: /services/social-service
+            data:
+              $ref: '#/components/schemas/PostHiddenData'
+      bindings:
+        amqp:
+          messageType: bandada.social.post.hidden.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Post ocultado
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-050096269621
+          source: /services/social-service
+          type: bandada.social.post.hidden.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: posts/0192a3a0-0000-7000-8000-000000000321
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            postId: 0192a3a0-0000-7000-8000-000000000321
+            authorId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            reason: REPORTED
+            occurredAt: '2026-10-14T14:00:00Z'
+    SocialPostDeletedV1:
+      name: SocialPostDeletedV1
+      title: Post eliminado
+      summary: bandada.social.post.deleted.v1
+      description: |-
+        El autor o un moderador eliminó el post. media-service elimina/archiva sus medios.
+
+        **Exchange:** `bandada.events` · **Publica:** `social-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: social-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.social.post.deleted.v1
+            source:
+              const: /services/social-service
+            data:
+              $ref: '#/components/schemas/PostDeletedData'
+      bindings:
+        amqp:
+          messageType: bandada.social.post.deleted.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Post eliminado
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-434048907971
+          source: /services/social-service
+          type: bandada.social.post.deleted.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: posts/0192a3a0-0000-7000-8000-000000000321
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            postId: 0192a3a0-0000-7000-8000-000000000321
+            authorId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            mediaIds:
+            - 0192a3a2-0000-7000-8000-000000000654
+            deletedBy: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            reason: AUTHOR
+            occurredAt: '2026-10-14T14:00:00Z'
+    SocialPostRemovedV1:
+      name: SocialPostRemovedV1
+      title: Post retirado por moderación
+      summary: bandada.social.post.removed.v1
+      description: |-
+        El post pasó a `REMOVED` por decisión de moderación (`resolveContentReport` con `REMOVE` o `updatePostStatus` a `REMOVED`; UC-18, D15). notification-service avisa al autor; a diferencia de `post.deleted.v1`, el contenido se conserva para auditoría.
+
+        **Exchange:** `bandada.events` · **Publica:** `social-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: social-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.social.post.removed.v1
+            source:
+              const: /services/social-service
+            data:
+              $ref: '#/components/schemas/PostRemovedData'
+      bindings:
+        amqp:
+          messageType: bandada.social.post.removed.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Post retirado por moderación
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-0a1b2c3d4e02
+          source: /services/social-service
+          type: bandada.social.post.removed.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: posts/0192a3a0-0000-7000-8000-000000000321
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            postId: 0192a3a0-0000-7000-8000-000000000321
+            authorId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            mediaIds:
+            - 0192a3a2-0000-7000-8000-000000000654
+            removedBy: 0192a3b4-0000-7000-8000-00000000ad01
+            reportId: 0192f2c9-1d2e-7f30-8a41-b52c63d74e85
+            note: Expone datos personales de terceros.
+            occurredAt: '2026-10-14T14:00:00Z'
+    SocialCommentCreatedV1:
+      name: SocialCommentCreatedV1
+      title: Comentario creado
+      summary: bandada.social.comment.created.v1
+      description: |-
+        Nuevo comentario (UC-07). notification-service avisa al autor del post (`NEW_COMMENT`) salvo que sea él mismo.
+
+        **Exchange:** `bandada.events` · **Publica:** `social-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: social-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.social.comment.created.v1
+            source:
+              const: /services/social-service
+            data:
+              $ref: '#/components/schemas/CommentCreatedData'
+      bindings:
+        amqp:
+          messageType: bandada.social.comment.created.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Comentario creado
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-733793231513
+          source: /services/social-service
+          type: bandada.social.comment.created.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: posts/0192a3a0-0000-7000-8000-000000000321
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            commentId: 0192a3a6-0000-7000-8000-000000000901
+            postId: 0192a3a0-0000-7000-8000-000000000321
+            postAuthorId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            authorId: 0192a3b4-9999-7e8f-9a0b-1c2d3e4f0002
+            occurredAt: '2026-10-14T14:00:00Z'
+    SocialCommentHiddenV1:
+      name: SocialCommentHiddenV1
+      title: Comentario ocultado
+      summary: bandada.social.comment.hidden.v1
+      description: |-
+        El comentario pasó a `HIDDEN` por el umbral de 3 denuncias (RF-13) o a `REMOVED` por decisión de moderación (UC-10, UC-18; D15). notification-service avisa al autor.
+
+        **Exchange:** `bandada.events` · **Publica:** `social-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: social-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.social.comment.hidden.v1
+            source:
+              const: /services/social-service
+            data:
+              $ref: '#/components/schemas/CommentHiddenData'
+      bindings:
+        amqp:
+          messageType: bandada.social.comment.hidden.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Comentario ocultado
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-0a1b2c3d4e01
+          source: /services/social-service
+          type: bandada.social.comment.hidden.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: comments/0192a3a1-0000-7000-8000-000000000432
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            commentId: 0192a3a1-0000-7000-8000-000000000432
+            postId: 0192a3a0-0000-7000-8000-000000000321
+            authorId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            status: HIDDEN
+            reason: REPORTED
+            openReportsCount: 3
+            occurredAt: '2026-10-14T14:00:00Z'
+    SocialReactionSetV1:
+      name: SocialReactionSetV1
+      title: Reacción establecida
+      summary: bandada.social.reaction.set.v1
+      description: |-
+        Un usuario creó o cambió su reacción a un post (una por usuario y post).
+
+        **Exchange:** `bandada.events` · **Publica:** `social-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: social-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.social.reaction.set.v1
+            source:
+              const: /services/social-service
+            data:
+              $ref: '#/components/schemas/ReactionSetData'
+      bindings:
+        amqp:
+          messageType: bandada.social.reaction.set.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Reacción establecida
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-469487200866
+          source: /services/social-service
+          type: bandada.social.reaction.set.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: posts/0192a3a0-0000-7000-8000-000000000321
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            postId: 0192a3a0-0000-7000-8000-000000000321
+            postAuthorId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            userId: 0192a3b4-9999-7e8f-9a0b-1c2d3e4f0002
+            type: HELPFUL
+            previousType: null
+            occurredAt: '2026-10-14T14:00:00Z'
+    SocialFollowCreatedV1:
+      name: SocialFollowCreatedV1
+      title: Nuevo seguidor
+      summary: bandada.social.follow.created.v1
+      description: |-
+        `followerId` empezó a seguir a `followeeId` (UC-08).
+
+        **Exchange:** `bandada.events` · **Publica:** `social-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: social-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.social.follow.created.v1
+            source:
+              const: /services/social-service
+            data:
+              $ref: '#/components/schemas/FollowCreatedData'
+      bindings:
+        amqp:
+          messageType: bandada.social.follow.created.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Nuevo seguidor
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-071420465079
+          source: /services/social-service
+          type: bandada.social.follow.created.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: users/0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            followerId: 0192a3b4-9999-7e8f-9a0b-1c2d3e4f0002
+            followeeId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            occurredAt: '2026-10-14T14:00:00Z'
+    SocialGroupJoinRequestedV1:
+      name: SocialGroupJoinRequestedV1
+      title: Solicitud de ingreso a grupo
+      summary: bandada.social.group.join-requested.v1
+      description: |-
+        Un usuario pidió unirse a un grupo (UC-09). En grupos privados la membresía queda `PENDING` y se notifica a los administradores del grupo (`GROUP_REQUEST`).
+
+        **Exchange:** `bandada.events` · **Publica:** `social-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: social-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.social.group.join-requested.v1
+            source:
+              const: /services/social-service
+            data:
+              $ref: '#/components/schemas/GroupJoinRequestedData'
+      bindings:
+        amqp:
+          messageType: bandada.social.group.join-requested.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Solicitud de ingreso a grupo
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-351149595229
+          source: /services/social-service
+          type: bandada.social.group.join-requested.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: groups/0192a3a5-0000-7000-8000-000000000077
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            groupId: 0192a3a5-0000-7000-8000-000000000077
+            groupName: Cálculo II — Paralelo B
+            privacy: PRIVATE
+            userId: 0192a3b4-9999-7e8f-9a0b-1c2d3e4f0002
+            membershipStatus: PENDING
+            groupAdminIds:
+            - 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            occurredAt: '2026-10-14T14:00:00Z'
+    SocialContentReportedV1:
+      name: SocialContentReportedV1
+      title: Contenido denunciado
+      summary: bandada.social.content.reported.v1
+      description: |-
+        Se registró una denuncia (UC-10). Si `openReportsCount` llega a 3 el contenido se oculta (`autoHidden: true`).
+
+        **Exchange:** `bandada.events` · **Publica:** `social-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: social-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.social.content.reported.v1
+            source:
+              const: /services/social-service
+            data:
+              $ref: '#/components/schemas/ContentReportedData'
+      bindings:
+        amqp:
+          messageType: bandada.social.content.reported.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Contenido denunciado
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-902300192625
+          source: /services/social-service
+          type: bandada.social.content.reported.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: posts/0192a3a0-0000-7000-8000-000000000321
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            reportId: 0192a3a7-0000-7000-8000-000000000111
+            targetType: POST
+            targetId: 0192a3a0-0000-7000-8000-000000000321
+            targetAuthorId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            reporterId: 0192a3b4-9999-7e8f-9a0b-1c2d3e4f0002
+            reason: SPAM
+            details: Spam de venta de apuntes.
+            openReportsCount: 3
+            autoHidden: true
+            occurredAt: '2026-10-14T14:00:00Z'
+    MediaAssetApprovedV1:
+      name: MediaAssetApprovedV1
+      title: Medio aprobado
+      summary: bandada.media.asset.approved.v1
+      description: |-
+        El medio pasó a `APPROVED` (score < 0.5 o aprobación manual). social-service publica los posts que esperaban este medio.
+
+        **Exchange:** `bandada.events` · **Publica:** `media-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: media-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.media.asset.approved.v1
+            source:
+              const: /services/media-service
+            data:
+              $ref: '#/components/schemas/MediaAssetApprovedData'
+      bindings:
+        amqp:
+          messageType: bandada.media.asset.approved.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Medio aprobado
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-078465456235
+          source: /services/media-service
+          type: bandada.media.asset.approved.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: media/0192a3a2-0000-7000-8000-000000000654
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            mediaId: 0192a3a2-0000-7000-8000-000000000654
+            ownerId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            kind: IMAGE
+            decision: ALLOW
+            tags:
+            - apuntes
+            - evento
+            modelVersion: nsfw-classifier@1.2.0
+            reviewedBy: null
+            occurredAt: '2026-10-14T14:00:00Z'
+    MediaAssetFlaggedV1:
+      name: MediaAssetFlaggedV1
+      title: Medio marcado para revisión
+      summary: bandada.media.asset.flagged.v1
+      description: |-
+        Score entre 0.5 y 0.85 (`REVIEW`): queda `FLAGGED` hasta revisión humana. n8n `wf-03` escala si `maxScore ≥ 0.95` o 3+ flags del autor en 24 h.
+
+        **Exchange:** `bandada.events` · **Publica:** `media-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: media-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.media.asset.flagged.v1
+            source:
+              const: /services/media-service
+            data:
+              $ref: '#/components/schemas/MediaAssetFlaggedData'
+      bindings:
+        amqp:
+          messageType: bandada.media.asset.flagged.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Medio marcado para revisión
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-209256310385
+          source: /services/media-service
+          type: bandada.media.asset.flagged.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: media/0192a3a2-0000-7000-8000-000000000654
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            mediaId: 0192a3a2-0000-7000-8000-000000000654
+            ownerId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            kind: IMAGE
+            decision: REVIEW
+            labels:
+            - nsfw
+            scores:
+              nsfw: 0.71
+              violence: 0.04
+            maxScore: 0.71
+            modelVersion: nsfw-classifier@1.2.0
+            occurredAt: '2026-10-14T14:00:00Z'
+    MediaAssetRejectedV1:
+      name: MediaAssetRejectedV1
+      title: Medio rechazado
+      summary: bandada.media.asset.rejected.v1
+      description: |-
+        Rechazo automático (score ≥ 0.85, `BLOCK`) o manual de un moderador. social-service oculta los posts que lo contienen.
+
+        **Exchange:** `bandada.events` · **Publica:** `media-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: media-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.media.asset.rejected.v1
+            source:
+              const: /services/media-service
+            data:
+              $ref: '#/components/schemas/MediaAssetRejectedData'
+      bindings:
+        amqp:
+          messageType: bandada.media.asset.rejected.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Medio rechazado
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-523607115459
+          source: /services/media-service
+          type: bandada.media.asset.rejected.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: media/0192a3a2-0000-7000-8000-000000000654
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            mediaId: 0192a3a2-0000-7000-8000-000000000654
+            ownerId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            kind: IMAGE
+            decision: BLOCK
+            scores:
+              nsfw: 0.93
+            source: AUTOMATIC
+            reviewedBy: null
+            note: null
+            occurredAt: '2026-10-14T14:00:00Z'
+    EventsEventPublishedV1:
+      name: EventsEventPublishedV1
+      title: Evento publicado
+      summary: bandada.events.event.published.v1
+      description: |-
+        Un organizador publicó un evento (UC-11).
+
+        **Exchange:** `bandada.events` · **Publica:** `events-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: events-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.events.event.published.v1
+            source:
+              const: /services/events-service
+            data:
+              $ref: '#/components/schemas/EventPublishedData'
+      bindings:
+        amqp:
+          messageType: bandada.events.event.published.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Evento publicado
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-839411140521
+          source: /services/events-service
+          type: bandada.events.event.published.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: events/0192a3be-1234-7abc-8def-000000000042
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            eventId: 0192a3be-1234-7abc-8def-000000000042
+            organizerId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            title: Taller de Docker para principiantes
+            startsAt: '2026-10-20T22:00:00Z'
+            venue: Auditorio de la Facultad de Tecnología, UMSA
+            capacity: 80
+            priceCredits: 15
+            occurredAt: '2026-10-14T14:00:00Z'
+    EventsEventCancelledV1:
+      name: EventsEventCancelledV1
+      title: Evento cancelado
+      summary: bandada.events.event.cancelled.v1
+      description: |-
+        El organizador canceló el evento. events-service lanza SAGAs `CANCELLATION` para cada inscripción confirmada.
+
+        **Exchange:** `bandada.events` · **Publica:** `events-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: events-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.events.event.cancelled.v1
+            source:
+              const: /services/events-service
+            data:
+              $ref: '#/components/schemas/EventCancelledData'
+      bindings:
+        amqp:
+          messageType: bandada.events.event.cancelled.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Evento cancelado
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-958009204439
+          source: /services/events-service
+          type: bandada.events.event.cancelled.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: events/0192a3be-1234-7abc-8def-000000000042
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            eventId: 0192a3be-1234-7abc-8def-000000000042
+            organizerId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            title: Taller de Docker para principiantes
+            startsAt: '2026-10-20T22:00:00Z'
+            reason: El auditorio no estará disponible por mantenimiento.
+            confirmedRegistrations: 54
+            occurredAt: '2026-10-14T14:00:00Z'
+    EventsRegistrationConfirmedV1:
+      name: EventsRegistrationConfirmedV1
+      title: Inscripción confirmada
+      summary: bandada.events.registration.confirmed.v1
+      description: |-
+        La SAGA de inscripción terminó con éxito (UC-12): cupo reservado, créditos debitados y ticket emitido.
+
+        **Exchange:** `bandada.events` · **Publica:** `events-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: events-service
+      - name: saga
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required:
+          - sagaid
+          properties:
+            type:
+              const: bandada.events.registration.confirmed.v1
+            source:
+              const: /services/events-service
+            data:
+              $ref: '#/components/schemas/RegistrationConfirmedData'
+      bindings:
+        amqp:
+          messageType: bandada.events.registration.confirmed.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Inscripción confirmada
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-631018528617
+          source: /services/events-service
+          type: bandada.events.registration.confirmed.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: registrations/0192a3bf-aaaa-7bbb-8ccc-000000000777
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          causationid: 0192a3bf-dddd-7eee-8fff-000000000001
+          sagaid: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+            eventId: 0192a3be-1234-7abc-8def-000000000042
+            userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            sagaId: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+            eventTitle: Taller de Docker para principiantes
+            eventStartsAt: '2026-10-20T22:00:00Z'
+            ticketId: 0192a3c5-7777-7aaa-8bbb-000000000101
+            priceCredits: 15
+            occurredAt: '2026-10-14T14:00:00Z'
+    EventsRegistrationFailedV1:
+      name: EventsRegistrationFailedV1
+      title: Inscripción fallida
+      summary: bandada.events.registration.failed.v1
+      description: |-
+        La SAGA falló y se compensó (cupo liberado, créditos reembolsados si se habían debitado).
+
+        **Exchange:** `bandada.events` · **Publica:** `events-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: events-service
+      - name: saga
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required:
+          - sagaid
+          properties:
+            type:
+              const: bandada.events.registration.failed.v1
+            source:
+              const: /services/events-service
+            data:
+              $ref: '#/components/schemas/RegistrationFailedData'
+      bindings:
+        amqp:
+          messageType: bandada.events.registration.failed.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Inscripción fallida
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-031624308315
+          source: /services/events-service
+          type: bandada.events.registration.failed.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: registrations/0192a3bf-aaaa-7bbb-8ccc-000000000777
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          causationid: 0192a3bf-dddd-7eee-8fff-000000000001
+          sagaid: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+            eventId: 0192a3be-1234-7abc-8def-000000000042
+            userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            sagaId: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+            eventTitle: Taller de Docker para principiantes
+            eventStartsAt: '2026-10-20T22:00:00Z'
+            reason: INSUFFICIENT_FUNDS
+            occurredAt: '2026-10-14T14:00:00Z'
+    EventsRegistrationCancelledV1:
+      name: EventsRegistrationCancelledV1
+      title: Inscripción cancelada
+      summary: bandada.events.registration.cancelled.v1
+      description: |-
+        SAGA `CANCELLATION` completada (UC-13): ticket anulado, créditos reembolsados y cupo liberado.
+
+        **Exchange:** `bandada.events` · **Publica:** `events-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: events-service
+      - name: saga
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required:
+          - sagaid
+          properties:
+            type:
+              const: bandada.events.registration.cancelled.v1
+            source:
+              const: /services/events-service
+            data:
+              $ref: '#/components/schemas/RegistrationCancelledData'
+      bindings:
+        amqp:
+          messageType: bandada.events.registration.cancelled.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Inscripción cancelada
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-802579800723
+          source: /services/events-service
+          type: bandada.events.registration.cancelled.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: registrations/0192a3bf-aaaa-7bbb-8ccc-000000000777
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          causationid: 0192a3bf-dddd-7eee-8fff-000000000001
+          sagaid: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+            eventId: 0192a3be-1234-7abc-8def-000000000042
+            userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            sagaId: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+            eventTitle: Taller de Docker para principiantes
+            eventStartsAt: '2026-10-20T22:00:00Z'
+            refundedCredits: 15
+            occurredAt: '2026-10-14T14:00:00Z'
+    WalletTopupPaidV1:
+      name: WalletTopupPaidV1
+      title: Recarga pagada
+      summary: bandada.wallet.topup.paid.v1
+      description: |-
+        Se acreditó una recarga (UC-15). Se emite una sola vez por `gatewayRef`.
+
+        **Exchange:** `bandada.events` · **Publica:** `wallet-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: wallet-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.wallet.topup.paid.v1
+            source:
+              const: /services/wallet-service
+            data:
+              $ref: '#/components/schemas/TopUpPaidData'
+      bindings:
+        amqp:
+          messageType: bandada.wallet.topup.paid.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Recarga pagada
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-261408272288
+          source: /services/wallet-service
+          type: bandada.wallet.topup.paid.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: wallets/0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            topUpId: 0192a3bd-0000-7000-8000-000000000010
+            userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            package: CREDITS_50
+            amountCredits: 50
+            gatewayRef: SIM-PAY-8f3a2c19
+            ledgerEntryId: 0192a3c0-1111-7aaa-8bbb-000000000001
+            balanceCredits: 135
+            occurredAt: '2026-10-14T14:00:00Z'
+    WalletCreditsDebitedV1:
+      name: WalletCreditsDebitedV1
+      title: Créditos debitados (respuesta SAGA)
+      summary: bandada.wallet.credits-debited.v1
+      description: |-
+        Respuesta OK al comando `debit-credits`. Si el comando se repite (mismo `operationRef`) se reenvía esta misma respuesta sin volver a debitar.
+
+        **Exchange:** `bandada.events` · **Publica:** `wallet-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: wallet-service
+      - name: saga
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required:
+          - sagaid
+          properties:
+            type:
+              const: bandada.wallet.credits-debited.v1
+            source:
+              const: /services/wallet-service
+            data:
+              $ref: '#/components/schemas/CreditsDebitedData'
+      bindings:
+        amqp:
+          messageType: bandada.wallet.credits-debited.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Créditos debitados (respuesta SAGA)
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-050633923218
+          source: /services/wallet-service
+          type: bandada.wallet.credits-debited.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: registrations/0192a3bf-aaaa-7bbb-8ccc-000000000777
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          causationid: 0192a3bf-dddd-7eee-8fff-000000000001
+          sagaid: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            sagaId: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+            registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+            userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            ledgerEntryId: 0192a3c0-1111-7aaa-8bbb-000000000003
+            amountCredits: 15
+            balanceCredits: 85
+            occurredAt: '2026-10-14T14:00:00Z'
+    WalletCreditsDebitFailedV1:
+      name: WalletCreditsDebitFailedV1
+      title: Débito fallido (respuesta SAGA)
+      summary: bandada.wallet.credits-debit-failed.v1
+      description: |-
+        Respuesta de fallo al comando `debit-credits`: `INSUFFICIENT_FUNDS`, `WALLET_NOT_FOUND` o `SAGA_ABORTED` (débito tardío tras el reembolso; el orquestador lo ignora porque la SAGA ya terminó).
+
+        **Exchange:** `bandada.events` · **Publica:** `wallet-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: wallet-service
+      - name: saga
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required:
+          - sagaid
+          properties:
+            type:
+              const: bandada.wallet.credits-debit-failed.v1
+            source:
+              const: /services/wallet-service
+            data:
+              $ref: '#/components/schemas/CreditsDebitFailedData'
+      bindings:
+        amqp:
+          messageType: bandada.wallet.credits-debit-failed.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Débito fallido (respuesta SAGA)
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-365109138285
+          source: /services/wallet-service
+          type: bandada.wallet.credits-debit-failed.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: registrations/0192a3bf-aaaa-7bbb-8ccc-000000000777
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          causationid: 0192a3bf-dddd-7eee-8fff-000000000001
+          sagaid: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            sagaId: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+            registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+            userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            reason: INSUFFICIENT_FUNDS
+            requiredCredits: 15
+            balanceCredits: 5
+            occurredAt: '2026-10-14T14:00:00Z'
+    WalletCreditsRefundedV1:
+      name: WalletCreditsRefundedV1
+      title: Créditos reembolsados (respuesta SAGA)
+      summary: bandada.wallet.credits-refunded.v1
+      description: |-
+        Respuesta al comando `refund-credits` (compensación o cancelación). Idempotente por `REFUND:<registrationId>`. Si no había débito previo se registra un *tombstone* y se responde con `amountCredits: 0` (los créditos reembolsados, `refundedCredits` en D15/ADR-0016) y `ledgerEntryId: null`; un `debit-credits` tardío responderá `credits-debit-failed` con `SAGA_ABORTED`.
+
+        **Exchange:** `bandada.events` · **Publica:** `wallet-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: wallet-service
+      - name: saga
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required:
+          - sagaid
+          properties:
+            type:
+              const: bandada.wallet.credits-refunded.v1
+            source:
+              const: /services/wallet-service
+            data:
+              $ref: '#/components/schemas/CreditsRefundedData'
+      bindings:
+        amqp:
+          messageType: bandada.wallet.credits-refunded.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Créditos reembolsados (respuesta SAGA)
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-161195966479
+          source: /services/wallet-service
+          type: bandada.wallet.credits-refunded.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: registrations/0192a3bf-aaaa-7bbb-8ccc-000000000777
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          causationid: 0192a3bf-dddd-7eee-8fff-000000000001
+          sagaid: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            sagaId: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+            registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+            userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            ledgerEntryId: 0192a3c0-1111-7aaa-8bbb-000000000004
+            amountCredits: 15
+            balanceCredits: 100
+            occurredAt: '2026-10-14T14:00:00Z'
+    TicketingTicketIssuedV1:
+      name: TicketingTicketIssuedV1
+      title: Ticket emitido (respuesta SAGA)
+      summary: bandada.ticketing.ticket-issued.v1
+      description: |-
+        Respuesta OK al comando `issue-ticket`. Si ya existía un ticket para la inscripción (GSI2 `REG#`), se responde con ese mismo ticket.
+
+        **Exchange:** `bandada.events` · **Publica:** `ticketing-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: ticketing-service
+      - name: saga
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required:
+          - sagaid
+          properties:
+            type:
+              const: bandada.ticketing.ticket-issued.v1
+            source:
+              const: /services/ticketing-service
+            data:
+              $ref: '#/components/schemas/TicketIssuedData'
+      bindings:
+        amqp:
+          messageType: bandada.ticketing.ticket-issued.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Ticket emitido (respuesta SAGA)
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-131562950783
+          source: /services/ticketing-service
+          type: bandada.ticketing.ticket-issued.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: registrations/0192a3bf-aaaa-7bbb-8ccc-000000000777
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          causationid: 0192a3bf-dddd-7eee-8fff-000000000001
+          sagaid: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            sagaId: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+            registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+            ticketId: 0192a3c5-7777-7aaa-8bbb-000000000101
+            eventId: 0192a3be-1234-7abc-8def-000000000042
+            userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            occurredAt: '2026-10-14T14:00:00Z'
+    TicketingTicketIssueFailedV1:
+      name: TicketingTicketIssueFailedV1
+      title: Emisión de ticket fallida (respuesta SAGA)
+      summary: bandada.ticketing.ticket-issue-failed.v1
+      description: |-
+        Respuesta de fallo al comando `issue-ticket` (incluye el fallo forzado `CHAOS_TICKETING_FAIL=true` de la demo y `ALREADY_VOIDED` cuando la emisión llega tarde tras una anulación).
+
+        **Exchange:** `bandada.events` · **Publica:** `ticketing-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: ticketing-service
+      - name: saga
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required:
+          - sagaid
+          properties:
+            type:
+              const: bandada.ticketing.ticket-issue-failed.v1
+            source:
+              const: /services/ticketing-service
+            data:
+              $ref: '#/components/schemas/TicketIssueFailedData'
+      bindings:
+        amqp:
+          messageType: bandada.ticketing.ticket-issue-failed.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Emisión de ticket fallida (respuesta SAGA)
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-118927046889
+          source: /services/ticketing-service
+          type: bandada.ticketing.ticket-issue-failed.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: registrations/0192a3bf-aaaa-7bbb-8ccc-000000000777
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          causationid: 0192a3bf-dddd-7eee-8fff-000000000001
+          sagaid: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            sagaId: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+            registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+            reason: CHAOS_INJECTED
+            detail: CHAOS_TICKETING_FAIL activo
+            occurredAt: '2026-10-14T14:00:00Z'
+    TicketingTicketVoidedV1:
+      name: TicketingTicketVoidedV1
+      title: Ticket anulado (respuesta SAGA)
+      summary: bandada.ticketing.ticket-voided.v1
+      description: |-
+        Respuesta al comando `void-ticket`. Idempotente: si no existía ticket se responde con `ticketId: null`.
+
+        **Exchange:** `bandada.events` · **Publica:** `ticketing-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: ticketing-service
+      - name: saga
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required:
+          - sagaid
+          properties:
+            type:
+              const: bandada.ticketing.ticket-voided.v1
+            source:
+              const: /services/ticketing-service
+            data:
+              $ref: '#/components/schemas/TicketVoidedData'
+      bindings:
+        amqp:
+          messageType: bandada.ticketing.ticket-voided.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Ticket anulado (respuesta SAGA)
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-534946472655
+          source: /services/ticketing-service
+          type: bandada.ticketing.ticket-voided.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: registrations/0192a3bf-aaaa-7bbb-8ccc-000000000777
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          causationid: 0192a3bf-dddd-7eee-8fff-000000000001
+          sagaid: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            sagaId: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+            registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+            ticketId: 0192a3c5-7777-7aaa-8bbb-000000000101
+            occurredAt: '2026-10-14T14:00:00Z'
+    TicketingTicketVoidFailedV1:
+      name: TicketingTicketVoidFailedV1
+      title: Anulación de ticket fallida (respuesta SAGA)
+      summary: bandada.ticketing.ticket-void-failed.v1
+      description: |-
+        Respuesta de fallo al comando `void-ticket` cuando el ticket ya fue `USED` (invariante 5: no se puede anular; UC-13 8c, D15). El orquestador marca la SAGA `CANCELLATION` como `COMPENSATED` y devuelve la `Registration` a `CONFIRMED`.
+
+        **Exchange:** `bandada.events` · **Publica:** `ticketing-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: ticketing-service
+      - name: saga
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required:
+          - sagaid
+          properties:
+            type:
+              const: bandada.ticketing.ticket-void-failed.v1
+            source:
+              const: /services/ticketing-service
+            data:
+              $ref: '#/components/schemas/TicketVoidFailedData'
+      bindings:
+        amqp:
+          messageType: bandada.ticketing.ticket-void-failed.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Anulación de ticket fallida (respuesta SAGA)
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-0a1b2c3d4e03
+          source: /services/ticketing-service
+          type: bandada.ticketing.ticket-void-failed.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: registrations/0192a3bf-aaaa-7bbb-8ccc-000000000777
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          causationid: 0192a3bf-dddd-7eee-8fff-000000000001
+          sagaid: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            sagaId: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+            registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+            ticketId: 0192a3c5-7777-7aaa-8bbb-000000000101
+            reason: TICKET_ALREADY_USED
+            usedAt: '2026-10-14T13:58:10Z'
+            occurredAt: '2026-10-14T14:00:00Z'
+    TicketingTicketUsedV1:
+      name: TicketingTicketUsedV1
+      title: Ticket usado
+      summary: bandada.ticketing.ticket.used.v1
+      description: |-
+        El ticket fue validado en la puerta (UC-14).
+
+        **Exchange:** `bandada.events` · **Publica:** `ticketing-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: ticketing-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.ticketing.ticket.used.v1
+            source:
+              const: /services/ticketing-service
+            data:
+              $ref: '#/components/schemas/TicketUsedData'
+      bindings:
+        amqp:
+          messageType: bandada.ticketing.ticket.used.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Ticket usado
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-726946011693
+          source: /services/ticketing-service
+          type: bandada.ticketing.ticket.used.v1
+          time: '2026-10-20T21:48:10Z'
+          subject: tickets/0192a3c5-7777-7aaa-8bbb-000000000101
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            ticketId: 0192a3c5-7777-7aaa-8bbb-000000000101
+            registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+            eventId: 0192a3be-1234-7abc-8def-000000000042
+            userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            validatedBy: 0192a3b4-9999-7e8f-9a0b-1c2d3e4f0002
+            occurredAt: '2026-10-20T21:48:10Z'
+    InsightsAlertRaisedV1:
+      name: InsightsAlertRaisedV1
+      title: Alerta generada
+      summary: bandada.insights.alert.raised.v1
+      description: |-
+        El agente de monitoreo (o n8n vía REST interno) creó una alerta (UC-20). n8n `wf-05` actúa si `severity = CRITICAL`.
+
+        **Exchange:** `bandada.events` · **Publica:** `insights-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: insights-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.insights.alert.raised.v1
+            source:
+              const: /services/insights-service
+            data:
+              $ref: '#/components/schemas/AlertRaisedData'
+      bindings:
+        amqp:
+          messageType: bandada.insights.alert.raised.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Alerta generada
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-811536207894
+          source: /services/insights-service
+          type: bandada.insights.alert.raised.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: alerts/0192a3e5-0000-7000-8000-000000000a01
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            alertId: 0192a3e5-0000-7000-8000-000000000a01
+            severity: CRITICAL
+            kind: SAGA_FAILURES
+            message: 12 inscripciones compensadas en los últimos 15 minutos (umbral 5).
+            details:
+              window: 15m
+              compensatedSagas: 12
+              suspectedService: ticketing-service
+            agentRunId: 0192a3e5-0000-7000-8000-000000000a00
+            occurredAt: '2026-10-14T14:00:00Z'
+    InsightsReportReadyV1:
+      name: InsightsReportReadyV1
+      title: Reporte listo
+      summary: bandada.insights.report.ready.v1
+      description: |-
+        Un reporte generativo terminó (`READY` o `FAILED`). admin-gateway lo propaga a `Subscription.reportReady`.
+
+        **Exchange:** `bandada.events` · **Publica:** `insights-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: insights-service
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: bandada.insights.report.ready.v1
+            source:
+              const: /services/insights-service
+            data:
+              $ref: '#/components/schemas/ReportReadyData'
+      bindings:
+        amqp:
+          messageType: bandada.insights.report.ready.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: Reporte listo
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-838231036367
+          source: /services/insights-service
+          type: bandada.insights.report.ready.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: reports/0192a3e0-0000-7000-8000-000000000901
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            reportId: 0192a3e0-0000-7000-8000-000000000901
+            requestedBy: 0192a3b4-0000-7000-8000-00000000ad01
+            status: READY
+            title: Inscripciones y créditos — septiembre vs. agosto 2026
+            locale: es
+            hasAudio: true
+            occurredAt: '2026-10-14T14:00:00Z'
+    WalletCmdDebitCreditsV1:
+      name: WalletCmdDebitCreditsV1
+      title: 'Comando: debitar créditos'
+      summary: bandada.wallet.cmd.debit-credits.v1
+      description: |-
+        Paso 2 de la SAGA. wallet-service crea un `LedgerEntry DEBIT` con `operationRef = DEBIT:<registrationId>` (único) y responde `credits-debited` o `credits-debit-failed`.
+
+        **Exchange:** `bandada.commands` · **Publica:** `events-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: events-service
+      - name: saga
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required:
+          - sagaid
+          properties:
+            type:
+              const: bandada.wallet.cmd.debit-credits.v1
+            source:
+              const: /services/events-service
+            data:
+              $ref: '#/components/schemas/DebitCreditsCommandData'
+      bindings:
+        amqp:
+          messageType: bandada.wallet.cmd.debit-credits.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: 'Comando: debitar créditos'
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-527104594133
+          source: /services/events-service
+          type: bandada.wallet.cmd.debit-credits.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: registrations/0192a3bf-aaaa-7bbb-8ccc-000000000777
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          causationid: 0192a3bf-dddd-7eee-8fff-000000000001
+          sagaid: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            sagaId: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+            registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+            idempotencyKey: 0192a3bf-bbbb-7ccc-8ddd-000000000888:DEBIT
+            userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            eventId: 0192a3be-1234-7abc-8def-000000000042
+            amountCredits: 15
+            description: Inscripción a «Taller de Docker para principiantes»
+            deadlineAt: '2026-10-14T14:00:30Z'
+    WalletCmdRefundCreditsV1:
+      name: WalletCmdRefundCreditsV1
+      title: 'Comando: reembolsar créditos'
+      summary: bandada.wallet.cmd.refund-credits.v1
+      description: |-
+        Compensación del paso 2 (o paso de la SAGA `CANCELLATION`). `operationRef = REFUND:<registrationId>`; responde `credits-refunded`.
+
+        **Exchange:** `bandada.commands` · **Publica:** `events-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: events-service
+      - name: saga
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required:
+          - sagaid
+          properties:
+            type:
+              const: bandada.wallet.cmd.refund-credits.v1
+            source:
+              const: /services/events-service
+            data:
+              $ref: '#/components/schemas/RefundCreditsCommandData'
+      bindings:
+        amqp:
+          messageType: bandada.wallet.cmd.refund-credits.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: 'Comando: reembolsar créditos'
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-424108089718
+          source: /services/events-service
+          type: bandada.wallet.cmd.refund-credits.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: registrations/0192a3bf-aaaa-7bbb-8ccc-000000000777
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          causationid: 0192a3bf-dddd-7eee-8fff-000000000001
+          sagaid: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            sagaId: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+            registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+            idempotencyKey: 0192a3bf-bbbb-7ccc-8ddd-000000000888:REFUND
+            userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            amountCredits: 15
+            reason: SAGA_COMPENSATION
+            deadlineAt: '2026-10-14T14:01:30Z'
+    TicketingCmdIssueTicketV1:
+      name: TicketingCmdIssueTicketV1
+      title: 'Comando: emitir ticket'
+      summary: bandada.ticketing.cmd.issue-ticket.v1
+      description: |-
+        Paso 3 de la SAGA. ticketing-service crea el ticket (condición: uno por `registrationId`) con `qrPayload` firmado y responde `ticket-issued` o `ticket-issue-failed`.
+
+        **Exchange:** `bandada.commands` · **Publica:** `events-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: events-service
+      - name: saga
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required:
+          - sagaid
+          properties:
+            type:
+              const: bandada.ticketing.cmd.issue-ticket.v1
+            source:
+              const: /services/events-service
+            data:
+              $ref: '#/components/schemas/IssueTicketCommandData'
+      bindings:
+        amqp:
+          messageType: bandada.ticketing.cmd.issue-ticket.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: 'Comando: emitir ticket'
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-984155440655
+          source: /services/events-service
+          type: bandada.ticketing.cmd.issue-ticket.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: registrations/0192a3bf-aaaa-7bbb-8ccc-000000000777
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          causationid: 0192a3bf-dddd-7eee-8fff-000000000001
+          sagaid: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            sagaId: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+            registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+            idempotencyKey: 0192a3bf-bbbb-7ccc-8ddd-000000000888:ISSUE_TICKET
+            eventId: 0192a3be-1234-7abc-8def-000000000042
+            userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+            eventTitle: Taller de Docker para principiantes
+            eventStartsAt: '2026-10-20T22:00:00Z'
+            venue: Auditorio de la Facultad de Tecnología, UMSA
+            deadlineAt: '2026-10-14T14:00:33Z'
+    TicketingCmdVoidTicketV1:
+      name: TicketingCmdVoidTicketV1
+      title: 'Comando: anular ticket'
+      summary: bandada.ticketing.cmd.void-ticket.v1
+      description: |-
+        Compensación del paso 3 (o primer paso de la SAGA `CANCELLATION`). Responde `ticket-voided`.
+
+        **Exchange:** `bandada.commands` · **Publica:** `events-service`
+      contentType: application/cloudevents+json
+      correlationId:
+        location: $message.payload#/correlationid
+      tags:
+      - name: events-service
+      - name: saga
+      payload:
+        allOf:
+        - $ref: '#/components/schemas/CloudEventEnvelope'
+        - type: object
+          required:
+          - sagaid
+          properties:
+            type:
+              const: bandada.ticketing.cmd.void-ticket.v1
+            source:
+              const: /services/events-service
+            data:
+              $ref: '#/components/schemas/VoidTicketCommandData'
+      bindings:
+        amqp:
+          messageType: bandada.ticketing.cmd.void-ticket.v1
+          bindingVersion: 0.3.0
+      examples:
+      - name: ejemplo
+        summary: 'Comando: anular ticket'
+        payload:
+          specversion: '1.0'
+          id: 0192a3bf-dddd-7eee-8fff-908348438263
+          source: /services/events-service
+          type: bandada.ticketing.cmd.void-ticket.v1
+          time: '2026-10-14T14:00:00Z'
+          subject: registrations/0192a3bf-aaaa-7bbb-8ccc-000000000777
+          datacontenttype: application/json
+          correlationid: 0192a3bf-cccc-7ddd-8eee-000000000999
+          causationid: 0192a3bf-dddd-7eee-8fff-000000000001
+          sagaid: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+          traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+          data:
+            sagaId: 0192a3bf-bbbb-7ccc-8ddd-000000000888
+            registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+            idempotencyKey: 0192a3bf-bbbb-7ccc-8ddd-000000000888:VOID_TICKET
+            ticketId: 0192a3c5-7777-7aaa-8bbb-000000000101
+            reason: USER_CANCELLATION
+            deadlineAt: '2026-10-14T14:00:30Z'
+  securitySchemes:
+    rabbitUserPassword:
+      type: userPassword
+      description: Usuario/contraseña por servicio (`RABBITMQ_URL`), con permisos de configure/write/read limitados a sus
+        colas y exchanges.
+  operationBindings:
+    publishPersistent:
+      amqp:
+        deliveryMode: 2
+        mandatory: true
+        timestamp: true
+        bindingVersion: 0.3.0
+    consumeAck:
+      amqp:
+        ack: true
+        bindingVersion: 0.3.0

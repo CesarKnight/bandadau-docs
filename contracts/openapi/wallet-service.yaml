@@ -1,0 +1,720 @@
+openapi: 3.1.0
+info:
+  title: Bandada U — wallet-service
+  version: 1.0.1
+  summary: Billetera de créditos (saldo, movimientos, recargas y pasarela simulada).
+  description: |
+    API del bounded context **Billetera** (`wallet-service`, PHP 8.4 + Laravel 12,
+    arquitectura Hexagonal, PostgreSQL `wallet_db`).
+
+    - El saldo (`balanceCredits`) es la suma de los `LedgerEntry` y nunca es negativo.
+    - Los créditos son **enteros** (`int64`); nunca se usan decimales.
+    - La billetera se crea de forma perezosa: si el usuario aún no tiene una,
+      `GET /wallet/me` devuelve saldo `0`.
+    - Los débitos/reembolsos de la SAGA de inscripción **no** pasan por REST: llegan como
+      comandos por RabbitMQ (`bandada.wallet.cmd.debit-credits.v1`,
+      `bandada.wallet.cmd.refund-credits.v1`). Ver `bandadau-docs/contracts/asyncapi/bandada-events.yaml`.
+    - Errores en RFC 9457 (`application/problem+json`); `title`/`detail` localizados según
+      `Accept-Language` (`es` por defecto) y respuesta con `Content-Language` (D14).
+    - Rutas `/internal/v1/**` (tag `internal`) solo en red interna; el gateway las bloquea (403).
+
+    ## Changelog
+    - 1.0.1 (2026-10-14): `getTopUp` deja de ser propuesta (D15, ADR-0016); paquetes `CREDITS_20/50/100` y
+      cabecera `X-Signature` confirmados por ADR-0016.
+    - 1.0.0 (2026-10-14): versión inicial contract-first (D1, D3, D14).
+  contact:
+    name: Grupo 24 — Ingeniería de Software II
+servers:
+  - url: http://api.bandada.localhost/api/v1
+    description: Desarrollo local (Traefik)
+  - url: https://api.bandadau.com/api/v1
+    description: Producción
+tags:
+  - name: wallet
+    description: Saldo y movimientos del usuario autenticado.
+  - name: topups
+    description: Recargas de créditos (paquetes 20/50/100) vía pasarela simulada.
+  - name: webhooks
+    description: Callbacks de la pasarela de pago (sin JWT, firmados con HMAC).
+  - name: internal
+    description: Endpoints internos (`/internal/v1`), solo con token de servicio.
+security:
+  - bearerAuth: []
+paths:
+  /wallet/me:
+    get:
+      tags: [wallet]
+      operationId: getMyWallet
+      summary: Consultar mi billetera
+      description: Devuelve el saldo actual del usuario autenticado (UC-16, RF-20).
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Billetera del usuario.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Wallet'
+              examples:
+                conSaldo:
+                  summary: Estudiante con saldo
+                  value:
+                    userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+                    balanceCredits: 85
+                    updatedAt: '2026-10-14T15:04:05Z'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /wallet/me/entries:
+    get:
+      tags: [wallet]
+      operationId: listMyLedgerEntries
+      summary: Listar mis movimientos
+      description: |
+        Historial paginado por cursor de los movimientos (`TOPUP`, `DEBIT`, `REFUND`) del
+        usuario, del más reciente al más antiguo (UC-16, RF-20).
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+        - name: type
+          in: query
+          required: false
+          description: Filtra por tipo de movimiento.
+          schema:
+            $ref: '#/components/schemas/LedgerEntryType'
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Página de movimientos.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LedgerEntryPage'
+              examples:
+                pagina:
+                  value:
+                    items:
+                      - id: 0192a3c0-1111-7aaa-8bbb-000000000003
+                        walletId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+                        type: DEBIT
+                        amountCredits: 15
+                        balanceAfterCredits: 85
+                        operationRef: DEBIT:0192a3bf-aaaa-7bbb-8ccc-000000000777
+                        description: Inscripción a «Taller de Docker para principiantes»
+                        registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+                        eventId: 0192a3be-1234-7abc-8def-000000000042
+                        topUpId: null
+                        createdAt: '2026-10-14T14:00:00Z'
+                      - id: 0192a3c0-1111-7aaa-8bbb-000000000001
+                        walletId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+                        type: TOPUP
+                        amountCredits: 100
+                        balanceAfterCredits: 100
+                        operationRef: TOPUP:0192a3bd-0000-7000-8000-000000000010
+                        description: Recarga de 100 créditos
+                        registrationId: null
+                        eventId: null
+                        topUpId: 0192a3bd-0000-7000-8000-000000000010
+                        createdAt: '2026-10-12T20:31:00Z'
+                    nextCursor: eyJpZCI6IjAxOTJhM2MwLTExMTEtN2FhYS04YmJiLTAwMDAwMDAwMDAwMSJ9
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /wallet/topups:
+    post:
+      tags: [topups]
+      operationId: createTopUp
+      summary: Iniciar una recarga de créditos
+      description: |
+        Crea un `TopUp` en estado `PENDING` para uno de los paquetes (20/50/100 créditos) y
+        devuelve la URL de checkout de la pasarela simulada (UC-15, RF-19).
+        **Idempotente** con `Idempotency-Key` (D3): misma clave y mismo cuerpo → misma respuesta
+        con `Idempotent-Replayed: true`.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTopUpRequest'
+            examples:
+              paquete50:
+                value:
+                  package: CREDITS_50
+      responses:
+        '201':
+          description: Recarga creada; redirigir al usuario a `checkoutUrl`.
+          headers:
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+            Location:
+              description: URL del recurso de la recarga.
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateTopUpResponse'
+              examples:
+                creada:
+                  value:
+                    topUpId: 0192a3bd-0000-7000-8000-000000000010
+                    checkoutUrl: http://app.bandada.localhost/wallet/checkout/0192a3bd-0000-7000-8000-000000000010
+                    package: CREDITS_50
+                    amountCredits: 50
+                    priceMinor: 5000
+                    currency: BOB
+                    status: PENDING
+                    expiresAt: '2026-10-14T15:34:05Z'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '409':
+          $ref: './shared/components.yaml#/components/responses/Conflict'
+        '422':
+          $ref: './shared/components.yaml#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /wallet/topups/{topUpId}:
+    get:
+      tags: [topups]
+      operationId: getTopUp
+      summary: Consultar el estado de una recarga
+      description: |
+        Aceptado en D15 (ADR-0016, UC-15): permite a la app hacer *polling* del estado de la
+        recarga al volver del checkout (el webhook llega de forma asíncrona). Solo el dueño.
+      parameters:
+        - $ref: '#/components/parameters/TopUpId'
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Recarga.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopUp'
+              examples:
+                pagada:
+                  value:
+                    id: 0192a3bd-0000-7000-8000-000000000010
+                    userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+                    package: CREDITS_50
+                    amountCredits: 50
+                    priceMinor: 5000
+                    currency: BOB
+                    status: PAID
+                    gatewayRef: SIM-PAY-8f3a2c19
+                    createdAt: '2026-10-14T15:04:05Z'
+                    paidAt: '2026-10-14T15:05:12Z'
+                    expiresAt: '2026-10-14T15:34:05Z'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /wallet/topups/{topUpId}/simulate-payment:
+    post:
+      x-dev-only: true
+      tags: [topups]
+      operationId: simulateTopUpPayment
+      summary: '[SOLO DEV/DEMO] Simular el pago de una recarga'
+      description: |
+        **Solo disponible en desarrollo/demo** (`PAYMENT_GATEWAY=simulated`); en producción
+        responde `404`. Simula la pasarela: genera un `gatewayRef`, firma un callback con HMAC y lo
+        procesa por el mismo caso de uso que `paymentWebhook` (acreditación idempotente por
+        `gatewayRef`). La página de checkout simulada de la app llama a este endpoint.
+        Solo el dueño de la recarga puede invocarlo.
+      parameters:
+        - $ref: '#/components/parameters/TopUpId'
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulatePaymentRequest'
+            examples:
+              exito:
+                value:
+                  outcome: PAID
+              rechazo:
+                value:
+                  outcome: FAILED
+      responses:
+        '200':
+          description: Pago simulado procesado; devuelve la recarga actualizada.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopUp'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          $ref: './shared/components.yaml#/components/responses/Conflict'
+
+  /wallet/webhooks/payment:
+    post:
+      tags: [webhooks]
+      operationId: paymentWebhook
+      summary: Callback de la pasarela de pago
+      description: |
+        Recibe la notificación de la pasarela (simulada). **Sin JWT**: se autentica con la firma
+        HMAC del cuerpo crudo en la cabecera `X-Signature`:
+
+        `X-Signature: sha256=<hex(HMAC-SHA256(PAYMENT_WEBHOOK_SECRET, rawBody))>`
+
+        La comparación es en tiempo constante. **Idempotente por `gatewayRef`** (D3 §5): si el
+        pago ya fue procesado se responde `200` con `duplicate: true` sin volver a acreditar.
+        Al pasar a `PAID` se crea un `LedgerEntry TOPUP` (`operationRef = TOPUP:<topUpId>`) y se
+        publica `bandada.wallet.topup.paid.v1` (outbox).
+      security: []
+      parameters:
+        - name: X-Signature
+          in: header
+          required: true
+          description: Firma HMAC-SHA256 del cuerpo crudo, con prefijo `sha256=`.
+          schema:
+            type: string
+            pattern: '^sha256=[0-9a-f]{64}$'
+          example: sha256=6f1e3c0a9b8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentWebhookPayload'
+            examples:
+              pagado:
+                value:
+                  eventId: evt_01JA7K3M2Q8XN4R6T9V0W1Y2Z3
+                  gatewayRef: SIM-PAY-8f3a2c19
+                  topUpId: 0192a3bd-0000-7000-8000-000000000010
+                  status: PAID
+                  amountMinor: 5000
+                  currency: BOB
+                  occurredAt: '2026-10-14T15:05:12Z'
+      responses:
+        '200':
+          description: Callback aceptado (también si es repetido).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentWebhookAck'
+              examples:
+                primero:
+                  value:
+                    received: true
+                    duplicate: false
+                    topUpStatus: PAID
+                repetido:
+                  value:
+                    received: true
+                    duplicate: true
+                    topUpStatus: PAID
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          description: Firma ausente o inválida.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                firmaInvalida:
+                  value:
+                    type: https://api.bandadau.com/problems/invalid-signature
+                    title: Firma inválida
+                    status: 401
+                    detail: La firma X-Signature no coincide con el cuerpo recibido.
+                    code: INVALID_SIGNATURE
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '422':
+          $ref: './shared/components.yaml#/components/responses/UnprocessableEntity'
+
+  /internal/v1/stats/credits:
+    get:
+      tags: [internal]
+      operationId: getCreditStats
+      summary: Estadísticas de créditos (interno)
+      description: |
+        Agregados de recargas, débitos y reembolsos por día en un rango. Lo consumen
+        `admin-gateway` (`walletStats`) e `insights-service` (herramienta MCP `get_credit_stats`).
+        Datos agregados, sin información personal.
+      servers:
+        - url: http://wallet-service:7005
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - name: groupBy
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [day, week, month]
+            default: day
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Estadísticas.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditStats'
+              examples:
+                semana:
+                  value:
+                    from: '2026-10-07'
+                    to: '2026-10-13'
+                    groupBy: day
+                    totals:
+                      topUpCount: 42
+                      topUpCredits: 2650
+                      debitCount: 118
+                      debitCredits: 1770
+                      refundCount: 9
+                      refundCredits: 135
+                      netCredits: 1015
+                      circulatingCredits: 12480
+                    series:
+                      - date: '2026-10-07'
+                        topUpCredits: 300
+                        debitCredits: 210
+                        refundCredits: 15
+                      - date: '2026-10-08'
+                        topUpCredits: 450
+                        debitCredits: 240
+                        refundCredits: 0
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+components:
+  parameters:
+    TopUpId:
+      name: topUpId
+      in: path
+      required: true
+      description: Identificador (UUIDv7) de la recarga.
+      schema:
+        type: string
+        format: uuid
+    From:
+      name: from
+      in: query
+      required: true
+      description: Fecha inicial inclusiva (UTC).
+      schema:
+        type: string
+        format: date
+      example: '2026-10-07'
+    To:
+      name: to
+      in: query
+      required: true
+      description: Fecha final inclusiva (UTC).
+      schema:
+        type: string
+        format: date
+      example: '2026-10-13'
+  schemas:
+    LedgerEntryType:
+      type: string
+      enum: [TOPUP, DEBIT, REFUND]
+    TopUpStatus:
+      type: string
+      enum: [PENDING, PAID, FAILED, EXPIRED]
+    TopUpPackage:
+      type: string
+      description: |
+        Paquete de recarga (RF-19). `CREDITS_20` = 20 créditos, `CREDITS_50` = 50,
+        `CREDITS_100` = 100. Precio de referencia de la pasarela simulada: 1 crédito = 1 BOB.
+      enum: [CREDITS_20, CREDITS_50, CREDITS_100]
+    Wallet:
+      type: object
+      required: [userId, balanceCredits, updatedAt]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        balanceCredits:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Saldo actual en créditos (entero, nunca negativo).
+        updatedAt:
+          type: string
+          format: date-time
+    LedgerEntry:
+      type: object
+      required: [id, walletId, type, amountCredits, balanceAfterCredits, operationRef, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        walletId:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/LedgerEntryType'
+        amountCredits:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monto en valor absoluto; el signo lo da `type` (`DEBIT` resta).
+        balanceAfterCredits:
+          type: integer
+          format: int64
+          minimum: 0
+        operationRef:
+          type: string
+          description: Referencia única por tipo (`DEBIT:<registrationId>`, `REFUND:<registrationId>`, `TOPUP:<topUpId>`).
+          pattern: '^(TOPUP|DEBIT|REFUND):[0-9a-f-]{36}$'
+        description:
+          type: string
+          description: Texto legible (localizado según `Accept-Language`).
+        registrationId:
+          type: [string, 'null']
+          format: uuid
+        eventId:
+          type: [string, 'null']
+          format: uuid
+        topUpId:
+          type: [string, 'null']
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+    LedgerEntryPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/LedgerEntry'
+    CreateTopUpRequest:
+      type: object
+      additionalProperties: false
+      required: [package]
+      properties:
+        package:
+          $ref: '#/components/schemas/TopUpPackage'
+    CreateTopUpResponse:
+      type: object
+      required: [topUpId, checkoutUrl, package, amountCredits, status, expiresAt]
+      properties:
+        topUpId:
+          type: string
+          format: uuid
+        checkoutUrl:
+          type: string
+          format: uri
+          description: URL de la pasarela (simulada en dev) a la que se redirige al usuario.
+        package:
+          $ref: '#/components/schemas/TopUpPackage'
+        amountCredits:
+          type: integer
+          format: int64
+        priceMinor:
+          type: integer
+          format: int64
+          description: Precio en unidades menores de la moneda (centavos).
+        currency:
+          type: string
+          example: BOB
+        status:
+          $ref: '#/components/schemas/TopUpStatus'
+        expiresAt:
+          type: string
+          format: date-time
+    TopUp:
+      type: object
+      required: [id, userId, package, amountCredits, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        package:
+          $ref: '#/components/schemas/TopUpPackage'
+        amountCredits:
+          type: integer
+          format: int64
+        priceMinor:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        status:
+          $ref: '#/components/schemas/TopUpStatus'
+        gatewayRef:
+          type: [string, 'null']
+          description: Referencia del pago en la pasarela (clave de deduplicación).
+        createdAt:
+          type: string
+          format: date-time
+        paidAt:
+          type: [string, 'null']
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+    SimulatePaymentRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        outcome:
+          type: string
+          enum: [PAID, FAILED]
+          default: PAID
+    PaymentWebhookPayload:
+      type: object
+      required: [eventId, gatewayRef, topUpId, status, amountMinor, currency, occurredAt]
+      properties:
+        eventId:
+          type: string
+          description: Identificador del evento en la pasarela (también se deduplica).
+        gatewayRef:
+          type: string
+          description: Referencia única del pago (clave de idempotencia del webhook).
+        topUpId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PAID, FAILED, EXPIRED]
+        amountMinor:
+          type: integer
+          format: int64
+          description: Debe coincidir con el precio del paquete; si no, `422 AMOUNT_MISMATCH`.
+        currency:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+    PaymentWebhookAck:
+      type: object
+      required: [received, duplicate]
+      properties:
+        received:
+          type: boolean
+        duplicate:
+          type: boolean
+          description: '`true` si el `gatewayRef` ya había sido procesado.'
+        topUpStatus:
+          $ref: '#/components/schemas/TopUpStatus'
+    CreditStats:
+      type: object
+      required: [from, to, groupBy, totals, series]
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        groupBy:
+          type: string
+          enum: [day, week, month]
+        totals:
+          type: object
+          required: [topUpCount, topUpCredits, debitCount, debitCredits, refundCount, refundCredits, netCredits]
+          properties:
+            topUpCount:
+              type: integer
+              format: int64
+            topUpCredits:
+              type: integer
+              format: int64
+            debitCount:
+              type: integer
+              format: int64
+            debitCredits:
+              type: integer
+              format: int64
+            refundCount:
+              type: integer
+              format: int64
+            refundCredits:
+              type: integer
+              format: int64
+            netCredits:
+              type: integer
+              format: int64
+              description: topUpCredits - debitCredits + refundCredits en el rango.
+            circulatingCredits:
+              type: integer
+              format: int64
+              description: Suma de saldos de todas las billeteras al final del rango.
+        series:
+          type: array
+          items:
+            type: object
+            required: [date, topUpCredits, debitCredits, refundCredits]
+            properties:
+              date:
+                type: string
+                format: date
+              topUpCredits:
+                type: integer
+                format: int64
+              debitCredits:
+                type: integer
+                format: int64
+              refundCredits:
+                type: integer
+                format: int64
+  securitySchemes:
+    bearerAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/bearerAuth'
+    serviceAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/serviceAuth'

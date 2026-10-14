@@ -1,0 +1,121 @@
+# Ruleset de Spectral para los contratos OpenAPI de Bandada U.
+# Uso: npx @stoplight/spectral-cli lint bandadau-docs/contracts/openapi/*.yaml --ruleset bandadau-docs/contracts/.spectral.yaml
+# Ver bandadau-docs/contracts/README.md para la política completa.
+extends:
+  - [spectral:oas, recommended]
+
+rules:
+  # ---------------------------------------------------------------------------
+  # Ajustes a reglas del ruleset base
+  # ---------------------------------------------------------------------------
+  operation-tag-defined: error
+  operation-operationId: error
+  operation-operationId-unique: error
+  operation-description: error
+  oas3-valid-media-example: error
+  oas3-valid-schema-example: error
+  info-contact: warn
+  info-license: off
+  license-url: off
+
+  # ---------------------------------------------------------------------------
+  # Reglas propias de Bandada U
+  # ---------------------------------------------------------------------------
+  bandada-operation-id-camel-case:
+    description: Todo operationId debe estar en camelCase (D1).
+    message: "operationId '{{value}}' debe estar en camelCase (p. ej. registerToEvent)."
+    severity: error
+    given: "$.paths[*][get,put,post,patch,delete,head,options,trace].operationId"
+    then:
+      function: pattern
+      functionOptions:
+        match: "^[a-z][a-zA-Z0-9]*$"
+
+  bandada-operation-summary:
+    description: Toda operación debe tener summary (en español).
+    severity: error
+    given: "$.paths[*][get,put,post,patch,delete]"
+    then:
+      field: summary
+      function: truthy
+
+  bandada-error-responses-problem-json:
+    description: Toda respuesta 4xx/5xx debe servirse como application/problem+json (RFC 9457).
+    message: "La respuesta {{property}} debe declarar contenido application/problem+json."
+    severity: error
+    given: "$.paths[*][get,put,post,patch,delete].responses[?(@property >= '400' && @property < '600')]"
+    then:
+      field: content
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          required: ["application/problem+json"]
+
+  bandada-idempotency-key-on-create:
+    description: |
+      Todo POST que crea un recurso o inicia un proceso (responde 201 o 202) debe exigir el
+      header Idempotency-Key (D3). Para eximir una operación (idempotente por naturaleza o
+      protegida por otra restricción) se declara `x-idempotency-exempt: "<motivo>"`.
+    message: "El POST que responde 201/202 debe incluir el parámetro requerido Idempotency-Key (o declarar x-idempotency-exempt)."
+    severity: error
+    given: "$.paths[*][?(@property === 'post' && @.responses && (@.responses['201'] || @.responses['202']) && !@['x-idempotency-exempt'])]"
+    then:
+      field: parameters
+      function: schema
+      functionOptions:
+        schema:
+          type: array
+          contains:
+            type: object
+            required: [name, in, required]
+            properties:
+              name:
+                const: Idempotency-Key
+              in:
+                const: header
+              required:
+                const: true
+
+  bandada-idempotent-replayed-header:
+    description: Las operaciones con Idempotency-Key deben documentar el header de respuesta Idempotent-Replayed en su respuesta exitosa.
+    message: "Documenta el header Idempotent-Replayed en la respuesta 2xx de una operación con Idempotency-Key."
+    severity: warn
+    given: "$.paths[*][?(@property === 'post' && @.responses && (@.responses['201'] || @.responses['202']) && !@['x-idempotency-exempt'])].responses[?(@property === '201' || @property === '202')]"
+    then:
+      field: headers.Idempotent-Replayed
+      function: truthy
+
+  bandada-property-camel-case:
+    description: Las propiedades JSON se nombran en camelCase.
+    message: "La propiedad '{{property}}' debe estar en camelCase."
+    severity: warn
+    given: "$..properties[*]~"
+    then:
+      function: pattern
+      functionOptions:
+        match: "^[a-z][a-zA-Z0-9]*$"
+
+  bandada-internal-uses-service-auth:
+    description: Las rutas /internal/v1 deben usar serviceAuth y el tag internal.
+    message: "Las operaciones internas deben declarar security serviceAuth y tag internal."
+    severity: error
+    given: "$.paths[?(@property.indexOf('/internal/v1') === 0)][get,put,post,patch,delete]"
+    then:
+      - field: security.0.serviceAuth
+        function: defined
+      - field: tags
+        function: schema
+        functionOptions:
+          schema:
+            type: array
+            contains:
+              const: internal
+
+overrides:
+  # El archivo compartido no tiene paths: sus componentes se usan desde otros archivos.
+  - files: ["openapi/shared/components.yaml"]
+    rules:
+      oas3-unused-component: off
+      openapi-tags: off
+      oas3-api-servers: off

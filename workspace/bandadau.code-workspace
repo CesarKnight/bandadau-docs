@@ -1,0 +1,17 @@
+{
+  "folders": [
+    { "name": "📚 bandadau-docs", "path": "bandadau-docs" },
+    { "name": "🧩 bandadau-shared", "path": "bandadau-shared" },
+    { "name": "⚙️ bandadau-backend", "path": "bandadau-backend" },
+    { "name": "📱 bandadau-frontend", "path": "bandadau-frontend" },
+    { "name": "🛠️ bandadau-admin", "path": "bandadau-admin" },
+    { "name": "🌐 bandadau-landing", "path": "bandadau-landing" },
+    { "name": "☁️ bandadau-infra", "path": "bandadau-infra" },
+    { "name": "🧠 bandadau-ml", "path": "bandadau-ml" },
+    { "name": "🗂️ workspace", "path": "." }
+  ],
+  "settings": {
+    "files.exclude": { "**/node_modules": true, "**/.DS_Store": true },
+    "git.autoRepositoryDetection": "subFolders"
+  }
+}

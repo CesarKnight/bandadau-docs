@@ -1,0 +1,1585 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bandadau.com/contracts/mcp/tools.schema.json",
+  "title": "Bandada U — herramientas MCP (insights-service)",
+  "description": "Definiciones de herramientas MCP (name, title, description, inputSchema, outputSchema, annotations) para generar código. Fuente de verdad junto con tools.md. Versión 1.1.0.",
+  "version": "1.1.0",
+  "server": {
+    "name": "bandada-insights",
+    "transport": "streamable-http",
+    "path": "/mcp"
+  },
+  "tools": [
+    {
+      "name": "get_platform_kpis",
+      "title": "KPIs de la plataforma",
+      "description": "Devuelve los indicadores agregados de Bandada U en un rango de fechas: usuarios activos y nuevos, posts, comentarios, reacciones, inscripciones (confirmadas/fallidas/canceladas), créditos recargados y gastados, contenido marcado y alertas abiertas, más una serie diaria. Úsala como primer paso para cualquier pregunta general sobre actividad o crecimiento. Los datos son agregados, sin información personal.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "Fecha inicial inclusiva (UTC), formato YYYY-MM-DD."
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "description": "Fecha final inclusiva (UTC), formato YYYY-MM-DD. Máximo 366 días después de `from`."
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          },
+          "activeUsers": {
+            "type": "integer"
+          },
+          "newUsers": {
+            "type": "integer"
+          },
+          "posts": {
+            "type": "integer"
+          },
+          "comments": {
+            "type": "integer"
+          },
+          "reactions": {
+            "type": "integer"
+          },
+          "registrationsConfirmed": {
+            "type": "integer"
+          },
+          "registrationsFailed": {
+            "type": "integer"
+          },
+          "registrationsCancelled": {
+            "type": "integer"
+          },
+          "creditsToppedUp": {
+            "type": "integer"
+          },
+          "creditsSpent": {
+            "type": "integer"
+          },
+          "flaggedContent": {
+            "type": "integer"
+          },
+          "openAlerts": {
+            "type": "integer"
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "activeUsers": {
+                  "type": "integer"
+                },
+                "posts": {
+                  "type": "integer"
+                },
+                "registrationsConfirmed": {
+                  "type": "integer"
+                },
+                "creditsSpent": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "date"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "activeUsers",
+          "newUsers",
+          "posts",
+          "registrationsConfirmed",
+          "creditsSpent",
+          "series"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "KPIs de la plataforma",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-source": "insights-service (proyección de métricas `METRIC#<name>` en DynamoDB) — `GET /internal/v1/kpis`",
+      "x-permissions": "Rol `ADMIN` o token de servicio.",
+      "x-internal-only": false
+    },
+    {
+      "name": "get_registration_stats",
+      "title": "Estadísticas de inscripciones",
+      "description": "Devuelve estadísticas de inscripciones a eventos en un rango, agrupadas por día, por evento o por estado (PENDING, CONFIRMED, FAILED, CANCELLATION_PENDING, CANCELLED). Úsala para preguntas sobre demanda de eventos, tasas de fallo de inscripción o comparación entre eventos.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "Fecha inicial inclusiva (UTC), formato YYYY-MM-DD."
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "description": "Fecha final inclusiva (UTC), formato YYYY-MM-DD. Máximo 366 días después de `from`."
+          },
+          "groupBy": {
+            "type": "string",
+            "enum": [
+              "day",
+              "event",
+              "status"
+            ],
+            "default": "day",
+            "description": "Dimensión de agrupación."
+          },
+          "eventId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Opcional: limitar a un evento."
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          },
+          "groupBy": {
+            "type": "string",
+            "enum": [
+              "day",
+              "event",
+              "status"
+            ]
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "Fecha, eventId o estado según groupBy."
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Título del evento cuando groupBy=event."
+                },
+                "confirmed": {
+                  "type": "integer"
+                },
+                "failed": {
+                  "type": "integer"
+                },
+                "cancelled": {
+                  "type": "integer"
+                },
+                "pending": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "key",
+                "confirmed",
+                "failed",
+                "cancelled"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "totals": {
+            "type": "object",
+            "properties": {
+              "confirmed": {
+                "type": "integer"
+              },
+              "failed": {
+                "type": "integer"
+              },
+              "cancelled": {
+                "type": "integer"
+              },
+              "pending": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "confirmed",
+              "failed",
+              "cancelled",
+              "pending"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "groupBy",
+          "rows",
+          "totals"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Estadísticas de inscripciones",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-source": "events-service — `GET /internal/v1/stats/registrations?from&to&groupBy` (`getRegistrationStats`)",
+      "x-permissions": "Rol `ADMIN` o token de servicio.",
+      "x-internal-only": false
+    },
+    {
+      "name": "list_events",
+      "title": "Listar eventos",
+      "description": "Lista eventos y talleres de la plataforma en un rango de fechas de inicio, opcionalmente filtrados por estado (DRAFT, PUBLISHED, CANCELLED, FINISHED). Devuelve título, fecha, lugar, cupo, plazas ocupadas y precio en créditos. Úsala para contextualizar estadísticas de inscripciones o responder qué eventos hubo o habrá.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Inicio del rango (startsAt ≥ from)."
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Fin del rango (startsAt ≤ to)."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "PUBLISHED",
+              "CANCELLED",
+              "FINISHED"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 50
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "eventId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "startsAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "venue": {
+                  "type": "string"
+                },
+                "capacity": {
+                  "type": "integer"
+                },
+                "seatsTaken": {
+                  "type": "integer"
+                },
+                "priceCredits": {
+                  "type": "integer"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "DRAFT",
+                    "PUBLISHED",
+                    "CANCELLED",
+                    "FINISHED"
+                  ]
+                }
+              },
+              "required": [
+                "eventId",
+                "title",
+                "startsAt",
+                "venue",
+                "capacity",
+                "seatsTaken",
+                "priceCredits",
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "true si había más eventos que `limit`."
+          }
+        },
+        "required": [
+          "items",
+          "truncated"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Listar eventos",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-source": "events-service — `GET /internal/v1/events?startsFrom&startsTo&status` (`listEventsInternal`, D15)",
+      "x-permissions": "Rol `ADMIN` o token de servicio.",
+      "x-internal-only": false
+    },
+    {
+      "name": "get_credit_stats",
+      "title": "Estadísticas de créditos",
+      "description": "Devuelve totales y series de la economía de créditos en un rango: recargas, débitos por inscripciones y reembolsos (cantidad y créditos), saldo neto y créditos en circulación. Los créditos son enteros. Úsala para preguntas de ingresos, consumo o reembolsos.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "Fecha inicial inclusiva (UTC), formato YYYY-MM-DD."
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "description": "Fecha final inclusiva (UTC), formato YYYY-MM-DD. Máximo 366 días después de `from`."
+          },
+          "groupBy": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ],
+            "default": "day"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          },
+          "groupBy": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ]
+          },
+          "totals": {
+            "type": "object",
+            "properties": {
+              "topUpCount": {
+                "type": "integer"
+              },
+              "topUpCredits": {
+                "type": "integer"
+              },
+              "debitCount": {
+                "type": "integer"
+              },
+              "debitCredits": {
+                "type": "integer"
+              },
+              "refundCount": {
+                "type": "integer"
+              },
+              "refundCredits": {
+                "type": "integer"
+              },
+              "netCredits": {
+                "type": "integer"
+              },
+              "circulatingCredits": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "topUpCount",
+              "topUpCredits",
+              "debitCount",
+              "debitCredits",
+              "refundCount",
+              "refundCredits",
+              "netCredits"
+            ],
+            "additionalProperties": false
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "topUpCredits": {
+                  "type": "integer"
+                },
+                "debitCredits": {
+                  "type": "integer"
+                },
+                "refundCredits": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "date",
+                "topUpCredits",
+                "debitCredits",
+                "refundCredits"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "groupBy",
+          "totals",
+          "series"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Estadísticas de créditos",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-source": "wallet-service — `GET /internal/v1/stats/credits?from&to&groupBy` (`getCreditStats`)",
+      "x-permissions": "Rol `ADMIN` o token de servicio.",
+      "x-internal-only": false
+    },
+    {
+      "name": "get_content_stats",
+      "title": "Estadísticas de contenido",
+      "description": "Devuelve la actividad de contenido social en un rango: posts, comentarios y reacciones por día, reparto de reacciones por tipo y los hashtags más usados. Úsala para preguntas sobre engagement o temas populares. No devuelve el texto de los posts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "Fecha inicial inclusiva (UTC), formato YYYY-MM-DD."
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "description": "Fecha final inclusiva (UTC), formato YYYY-MM-DD. Máximo 366 días después de `from`."
+          },
+          "topHashtags": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          },
+          "totals": {
+            "type": "object",
+            "properties": {
+              "posts": {
+                "type": "integer"
+              },
+              "comments": {
+                "type": "integer"
+              },
+              "reactions": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "posts",
+              "comments",
+              "reactions"
+            ],
+            "additionalProperties": false
+          },
+          "reactionsByType": {
+            "type": "object",
+            "properties": {
+              "LIKE": {
+                "type": "integer"
+              },
+              "HELPFUL": {
+                "type": "integer"
+              },
+              "FUNNY": {
+                "type": "integer"
+              },
+              "SUPPORT": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "LIKE",
+              "HELPFUL",
+              "FUNNY",
+              "SUPPORT"
+            ],
+            "additionalProperties": false
+          },
+          "daily": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "posts": {
+                  "type": "integer"
+                },
+                "comments": {
+                  "type": "integer"
+                },
+                "reactions": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "date",
+                "posts",
+                "comments",
+                "reactions"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "topHashtags": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "hashtag": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "hashtag",
+                "count"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "totals",
+          "reactionsByType",
+          "daily",
+          "topHashtags"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Estadísticas de contenido",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-source": "social-service — `GET /internal/v1/stats/daily?from&to`",
+      "x-permissions": "Rol `ADMIN` o token de servicio.",
+      "x-internal-only": false
+    },
+    {
+      "name": "list_flagged_content",
+      "title": "Cola de moderación",
+      "description": "Lista el contenido pendiente de moderación: medios marcados por el modelo de IA (FLAGGED) y posts ocultos por denuncias, con puntajes y antigüedad. Úsala para medir el backlog de moderación o detectar autores reincidentes. Los autores se identifican solo por id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "AI",
+              "REPORTS",
+              "ALL"
+            ],
+            "default": "ALL"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "totalPending": {
+            "type": "integer"
+          },
+          "oldestEnqueuedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "AI",
+                    "REPORTS"
+                  ]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "IMAGE",
+                    "VIDEO",
+                    "POST"
+                  ]
+                },
+                "authorId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "maxScore": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "labels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "openReports": {
+                  "type": "integer"
+                },
+                "enqueuedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "id",
+                "source",
+                "kind",
+                "authorId",
+                "enqueuedAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "totalPending",
+          "oldestEnqueuedAt",
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Cola de moderación",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-source": "media-service — `GET /internal/v1/media?status=FLAGGED` (`listFlaggedMedia`) + social-service — `GET /internal/v1/posts?status=HIDDEN` y `GET /internal/v1/reports?status=OPEN`",
+      "x-permissions": "Rol `ADMIN` o token de servicio.",
+      "x-internal-only": false
+    },
+    {
+      "name": "list_failed_sagas",
+      "title": "SAGAs fallidas o compensadas",
+      "description": "Lista las SAGAs de inscripción/cancelación que terminaron en FAILED o COMPENSATED desde una fecha, con el paso donde fallaron y el motivo. Úsala para diagnosticar problemas en wallet-service o ticketing-service.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "FAILED",
+              "COMPENSATED"
+            ],
+            "description": "Omitir para ambos."
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Desde cuándo (por defecto, últimas 24 h)."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 50
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "byFailureReason": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sagaId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "registrationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "eventId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "REGISTRATION",
+                    "CANCELLATION"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "FAILED",
+                    "COMPENSATED"
+                  ]
+                },
+                "failedStep": {
+                  "type": "string"
+                },
+                "failureReason": {
+                  "type": "string"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "sagaId",
+                "registrationId",
+                "eventId",
+                "type",
+                "status",
+                "failedStep",
+                "failureReason",
+                "updatedAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "count",
+          "byFailureReason",
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "SAGAs fallidas o compensadas",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-source": "events-service — `GET /internal/v1/sagas?status&since` (`listSagas`)",
+      "x-permissions": "Rol `ADMIN` o token de servicio.",
+      "x-internal-only": false
+    },
+    {
+      "name": "get_service_health",
+      "title": "Salud de servicios y colas",
+      "description": "Consulta el estado de los 9 servicios (GET /health/ready) y de las colas de RabbitMQ: mensajes listos y sin confirmar, consumidores y colas de dead letters (.dlq). Úsala para detectar servicios caídos, backlog o mensajes en DLQ.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "includeQueues": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "checkedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "overall": {
+            "type": "string",
+            "enum": [
+              "UP",
+              "DEGRADED",
+              "DOWN"
+            ]
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "UP",
+                    "DEGRADED",
+                    "DOWN"
+                  ]
+                },
+                "latencyMs": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "name",
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "queues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "messagesReady": {
+                  "type": "integer"
+                },
+                "messagesUnacked": {
+                  "type": "integer"
+                },
+                "consumers": {
+                  "type": "integer"
+                },
+                "isDeadLetter": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name",
+                "messagesReady",
+                "messagesUnacked",
+                "consumers",
+                "isDeadLetter"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "checkedAt",
+          "overall",
+          "services"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Salud de servicios y colas",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-source": "insights-service — `GET /internal/v1/service-health`, que agrega `/health/ready` de cada servicio y la API de management de RabbitMQ (`/api/queues`)",
+      "x-permissions": "Rol `ADMIN` o token de servicio.",
+      "x-internal-only": false
+    },
+    {
+      "name": "query_metrics",
+      "title": "Consultar métricas técnicas (PromQL acotado)",
+      "description": "Ejecuta una consulta PromQL de solo lectura contra Prometheus (stack LGTM) y devuelve series agregadas. Solo admite las métricas de la allowlist (latencia HTTP, duración y compensaciones de SAGA, outbox, fallos de consumo, profundidad de DLQ, backlog de moderación, inferencia ML, logins fallidos y uso de agentes) y funciones de agregación; el resultado se limita a 50 series y 500 puntos. Úsala para confirmar con datos técnicos un problema antes de levantar una alerta (p. ej. p95 de latencia o tasa de compensación en los últimos 15 min). No devuelve datos personales.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 500,
+            "description": "Expresión PromQL. Todo selector de métrica debe estar en la allowlist; se rechazan selectores sin nombre de métrica, `{__name__=~...}` y subconsultas con rango > 24 h."
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Inicio de una consulta de rango (UTC). Si se omiten `start` y `end` se ejecuta una consulta instantánea."
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Fin de la consulta de rango (UTC). Máximo 7 días después de `start`."
+          },
+          "step": {
+            "type": "string",
+            "pattern": "^[0-9]+[smh]$",
+            "default": "60s",
+            "description": "Resolución de la consulta de rango (p. ej. `60s`, `5m`). Mínimo efectivo 15s."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "dependentRequired": {
+          "start": [
+            "end"
+          ],
+          "end": [
+            "start"
+          ]
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "resultType": {
+            "type": "string",
+            "enum": [
+              "vector",
+              "matrix",
+              "scalar"
+            ]
+          },
+          "series": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "properties": {
+                "labels": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "points": {
+                  "type": "array",
+                  "maxItems": 500,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "t": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "v": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "t",
+                      "v"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "labels",
+                "points"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "`true` si se recortaron series o puntos."
+          },
+          "executedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "resultType",
+          "series",
+          "truncated",
+          "executedAt"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Consultar métricas técnicas (PromQL acotado)",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-source": "Prometheus del stack LGTM (`otel-lgtm`) — `GET /api/v1/query` y `/api/v1/query_range` desde insights-service; métricas de `bandadau-docs/docs/03-arquitectura/observabilidad.md` §6 (D15)",
+      "x-permissions": "Solo token de servicio (MonitoringAgent) o rol `ADMIN`. No se lista para otros roles.",
+      "x-internal-only": false,
+      "x-metrics-allowlist": [
+        "http_server_request_duration_seconds",
+        "traefik_service_request_duration_seconds",
+        "saga_duration_seconds",
+        "saga_compensations_total",
+        "saga_active",
+        "idempotency_replays_total",
+        "inbox_duplicates_total",
+        "outbox_pending",
+        "outbox_publish_lag_seconds",
+        "messaging_consume_failures_total",
+        "dlq_depth",
+        "moderation_backlog",
+        "ml_inference_duration_seconds",
+        "ml_decisions_total",
+        "auth_login_failures_total",
+        "agent_runs_total",
+        "agent_tokens_total"
+      ]
+    },
+    {
+      "name": "detect_anomalies",
+      "title": "Detectar anomalías en métricas",
+      "description": "Ejecuta el modelo Isolation Forest sobre una o más series de métricas diarias u horarias y devuelve los puntos anómalos con su puntaje. Métricas disponibles: activeUsers, posts, registrationsConfirmed, registrationsFailed, creditsSpent, flaggedContent, sagaCompensations. Úsala para explicar picos o caídas inusuales.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "metrics": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 7,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "activeUsers",
+                "posts",
+                "registrationsConfirmed",
+                "registrationsFailed",
+                "creditsSpent",
+                "flaggedContent",
+                "sagaCompensations"
+              ]
+            }
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "Fecha inicial inclusiva (UTC), formato YYYY-MM-DD."
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "description": "Fecha final inclusiva (UTC), formato YYYY-MM-DD. Máximo 366 días después de `from`."
+          },
+          "granularity": {
+            "type": "string",
+            "enum": [
+              "hour",
+              "day"
+            ],
+            "default": "day"
+          },
+          "sensitivity": {
+            "type": "number",
+            "minimum": 0.5,
+            "maximum": 0.99,
+            "default": 0.8,
+            "description": "Umbral del puntaje de anomalía (más alto = menos alertas)."
+          }
+        },
+        "required": [
+          "metrics",
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "modelVersion": {
+            "type": "string"
+          },
+          "anomalies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "metric": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "value": {
+                  "type": "number"
+                },
+                "expected": {
+                  "type": "number"
+                },
+                "score": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "SPIKE",
+                    "DROP"
+                  ]
+                }
+              },
+              "required": [
+                "metric",
+                "at",
+                "value",
+                "expected",
+                "score",
+                "direction"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "modelVersion",
+          "anomalies"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Detectar anomalías en métricas",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-source": "insights-service — modelo `anomaly-detector` (Isolation Forest ONNX) sobre `METRIC#<name>`; sin llamada externa",
+      "x-permissions": "Rol `ADMIN` o token de servicio.",
+      "x-internal-only": false
+    },
+    {
+      "name": "generate_report",
+      "title": "Generar reporte",
+      "description": "Crea un reporte generativo persistente (GeneratedReport) con título, texto en Markdown, dataset tabular y gráfico Vega-Lite opcional, y encola la narración en audio (≤ 90 s). Llámala UNA sola vez, al final, cuando ya reuniste los datos con las herramientas de consulta. El reporte se escribe en el idioma indicado en `locale`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 140
+          },
+          "question": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Pregunta original que responde el reporte."
+          },
+          "markdown": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "dataset": {
+            "type": "object",
+            "properties": {
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "string",
+                        "integer",
+                        "number",
+                        "date",
+                        "datetime",
+                        "boolean"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "rows": {
+                "type": "array",
+                "maxItems": 5000,
+                "items": {
+                  "type": "array"
+                }
+              }
+            },
+            "required": [
+              "columns",
+              "rows"
+            ],
+            "additionalProperties": false
+          },
+          "chart": {
+            "type": "object",
+            "description": "Especificación Vega-Lite v5 (sin `data.url`; usa el dataset).",
+            "additionalProperties": true
+          },
+          "audioSummary": {
+            "type": "string",
+            "maxLength": 1400,
+            "description": "Guion del audio (≤ 90 s, ~200 palabras)."
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "es",
+              "en"
+            ],
+            "description": "Idioma del reporte y del audio (D14). Por defecto, el del solicitante."
+          },
+          "reportId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Solo agentes internos: id del reporte ya creado por `requestReport` que se debe completar."
+          }
+        },
+        "required": [
+          "title",
+          "question",
+          "markdown"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "RUNNING",
+              "READY"
+            ]
+          },
+          "audioStatus": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "NONE"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Enlace al reporte en el panel."
+          }
+        },
+        "required": [
+          "reportId",
+          "status",
+          "audioStatus",
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Generar reporte",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      },
+      "x-source": "insights-service — caso de uso interno `GenerateReport` (DynamoDB `REPORT#<id>`, TTS vía `TtsPort`, audio en S3); publica `bandada.insights.report.ready.v1`",
+      "x-permissions": "Rol `ADMIN` o token de servicio. Escritura (confirmación del usuario recomendada en el cliente).",
+      "x-internal-only": false
+    },
+    {
+      "name": "raise_alert",
+      "title": "Crear alerta",
+      "description": "Crea una alerta operativa visible en vivo en el panel y notificada al equipo si es CRITICAL. Solo para el agente de monitoreo interno: úsala cuando una consulta muestre un problema real (servicio caído, SAGAs fallidas, mensajes en DLQ, backlog de moderación o anomalía). No crees alertas duplicadas: usa el mismo `dedupeKey` para el mismo problema.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": [
+              "INFO",
+              "WARNING",
+              "CRITICAL"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "SERVICE_DOWN",
+              "SAGA_FAILURES",
+              "DLQ_BACKLOG",
+              "MODERATION_BACKLOG",
+              "METRIC_ANOMALY",
+              "MODERATION_ESCALATION"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Mensaje en español, concreto y accionable."
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "dedupeKey": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Clave de deduplicación (p. ej. `SAGA_FAILURES:ticketing-service`); una alerta OPEN con la misma clave no se duplica."
+          }
+        },
+        "required": [
+          "severity",
+          "kind",
+          "message",
+          "dedupeKey"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "alertId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created": {
+            "type": "boolean",
+            "description": "false si ya existía una alerta OPEN con el mismo dedupeKey."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "ACKNOWLEDGED",
+              "RESOLVED"
+            ]
+          }
+        },
+        "required": [
+          "alertId",
+          "created",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Crear alerta",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-source": "insights-service — caso de uso interno `RaiseAlert` (DynamoDB `ALERT#<id>`); publica `bandada.insights.alert.raised.v1`",
+      "x-permissions": "Solo token de servicio (`typ=service`, `sub=insights-service`). Oculta en `tools/list` para clientes con JWT de usuario.",
+      "x-internal-only": true
+    }
+  ],
+  "resources": [
+    {
+      "uri": "bandada://kpis/today",
+      "name": "kpis-today",
+      "title": "KPIs de hoy",
+      "mimeType": "application/json",
+      "description": "KPIs del día en curso (misma forma que la salida de get_platform_kpis con from = to = hoy, UTC)."
+    },
+    {
+      "uri": "bandada://alerts/open",
+      "name": "alerts-open",
+      "title": "Alertas abiertas",
+      "mimeType": "application/json",
+      "description": "Alertas en estado OPEN: { items: Alert[] } (máx. 100). Soporta resources/subscribe."
+    }
+  ],
+  "prompts": [
+    {
+      "name": "monthly_report",
+      "title": "Reporte mensual",
+      "description": "Genera el reporte mensual de la plataforma (actividad, eventos, créditos, moderación, incidentes).",
+      "arguments": [
+        {
+          "name": "month",
+          "description": "Mes en formato YYYY-MM.",
+          "required": true
+        },
+        {
+          "name": "locale",
+          "description": "es | en (por defecto es).",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "weekly_summary",
+      "title": "Resumen semanal",
+      "description": "Resumen de la semana ISO indicada (o la anterior) para el equipo administrador; lo usa n8n wf-04.",
+      "arguments": [
+        {
+          "name": "weekStart",
+          "description": "Lunes de la semana (YYYY-MM-DD); por defecto, la semana anterior.",
+          "required": false
+        },
+        {
+          "name": "locale",
+          "description": "es | en (por defecto es).",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

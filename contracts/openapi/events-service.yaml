@@ -1,0 +1,1531 @@
+openapi: 3.1.0
+info:
+  title: Bandada U — events-service
+  version: 1.1.0
+  summary: Eventos y talleres, inscripciones y orquestación de la SAGA de inscripción.
+  description: |
+    API del bounded context **Eventos** (`events-service`, Java 25 + Spring Boot 4, DDD táctico,
+    PostgreSQL `events_db`). Es el **orquestador SAGA** (D2) de la inscripción:
+    reservar cupo (local) → debitar créditos (`wallet-service`) → emitir ticket (`ticketing-service`).
+
+    - `registerToEvent` responde **202** con la inscripción `PENDING`: el resultado final
+      (`CONFIRMED` / `FAILED`) se obtiene haciendo *polling* a `GET /registrations/{registrationId}`
+      (o por notificación push). Los errores síncronos posibles son solo los del paso 1
+      (`409 EVENT_FULL`, `409 ALREADY_REGISTERED`); los asíncronos quedan en `failureReason`
+      (`INSUFFICIENT_FUNDS`, `WALLET_NOT_FOUND`, `TICKET_ISSUE_FAILED`, `TIMEOUT`, `SAGA_ABORTED`).
+    - Una sola inscripción `PENDING`/`CONFIRMED` por (`eventId`, `userId`) aun ante reintentos
+      o doble clic (índice único parcial + `Idempotency-Key`; RF-16, D3).
+    - `cancelRegistration` (≥ 24 h antes) inicia la SAGA inversa `CANCELLATION` y responde **202**
+      con la inscripción `CANCELLATION_PENDING` (RF-17).
+    - Créditos siempre enteros (`int64`). Fechas ISO-8601 UTC.
+    - Errores RFC 9457 (`application/problem+json`); `title`/`detail` localizados según
+      `Accept-Language` (`es` por defecto) y respuesta con `Content-Language`. Todas las
+      respuestas devuelven `X-Correlation-Id`.
+    - Rutas `/internal/v1/**` (tag `internal`): solo red interna con `serviceAuth`; consumidas
+      por `admin-gateway` e `insights-service` (MCP `list_failed_sagas`, `get_registration_stats`).
+
+    ## Changelog
+    - 1.1.0 (2026-10-14): ADR-0016/D15 — `listEventsInternal` y `retrySaga`; `cancelEvent` y
+      `listEventRegistrations` dejan de ser propuestas; `RegistrationFailureReason` alineado
+      (`EVENT_FULL`, `TIMEOUT`, `SAGA_ABORTED`; reemplaza `SAGA_TIMEOUT`) y `SagaStep` sin `CONFIRM`.
+    - 1.0.0 (2026-10-14): versión inicial contract-first (D1, D2, D3, D14).
+  contact:
+    name: Grupo 24 — Ingeniería de Software II
+servers:
+  - url: http://api.bandada.localhost/api/v1
+    description: Desarrollo local (Traefik)
+  - url: https://api.bandadau.com/api/v1
+    description: Producción
+tags:
+  - name: events
+    description: Eventos y talleres.
+  - name: registrations
+    description: Inscripciones (SAGA).
+  - name: internal
+    description: Endpoints internos (`/internal/v1`), solo con token de servicio.
+security:
+  - bearerAuth: []
+paths:
+  /events:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [events]
+      operationId: createEvent
+      summary: Crear un evento
+      description: |
+        Crea un evento en estado `DRAFT` (UC-11, RF-14). Requiere rol `ORGANIZER`.
+        `priceCredits = 0` significa evento gratuito (la SAGA salta el débito).
+        `coverMediaId` debe ser una imagen propia `APPROVED` en `media-service`.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEventRequest'
+            examples:
+              taller:
+                summary: Taller pagado
+                value:
+                  title: Taller de Docker para principiantes
+                  description: Aprende a contenerizar tu primera API. Trae tu laptop con Docker instalado.
+                  coverMediaId: 0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d
+                  startsAt: '2026-10-24T22:00:00Z'
+                  venue: Auditorio de la Facultad de Ingeniería, UMSA
+                  capacity: 40
+                  priceCredits: 20
+      responses:
+        '201':
+          description: Evento creado en borrador.
+          headers:
+            Location:
+              $ref: './shared/components.yaml#/components/headers/Location'
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+            X-Correlation-Id:
+              $ref: './shared/components.yaml#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+              examples:
+                borrador:
+                  summary: Evento en borrador
+                  value:
+                    id: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+                    organizerId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                    title: Taller de Docker para principiantes
+                    description: Aprende a contenerizar tu primera API. Trae tu laptop con Docker instalado.
+                    coverMediaId: 0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d
+                    coverUrl: null
+                    startsAt: '2026-10-24T22:00:00Z'
+                    venue: Auditorio de la Facultad de Ingeniería, UMSA
+                    capacity: 40
+                    seatsTaken: 0
+                    seatsAvailable: 40
+                    priceCredits: 20
+                    status: DRAFT
+                    publishedAt: null
+                    createdAt: '2026-10-14T15:04:05Z'
+                    updatedAt: '2026-10-14T15:04:05Z'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '409':
+          $ref: './shared/components.yaml#/components/responses/Conflict'
+        '422':
+          description: '`STARTS_AT_IN_PAST`, `MEDIA_NOT_APPROVED` (portada) o `IDEMPOTENCY_KEY_REUSED`.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                fechaPasada:
+                  summary: Fecha en el pasado
+                  value:
+                    type: https://api.bandadau.com/problems/starts-at-in-past
+                    title: Fecha inválida
+                    status: 422
+                    detail: La fecha de inicio debe ser futura.
+                    instance: /api/v1/events
+                    code: STARTS_AT_IN_PAST
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+    get:
+      tags: [events]
+      operationId: listEvents
+      summary: Listar eventos
+      description: |
+        Eventos ordenados por `startsAt` ascendente, filtrables por rango. Con `public=true` el
+        endpoint es accesible **sin JWT** (landing) y solo devuelve eventos `PUBLISHED` con
+        datos públicos. Sin `public`, requiere JWT y devuelve eventos `PUBLISHED`; un
+        organizador puede ver además sus borradores con `organizerId` = su propio id (*propuesto*).
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: false
+          description: Solo eventos que empiezan desde esta fecha-hora (UTC). Por defecto, ahora.
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-14T00:00:00Z'
+        - name: to
+          in: query
+          required: false
+          description: Solo eventos que empiezan hasta esta fecha-hora (UTC).
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-31T23:59:59Z'
+        - name: public
+          in: query
+          required: false
+          description: '`true` para el listado público sin autenticación (landing).'
+          schema:
+            type: boolean
+            default: false
+        - name: organizerId
+          in: query
+          required: false
+          x-proposal: true
+          description: '*Propuesto*: filtra por organizador. Si es el propio usuario, incluye sus `DRAFT`.'
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          x-proposal: true
+          description: '*Propuesto*: filtra por estado (`DRAFT` solo con `organizerId` propio).'
+          schema:
+            $ref: '#/components/schemas/EventStatus'
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de eventos.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventPage'
+              examples:
+                proximos:
+                  summary: Próximos eventos
+                  value:
+                    items:
+                      - id: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+                        organizerId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                        title: Taller de Docker para principiantes
+                        description: Aprende a contenerizar tu primera API. Trae tu laptop con Docker instalado.
+                        coverMediaId: 0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d
+                        coverUrl: http://minio.bandada.localhost/bandada-media/u/0192f29f.jpg?X-Amz-Signature=abc123
+                        startsAt: '2026-10-24T22:00:00Z'
+                        venue: Auditorio de la Facultad de Ingeniería, UMSA
+                        capacity: 40
+                        seatsTaken: 12
+                        seatsAvailable: 28
+                        priceCredits: 20
+                        status: PUBLISHED
+                        publishedAt: '2026-10-14T15:10:00Z'
+                        createdAt: '2026-10-14T15:04:05Z'
+                        updatedAt: '2026-10-14T16:00:00Z'
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+
+  /events/{eventId}:
+    parameters:
+      - $ref: '#/components/parameters/EventId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [events]
+      operationId: getEvent
+      summary: Ver un evento
+      description: Detalle del evento con cupos disponibles. Los `DRAFT` solo los ve su organizador.
+      responses:
+        '200':
+          description: Evento.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+              examples:
+                publicado:
+                  $ref: '#/components/examples/EventPublished'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /events/{eventId}/publish:
+    parameters:
+      - $ref: '#/components/parameters/EventId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [events]
+      operationId: publishEvent
+      summary: Publicar un evento
+      description: |
+        El organizador publica su evento `DRAFT` → `PUBLISHED` (UC-11). Publica
+        `bandada.events.event.published.v1`. Idempotente por naturaleza: publicar un evento ya
+        `PUBLISHED` responde `200` sin cambios.
+      responses:
+        '200':
+          description: Evento publicado.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+              examples:
+                publicado:
+                  $ref: '#/components/examples/EventPublished'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/InvalidEventStatus'
+        '422':
+          description: El evento ya empezó (`STARTS_AT_IN_PAST`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                pasado:
+                  summary: Evento pasado
+                  value:
+                    type: https://api.bandadau.com/problems/starts-at-in-past
+                    title: Fecha inválida
+                    status: 422
+                    detail: No se puede publicar un evento cuya fecha ya pasó.
+                    instance: /api/v1/events/0192f3b0-7c1e-7a2b-9c3d-4e5f60718293/publish
+                    code: STARTS_AT_IN_PAST
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  /events/{eventId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/EventId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [events]
+      operationId: cancelEvent
+      summary: Cancelar un evento
+      description: |
+        Aceptada en D15 (ADR-0016): dispara `EventStatus.CANCELLED` y el evento
+        `bandada.events.event.cancelled.v1` (D12). El organizador (o un
+        `ADMIN`) cancela un evento `DRAFT`/`PUBLISHED`; se inicia una SAGA `CANCELLATION` por cada
+        inscripción `CONFIRMED` (sin la restricción de 24 h) y se responde **202**.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelEventRequest'
+            examples:
+              lluvia:
+                summary: Cancelación
+                value:
+                  reason: El auditorio no estará disponible por mantenimiento.
+      responses:
+        '202':
+          description: Cancelación aceptada; reembolsos en curso.
+          headers:
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+            X-Correlation-Id:
+              $ref: './shared/components.yaml#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+              examples:
+                cancelado:
+                  summary: Evento cancelado
+                  value:
+                    id: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+                    organizerId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                    title: Taller de Docker para principiantes
+                    description: Aprende a contenerizar tu primera API. Trae tu laptop con Docker instalado.
+                    coverMediaId: null
+                    coverUrl: null
+                    startsAt: '2026-10-24T22:00:00Z'
+                    venue: Auditorio de la Facultad de Ingeniería, UMSA
+                    capacity: 40
+                    seatsTaken: 12
+                    seatsAvailable: 28
+                    priceCredits: 20
+                    status: CANCELLED
+                    publishedAt: '2026-10-14T15:10:00Z'
+                    createdAt: '2026-10-14T15:04:05Z'
+                    updatedAt: '2026-10-20T12:00:00Z'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/InvalidEventStatus'
+        '422':
+          $ref: './shared/components.yaml#/components/responses/UnprocessableEntity'
+
+  /events/{eventId}/registrations:
+    parameters:
+      - $ref: '#/components/parameters/EventId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [registrations]
+      operationId: registerToEvent
+      summary: Inscribirse a un evento
+      description: |
+        Inicia la SAGA de inscripción (UC-12, RF-15, RF-16). En una transacción local reserva
+        el cupo (`seatsTaken++`) y crea la `Registration` `PENDING` + `SagaInstance STARTED`;
+        luego, de forma asíncrona, debita los créditos (si `priceCredits > 0`) y emite el ticket.
+        Responde **202** con la inscripción `PENDING` y `Location` para hacer *polling* con
+        `getRegistration` (sugerido cada `Retry-After` segundos).
+        Si ya existe una inscripción `PENDING`/`CONFIRMED` del usuario para el evento con otra
+        `Idempotency-Key` → `409 ALREADY_REGISTERED`.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: Inscripción aceptada y en proceso.
+          headers:
+            Location:
+              $ref: './shared/components.yaml#/components/headers/Location'
+            Retry-After:
+              $ref: './shared/components.yaml#/components/headers/RetryAfter'
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+            X-Correlation-Id:
+              $ref: './shared/components.yaml#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Registration'
+              examples:
+                pendiente:
+                  $ref: '#/components/examples/RegistrationPending'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          description: |
+            Conflicto: `EVENT_FULL` (no quedan cupos), `ALREADY_REGISTERED` (ya hay una
+            inscripción activa) o `IDEMPOTENCY_IN_PROGRESS`.
+          headers:
+            Retry-After:
+              $ref: './shared/components.yaml#/components/headers/RetryAfter'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                lleno:
+                  summary: Sin cupos
+                  value:
+                    type: https://api.bandadau.com/problems/event-full
+                    title: Evento lleno
+                    status: 409
+                    detail: Ya no quedan cupos para "Taller de Docker para principiantes".
+                    instance: /api/v1/events/0192f3b0-7c1e-7a2b-9c3d-4e5f60718293/registrations
+                    code: EVENT_FULL
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+                yaInscrito:
+                  summary: Ya inscrito
+                  value:
+                    type: https://api.bandadau.com/problems/already-registered
+                    title: Ya estás inscrito
+                    status: 409
+                    detail: Ya tienes una inscripción activa en este evento.
+                    instance: /api/v1/events/0192f3b0-7c1e-7a2b-9c3d-4e5f60718293/registrations
+                    code: ALREADY_REGISTERED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+                    registrationId: 0192f3c1-2d3e-7f40-a152-637485960a1b
+                enCurso:
+                  summary: Petición idéntica en curso
+                  value:
+                    type: https://api.bandadau.com/problems/idempotency-in-progress
+                    title: Petición en curso
+                    status: 409
+                    detail: Ya se está procesando una petición con esta Idempotency-Key. Reintenta en unos segundos.
+                    instance: /api/v1/events/0192f3b0-7c1e-7a2b-9c3d-4e5f60718293/registrations
+                    code: IDEMPOTENCY_IN_PROGRESS
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '422':
+          description: |
+            `EVENT_NOT_OPEN` (el evento no está `PUBLISHED` o ya empezó) o
+            `IDEMPOTENCY_KEY_REUSED` (misma clave usada para otro evento).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                noAbierto:
+                  summary: Evento no disponible
+                  value:
+                    type: https://api.bandadau.com/problems/event-not-open
+                    title: Inscripciones cerradas
+                    status: 422
+                    detail: Este evento no acepta inscripciones (cancelado, finalizado o ya empezó).
+                    instance: /api/v1/events/0192f3b0-7c1e-7a2b-9c3d-4e5f60718293/registrations
+                    code: EVENT_NOT_OPEN
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+                claveReutilizada:
+                  summary: Idempotency-Key reutilizada
+                  value:
+                    type: https://api.bandadau.com/problems/idempotency-key-reused
+                    title: Clave de idempotencia reutilizada
+                    status: 422
+                    detail: La Idempotency-Key ya se usó con una petición diferente.
+                    instance: /api/v1/events/0192f3b0-7c1e-7a2b-9c3d-4e5f60718293/registrations
+                    code: IDEMPOTENCY_KEY_REUSED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /registrations/me:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [registrations]
+      operationId: listMyRegistrations
+      summary: Listar mis inscripciones
+      description: Mis inscripciones, de la más reciente a la más antigua, opcionalmente filtradas por estado.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/RegistrationStatus'
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de inscripciones.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationPage'
+              examples:
+                mias:
+                  summary: Una inscripción confirmada
+                  value:
+                    items:
+                      - id: 0192f3c1-2d3e-7f40-a152-637485960a1b
+                        eventId: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+                        userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                        event:
+                          id: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+                          title: Taller de Docker para principiantes
+                          startsAt: '2026-10-24T22:00:00Z'
+                          venue: Auditorio de la Facultad de Ingeniería, UMSA
+                        status: CONFIRMED
+                        failureReason: null
+                        priceCredits: 20
+                        ticketId: 0192f3c2-9a8b-7c6d-8e5f-4a3b2c1d0e9f
+                        createdAt: '2026-10-14T15:30:00Z'
+                        updatedAt: '2026-10-14T15:30:02Z'
+                        confirmedAt: '2026-10-14T15:30:02Z'
+                        cancelledAt: null
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+
+  /registrations/{registrationId}:
+    parameters:
+      - $ref: '#/components/parameters/RegistrationId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [registrations]
+      operationId: getRegistration
+      summary: Consultar una inscripción (polling)
+      description: |
+        Estado actual de la inscripción del usuario. Mientras esté `PENDING` o
+        `CANCELLATION_PENDING` la respuesta incluye `Retry-After` (segundos sugeridos para el
+        siguiente *polling*). Estados finales: `CONFIRMED` (con `ticketId`), `FAILED` (con
+        `failureReason`), `CANCELLED`.
+      responses:
+        '200':
+          description: Inscripción.
+          headers:
+            Retry-After:
+              $ref: './shared/components.yaml#/components/headers/RetryAfter'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Registration'
+              examples:
+                pendiente:
+                  $ref: '#/components/examples/RegistrationPending'
+                confirmada:
+                  $ref: '#/components/examples/RegistrationConfirmed'
+                fallida:
+                  summary: Fallida por saldo insuficiente (compensada)
+                  value:
+                    id: 0192f3c1-2d3e-7f40-a152-637485960a1b
+                    eventId: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+                    userId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                    event:
+                      id: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+                      title: Taller de Docker para principiantes
+                      startsAt: '2026-10-24T22:00:00Z'
+                      venue: Auditorio de la Facultad de Ingeniería, UMSA
+                    status: FAILED
+                    failureReason: INSUFFICIENT_FUNDS
+                    priceCredits: 20
+                    ticketId: null
+                    createdAt: '2026-10-14T15:30:00Z'
+                    updatedAt: '2026-10-14T15:30:01Z'
+                    confirmedAt: null
+                    cancelledAt: null
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /registrations/{registrationId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/RegistrationId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [registrations]
+      operationId: cancelRegistration
+      summary: Cancelar mi inscripción
+      description: |
+        Inicia la SAGA inversa `CANCELLATION` (UC-13, RF-17): anular ticket → reembolsar
+        créditos → liberar cupo → `bandada.events.registration.cancelled.v1`. Solo para
+        inscripciones `CONFIRMED` y hasta 24 h antes del inicio del evento. Responde **202** con
+        la inscripción `CANCELLATION_PENDING`; consultar el resultado con `getRegistration`.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: Cancelación aceptada y en proceso.
+          headers:
+            Location:
+              $ref: './shared/components.yaml#/components/headers/Location'
+            Retry-After:
+              $ref: './shared/components.yaml#/components/headers/RetryAfter'
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+            X-Correlation-Id:
+              $ref: './shared/components.yaml#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Registration'
+              examples:
+                cancelando:
+                  summary: Cancelación en curso
+                  value:
+                    id: 0192f3c1-2d3e-7f40-a152-637485960a1b
+                    eventId: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+                    userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                    event:
+                      id: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+                      title: Taller de Docker para principiantes
+                      startsAt: '2026-10-24T22:00:00Z'
+                      venue: Auditorio de la Facultad de Ingeniería, UMSA
+                    status: CANCELLATION_PENDING
+                    failureReason: null
+                    priceCredits: 20
+                    ticketId: 0192f3c2-9a8b-7c6d-8e5f-4a3b2c1d0e9f
+                    createdAt: '2026-10-14T15:30:00Z'
+                    updatedAt: '2026-10-20T10:00:00Z'
+                    confirmedAt: '2026-10-14T15:30:02Z'
+                    cancelledAt: null
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          description: La inscripción no está `CONFIRMED` (`INVALID_REGISTRATION_STATUS`) o `IDEMPOTENCY_IN_PROGRESS`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                estadoInvalido:
+                  summary: No confirmada
+                  value:
+                    type: https://api.bandadau.com/problems/invalid-registration-status
+                    title: No se puede cancelar
+                    status: 409
+                    detail: Solo se pueden cancelar inscripciones confirmadas.
+                    instance: /api/v1/registrations/0192f3c1-2d3e-7f40-a152-637485960a1b/cancel
+                    code: INVALID_REGISTRATION_STATUS
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '422':
+          description: Faltan menos de 24 h para el evento (`CANCELLATION_WINDOW_CLOSED`) o `IDEMPOTENCY_KEY_REUSED`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                fueraDePlazo:
+                  summary: Fuera de plazo
+                  value:
+                    type: https://api.bandadau.com/problems/cancellation-window-closed
+                    title: Plazo de cancelación vencido
+                    status: 422
+                    detail: Solo puedes cancelar hasta 24 horas antes del inicio del evento.
+                    instance: /api/v1/registrations/0192f3c1-2d3e-7f40-a152-637485960a1b/cancel
+                    code: CANCELLATION_WINDOW_CLOSED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /internal/v1/sagas:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: listSagas
+      summary: Listar SAGAs (interno)
+      description: |
+        Instancias de SAGA filtradas por estado (p. ej. `status=FAILED&status=COMPENSATED`) y
+        fecha. Las `FAILED` se pueden reimpulsar con `retrySaga`. Para el panel (`sagas(status)`) y las herramientas MCP `list_failed_sagas`
+        (agente de monitoreo, UC-20). Ordenadas de la más reciente a la más antigua.
+      servers:
+        - url: http://events-service:7004
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          style: form
+          explode: true
+          description: Uno o más estados (se repite el parámetro).
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/SagaStatus'
+          example: [FAILED, COMPENSATED]
+        - name: type
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/SagaType'
+        - name: since
+          in: query
+          required: false
+          description: Solo SAGAs actualizadas desde esta fecha-hora (UTC).
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-14T00:00:00Z'
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de SAGAs.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SagaInstancePage'
+              examples:
+                compensada:
+                  summary: SAGA compensada por fallo de ticketing
+                  value:
+                    items:
+                      - id: 0192f3c1-2d3e-7f41-b263-748596a7b8c9
+                        type: REGISTRATION
+                        registrationId: 0192f3c1-2d3e-7f40-a152-637485960a1b
+                        eventId: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+                        userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                        step: REFUND_CREDITS
+                        status: COMPENSATED
+                        failureReason: TICKET_ISSUE_FAILED
+                        retries: 3
+                        deadlineAt: '2026-10-14T15:30:31Z'
+                        startedAt: '2026-10-14T15:30:00Z'
+                        updatedAt: '2026-10-14T15:30:09Z'
+                        correlationId: 0192f3c0-1234-7abc-8def-0123456789ab
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+  /internal/v1/sagas/{sagaId}/retry:
+    parameters:
+      - name: sagaId
+        in: path
+        required: true
+        description: Identificador de la instancia de SAGA.
+        schema:
+          type: string
+          format: uuid
+        example: 0192f3c1-2d3e-7f41-b263-748596a7b8c9
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [internal]
+      operationId: retrySaga
+      summary: Reimpulsar una SAGA fallida (interno)
+      description: |
+        Reimpulsa una SAGA `FAILED` desde el paso en que quedó (p. ej. `REFUND_CREDITS` tras una
+        caída de `wallet-service`): reinicia `retries`, fija un nuevo `deadlineAt` y vuelve a enviar
+        el comando del paso con la **misma** `idempotencyKey = <sagaId>:<step>`, por lo que los
+        participantes no duplican efectos (UC-13 10b, D2, D15). Solo `ADMIN` desde el panel
+        (mutación GraphQL `retrySaga`); se audita con `X-Actor-Id`. Responde **202** con la SAGA en
+        su nuevo estado intermedio; el resultado final se observa con `listSagas`.
+      x-idempotency-exempt: Idempotente por naturaleza; si la SAGA ya no está `FAILED` (porque un reintento anterior la reanudó) se devuelve su estado actual sin reenviar comandos, y los comandos reusan la idempotencyKey del paso.
+      servers:
+        - url: http://events-service:7004
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/ActorId'
+      responses:
+        '202':
+          description: SAGA reanudada (o ya en curso).
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SagaInstance'
+              examples:
+                reanudada:
+                  summary: Cancelación reanudada en REFUND_CREDITS
+                  value:
+                    id: 0192f3c1-2d3e-7f41-b263-748596a7b8c9
+                    type: CANCELLATION
+                    registrationId: 0192f3c1-2d3e-7f40-a152-637485960a1b
+                    eventId: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+                    userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                    step: REFUND_CREDITS
+                    status: COMPENSATING
+                    failureReason: null
+                    retries: 0
+                    deadlineAt: '2026-10-20T10:00:30Z'
+                    startedAt: '2026-10-19T18:00:00Z'
+                    updatedAt: '2026-10-20T10:00:00Z'
+                    correlationId: 0192f3c0-1234-7abc-8def-0123456789ab
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          description: La SAGA no se puede reimpulsar (`SAGA_NOT_RETRYABLE`, p. ej. está `COMPLETED` o `COMPENSATED`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                noReintentable:
+                  summary: SAGA ya terminada
+                  value:
+                    type: https://api.bandadau.com/problems/saga-not-retryable
+                    title: La SAGA no se puede reintentar
+                    status: 409
+                    detail: La SAGA ya terminó en estado COMPENSATED.
+                    instance: /internal/v1/sagas/0192f3c1-2d3e-7f41-b263-748596a7b8c9/retry
+                    code: SAGA_NOT_RETRYABLE
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  /internal/v1/events:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: listEventsInternal
+      summary: Listar eventos por rango y estado (interno)
+      description: |
+        Eventos de cualquier organizador ordenados por `startsAt` ascendente, filtrables por rango de
+        inicio y estado (D15). Lo usan la herramienta MCP `list_events` (insights-service) y n8n
+        `wf-02-recordatorio-evento` (eventos `PUBLISHED` que empiezan en 24 h). Los tokens de
+        servicio no se aceptan en `/api/v1`, por eso existe esta variante interna de `listEvents`.
+      servers:
+        - url: http://events-service:7004
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: startsFrom
+          in: query
+          required: false
+          description: Solo eventos que empiezan desde esta fecha-hora (UTC, inclusive).
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-15T15:00:00Z'
+        - name: startsTo
+          in: query
+          required: false
+          description: Solo eventos que empiezan hasta esta fecha-hora (UTC, exclusive).
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-15T16:00:00Z'
+        - name: status
+          in: query
+          required: false
+          style: form
+          explode: true
+          description: Uno o más estados (se repite el parámetro). Sin él, todos los estados.
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/EventStatus'
+          example: [PUBLISHED]
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de eventos.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventPage'
+              examples:
+                manana:
+                  summary: Eventos que empiezan en 24 h
+                  value:
+                    items:
+                      - id: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+                        organizerId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                        title: Taller de Docker para principiantes
+                        description: Aprende a contenerizar tu primera API. Trae tu laptop con Docker instalado.
+                        coverMediaId: 0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d
+                        coverUrl: null
+                        startsAt: '2026-10-15T15:30:00Z'
+                        venue: Auditorio de la Facultad de Ingeniería, UMSA
+                        capacity: 40
+                        seatsTaken: 38
+                        seatsAvailable: 2
+                        priceCredits: 20
+                        status: PUBLISHED
+                        publishedAt: '2026-10-10T15:10:00Z'
+                        createdAt: '2026-10-10T15:04:05Z'
+                        updatedAt: '2026-10-14T16:00:00Z'
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+  /internal/v1/stats/registrations:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: getRegistrationStats
+      summary: Estadísticas de inscripciones (interno)
+      description: |
+        Inscripciones agregadas por día (UTC) o por evento en un rango, con conteos por estado y
+        créditos cobrados/reembolsados. Para el dashboard del panel y la herramienta MCP
+        `get_registration_stats`. Sin datos personales. Rango máximo 366 días.
+      servers:
+        - url: http://events-service:7004
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2026-10-01'
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2026-10-14'
+        - name: groupBy
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [day, event]
+            default: day
+        - name: eventId
+          in: query
+          required: false
+          description: Restringe a un evento.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Estadísticas.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationStats'
+              examples:
+                porDia:
+                  summary: Agrupado por día
+                  value:
+                    from: '2026-10-13'
+                    to: '2026-10-14'
+                    groupBy: day
+                    totals:
+                      pending: 1
+                      confirmed: 57
+                      failed: 4
+                      cancelled: 3
+                      creditsCollected: 1140
+                      creditsRefunded: 60
+                    series:
+                      - key: '2026-10-13'
+                        label: '2026-10-13'
+                        pending: 0
+                        confirmed: 25
+                        failed: 1
+                        cancelled: 1
+                        creditsCollected: 500
+                        creditsRefunded: 20
+                      - key: '2026-10-14'
+                        label: '2026-10-14'
+                        pending: 1
+                        confirmed: 32
+                        failed: 3
+                        cancelled: 2
+                        creditsCollected: 640
+                        creditsRefunded: 40
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+  /internal/v1/events/{eventId}/registrations:
+    parameters:
+      - $ref: '#/components/parameters/EventId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: listEventRegistrations
+      summary: Inscripciones de un evento (interno)
+      description: |
+        Inscripciones de un evento, filtrables por estado (D15, UC-23). El GraphQL del panel (D11)
+        expone `registrations(eventId)` y n8n `wf-02-recordatorio-evento` necesita los inscritos
+        confirmados de cada evento.
+      servers:
+        - url: http://events-service:7004
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/RegistrationStatus'
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de inscripciones.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationPage'
+              examples:
+                confirmadas:
+                  summary: Inscritos confirmados
+                  value:
+                    items:
+                      - id: 0192f3c1-2d3e-7f40-a152-637485960a1b
+                        eventId: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+                        userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                        event:
+                          id: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+                          title: Taller de Docker para principiantes
+                          startsAt: '2026-10-24T22:00:00Z'
+                          venue: Auditorio de la Facultad de Ingeniería, UMSA
+                        status: CONFIRMED
+                        failureReason: null
+                        priceCredits: 20
+                        ticketId: 0192f3c2-9a8b-7c6d-8e5f-4a3b2c1d0e9f
+                        createdAt: '2026-10-14T15:30:00Z'
+                        updatedAt: '2026-10-14T15:30:02Z'
+                        confirmedAt: '2026-10-14T15:30:02Z'
+                        cancelledAt: null
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+components:
+  parameters:
+    EventId:
+      name: eventId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+    RegistrationId:
+      name: registrationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 0192f3c1-2d3e-7f40-a152-637485960a1b
+
+  responses:
+    InvalidEventStatus:
+      description: El estado del evento no permite la operación (`INVALID_EVENT_STATUS`).
+      content:
+        application/problem+json:
+          schema:
+            $ref: './shared/components.yaml#/components/schemas/Problem'
+          examples:
+            estado:
+              summary: Evento cancelado
+              value:
+                type: https://api.bandadau.com/problems/invalid-event-status
+                title: Estado del evento no válido
+                status: 409
+                detail: El evento está cancelado y no puede modificarse.
+                instance: /api/v1/events/0192f3b0-7c1e-7a2b-9c3d-4e5f60718293/publish
+                code: INVALID_EVENT_STATUS
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  examples:
+    EventPublished:
+      summary: Evento publicado
+      value:
+        id: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+        organizerId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+        title: Taller de Docker para principiantes
+        description: Aprende a contenerizar tu primera API. Trae tu laptop con Docker instalado.
+        coverMediaId: 0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d
+        coverUrl: http://minio.bandada.localhost/bandada-media/u/0192f29f.jpg?X-Amz-Signature=abc123
+        startsAt: '2026-10-24T22:00:00Z'
+        venue: Auditorio de la Facultad de Ingeniería, UMSA
+        capacity: 40
+        seatsTaken: 12
+        seatsAvailable: 28
+        priceCredits: 20
+        status: PUBLISHED
+        publishedAt: '2026-10-14T15:10:00Z'
+        createdAt: '2026-10-14T15:04:05Z'
+        updatedAt: '2026-10-14T16:00:00Z'
+
+    RegistrationPending:
+      summary: Inscripción en proceso
+      value:
+        id: 0192f3c1-2d3e-7f40-a152-637485960a1b
+        eventId: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+        userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+        event:
+          id: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+          title: Taller de Docker para principiantes
+          startsAt: '2026-10-24T22:00:00Z'
+          venue: Auditorio de la Facultad de Ingeniería, UMSA
+        status: PENDING
+        failureReason: null
+        priceCredits: 20
+        ticketId: null
+        createdAt: '2026-10-14T15:30:00Z'
+        updatedAt: '2026-10-14T15:30:00Z'
+        confirmedAt: null
+        cancelledAt: null
+
+    RegistrationConfirmed:
+      summary: Inscripción confirmada
+      value:
+        id: 0192f3c1-2d3e-7f40-a152-637485960a1b
+        eventId: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+        userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+        event:
+          id: 0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+          title: Taller de Docker para principiantes
+          startsAt: '2026-10-24T22:00:00Z'
+          venue: Auditorio de la Facultad de Ingeniería, UMSA
+        status: CONFIRMED
+        failureReason: null
+        priceCredits: 20
+        ticketId: 0192f3c2-9a8b-7c6d-8e5f-4a3b2c1d0e9f
+        createdAt: '2026-10-14T15:30:00Z'
+        updatedAt: '2026-10-14T15:30:02Z'
+        confirmedAt: '2026-10-14T15:30:02Z'
+        cancelledAt: null
+
+  schemas:
+    EventStatus:
+      type: string
+      enum: [DRAFT, PUBLISHED, CANCELLED, FINISHED]
+    RegistrationStatus:
+      type: string
+      enum: [PENDING, CONFIRMED, FAILED, CANCELLATION_PENDING, CANCELLED]
+    RegistrationFailureReason:
+      type: string
+      enum: [EVENT_FULL, INSUFFICIENT_FUNDS, WALLET_NOT_FOUND, TICKET_ISSUE_FAILED, TIMEOUT, SAGA_ABORTED]
+      description: |
+        Motivo de fallo de la SAGA (`RegistrationFailureReason`, D2, ADR-0016). `TIMEOUT` = algún
+        paso superó su `deadlineAt` tras los reintentos; `SAGA_ABORTED` = la SAGA se abortó (p. ej.
+        débito tardío rechazado tras el reembolso); `EVENT_FULL` solo aparece si el cupo se perdió
+        entre la reserva y la confirmación (normalmente es un `409` síncrono).
+    SagaStatus:
+      type: string
+      enum: [STARTED, AWAITING_DEBIT, AWAITING_TICKET, COMPENSATING, COMPLETED, COMPENSATED, FAILED]
+    SagaType:
+      type: string
+      enum: [REGISTRATION, CANCELLATION]
+    SagaStep:
+      type: string
+      enum: [RESERVE_SEAT, DEBIT_CREDITS, ISSUE_TICKET, VOID_TICKET, REFUND_CREDITS, RELEASE_SEAT]
+      description: Paso actual (o último ejecutado) de la SAGA (`SagaStep`, D2, ADR-0016). La confirmación final no es un paso; se refleja en `status = COMPLETED`.
+
+    Event:
+      type: object
+      required: [id, organizerId, title, description, coverMediaId, coverUrl, startsAt, venue, capacity, seatsTaken, seatsAvailable, priceCredits, status, publishedAt, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizerId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          minLength: 5
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 5000
+        coverMediaId:
+          type: [string, 'null']
+          format: uuid
+        coverUrl:
+          type: [string, 'null']
+          format: uri
+          description: URL prefirmada (15 min) de la portada.
+        startsAt:
+          type: string
+          format: date-time
+        venue:
+          type: string
+          maxLength: 200
+        capacity:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        seatsTaken:
+          type: integer
+          minimum: 0
+        seatsAvailable:
+          type: integer
+          minimum: 0
+          description: '`capacity - seatsTaken`.'
+        priceCredits:
+          $ref: './shared/components.yaml#/components/schemas/Credits'
+        status:
+          $ref: '#/components/schemas/EventStatus'
+        publishedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    EventPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Event'
+
+    CreateEventRequest:
+      type: object
+      required: [title, description, startsAt, venue, capacity, priceCredits]
+      properties:
+        title:
+          type: string
+          minLength: 5
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 5000
+        coverMediaId:
+          type: [string, 'null']
+          format: uuid
+        startsAt:
+          type: string
+          format: date-time
+          description: Debe ser futura.
+        venue:
+          type: string
+          minLength: 3
+          maxLength: 200
+        capacity:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        priceCredits:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 0 = gratuito.
+
+    CancelEventRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+
+    EventSummary:
+      type: object
+      required: [id, title, startsAt, venue]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+        venue:
+          type: string
+
+    Registration:
+      type: object
+      required: [id, eventId, userId, event, status, failureReason, priceCredits, ticketId, createdAt, updatedAt, confirmedAt, cancelledAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        event:
+          $ref: '#/components/schemas/EventSummary'
+        status:
+          $ref: '#/components/schemas/RegistrationStatus'
+        failureReason:
+          oneOf:
+            - $ref: '#/components/schemas/RegistrationFailureReason'
+            - type: 'null'
+        priceCredits:
+          $ref: './shared/components.yaml#/components/schemas/Credits'
+        ticketId:
+          type: [string, 'null']
+          format: uuid
+          description: Ticket emitido por `ticketing-service` (cuando `CONFIRMED`).
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        confirmedAt:
+          type: [string, 'null']
+          format: date-time
+        cancelledAt:
+          type: [string, 'null']
+          format: date-time
+
+    RegistrationPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Registration'
+
+    SagaInstance:
+      type: object
+      required: [id, type, registrationId, eventId, userId, step, status, failureReason, retries, deadlineAt, startedAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/SagaType'
+        registrationId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        step:
+          $ref: '#/components/schemas/SagaStep'
+        status:
+          $ref: '#/components/schemas/SagaStatus'
+        failureReason:
+          oneOf:
+            - $ref: '#/components/schemas/RegistrationFailureReason'
+            - type: 'null'
+        retries:
+          type: integer
+          minimum: 0
+          description: Reintentos del comando del paso actual (máx. 3).
+        deadlineAt:
+          type: [string, 'null']
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        correlationId:
+          type: string
+          format: uuid
+
+    SagaInstancePage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/SagaInstance'
+
+    RegistrationCounts:
+      type: object
+      required: [pending, confirmed, failed, cancelled, creditsCollected, creditsRefunded]
+      properties:
+        pending:
+          type: integer
+          format: int64
+        confirmed:
+          type: integer
+          format: int64
+        failed:
+          type: integer
+          format: int64
+        cancelled:
+          type: integer
+          format: int64
+        creditsCollected:
+          $ref: './shared/components.yaml#/components/schemas/Credits'
+        creditsRefunded:
+          $ref: './shared/components.yaml#/components/schemas/Credits'
+
+    RegistrationStats:
+      type: object
+      required: [from, to, groupBy, totals, series]
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        groupBy:
+          type: string
+          enum: [day, event]
+        totals:
+          $ref: '#/components/schemas/RegistrationCounts'
+        series:
+          type: array
+          items:
+            allOf:
+              - type: object
+                required: [key, label]
+                properties:
+                  key:
+                    type: string
+                    description: Fecha (`yyyy-mm-dd`) o `eventId`, según `groupBy`.
+                  label:
+                    type: string
+                    description: Fecha o título del evento.
+              - $ref: '#/components/schemas/RegistrationCounts'
+
+  securitySchemes:
+    bearerAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/bearerAuth'
+    serviceAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/serviceAuth'

@@ -1,0 +1,565 @@
+openapi: 3.1.0
+info:
+  title: Bandada U — notification-service
+  version: 1.1.0
+  summary: Notificaciones in-app, push y email; dispositivos y preferencias.
+  description: |
+    API del bounded context **Notificaciones** (`notification-service`, PHP 8.4 + Laravel 12,
+    Clean Architecture, DynamoDB `bandada-notifications`).
+
+    - Las notificaciones se generan principalmente **a partir de eventos** de RabbitMQ
+      (cola `notification-service.events`, ver `bandadau-docs/contracts/asyncapi/bandada-events.yaml`) y se
+      entregan por los canales habilitados en las preferencias del usuario (RF-28).
+    - **i18n (D14):** `title` y `body` se renderizan con plantillas ICU **en el idioma del
+      destinatario** (`User.locale`, copia local alimentada por
+      `bandada.identity.user.preferences-changed.v1` y `bandada.identity.user.registered.v1`;
+      *fallback* `es`). El `Accept-Language` de la petición solo afecta a los Problem Details.
+      Los emails usan solo el tema claro (D13).
+    - Las notificaciones in-app expiran a los 90 días (TTL DynamoDB).
+    - Errores RFC 9457 con `code` estable.
+
+    ## Changelog
+    - 1.1.0 (2026-10-14): ADR-0016/D15 — `sendNotification` deja de ser propuesta y acepta `dedupeKey`;
+      `NotificationType` agrega `WELCOME`, `REGISTRATION_CANCELLED`, `EVENT_CANCELLED`, `NEW_EVENT`.
+    - 1.0.0 (2026-10-14): versión inicial contract-first (D1, D14).
+  contact:
+    name: Grupo 24 — Ingeniería de Software II
+servers:
+  - url: http://api.bandada.localhost/api/v1
+    description: Desarrollo local (Traefik)
+  - url: https://api.bandadau.com/api/v1
+    description: Producción
+tags:
+  - name: notifications
+    description: Bandeja in-app del usuario.
+  - name: devices
+    description: Registro de tokens de push (Expo / Web Push).
+  - name: preferences
+    description: Preferencias de canales y tipos de notificación.
+  - name: internal
+    description: Endpoints internos (`/internal/v1`), solo con token de servicio.
+security:
+  - bearerAuth: []
+paths:
+  /notifications:
+    get:
+      tags: [notifications]
+      operationId: listNotifications
+      summary: Listar mis notificaciones
+      description: Bandeja in-app paginada por cursor, de la más reciente a la más antigua.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+        - name: unreadOnly
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Página de notificaciones.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+            X-Unread-Count:
+              x-proposal: true
+              description: '**PROPUESTA**: total de notificaciones no leídas (para el badge).'
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPage'
+              examples:
+                pagina:
+                  value:
+                    items:
+                      - id: 0192a3d0-0000-7000-8000-000000000501
+                        userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+                        type: REGISTRATION_CONFIRMED
+                        title: ¡Inscripción confirmada!
+                        body: Ya tienes tu entrada para «Taller de Docker para principiantes».
+                        locale: es
+                        data:
+                          deepLink: bandada://tickets/0192a3c5-7777-7aaa-8bbb-000000000101
+                          eventId: 0192a3be-1234-7abc-8def-000000000042
+                          registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
+                        readAt: null
+                        createdAt: '2026-10-14T14:00:05Z'
+                      - id: 0192a3cf-0000-7000-8000-000000000498
+                        userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+                        type: NEW_COMMENT
+                        title: Nuevo comentario
+                        body: Diego Mamani comentó tu publicación.
+                        locale: es
+                        data:
+                          deepLink: bandada://posts/0192a3a0-0000-7000-8000-000000000321
+                          postId: 0192a3a0-0000-7000-8000-000000000321
+                        readAt: '2026-10-14T13:10:00Z'
+                        createdAt: '2026-10-14T12:58:41Z'
+                    nextCursor: eyJzayI6Ik5PVElGIzAxOTJhM2NmIn0
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /notifications/{notificationId}/read:
+    post:
+      tags: [notifications]
+      operationId: markNotificationRead
+      summary: Marcar una notificación como leída
+      description: Idempotente por naturaleza (si ya estaba leída conserva su `readAt`).
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Notificación actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /notifications/read-all:
+    post:
+      tags: [notifications]
+      operationId: markAllNotificationsRead
+      summary: Marcar todas como leídas
+      description: Marca como leídas todas las notificaciones no leídas del usuario. Idempotente.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Resultado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [updatedCount, readAt]
+                properties:
+                  updatedCount:
+                    type: integer
+                    minimum: 0
+                  readAt:
+                    type: string
+                    format: date-time
+              examples:
+                ok:
+                  value:
+                    updatedCount: 7
+                    readAt: '2026-10-14T15:04:05Z'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+
+  /notifications/preferences:
+    get:
+      tags: [preferences]
+      operationId: getNotificationPreferences
+      summary: Obtener mis preferencias de notificación
+      description: |
+        Canales habilitados (`push`, `email`, `inApp`) y tipos silenciados del usuario autenticado
+        (RF-28). Si nunca las guardó, devuelve los valores por defecto (todos los canales activos,
+        ningún tipo silenciado).
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Preferencias (valores por defecto si nunca se guardaron).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreferences'
+              examples:
+                porDefecto:
+                  value:
+                    userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+                    channels:
+                      push: true
+                      email: true
+                      inApp: true
+                    mutedTypes: []
+                    updatedAt: '2026-10-01T10:00:00Z'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+    put:
+      tags: [preferences]
+      operationId: updateNotificationPreferences
+      summary: Reemplazar mis preferencias de notificación
+      description: |
+        Reemplaza las preferencias completas (PUT idempotente). `ALERT` no aplica a estudiantes.
+        El idioma **no** se configura aquí: se toma de `User.locale` (identity, D14).
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNotificationPreferencesRequest'
+            examples:
+              sinEmail:
+                value:
+                  channels:
+                    push: true
+                    email: false
+                    inApp: true
+                  mutedTypes: [NEW_REACTION]
+      responses:
+        '200':
+          description: Preferencias guardadas.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreferences'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '422':
+          $ref: './shared/components.yaml#/components/responses/UnprocessableEntity'
+
+  /devices/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        description: |
+          Token de push del dispositivo, **URL-encoded** (p. ej. `ExponentPushToken%5Bxxxx%5D`).
+          Para Web Push es el SHA-256 hex del `endpoint` de la suscripción.
+        schema:
+          type: string
+          minLength: 8
+          maxLength: 512
+    put:
+      tags: [devices]
+      operationId: registerDevice
+      summary: Registrar (o refrescar) un dispositivo para push
+      description: |
+        Upsert idempotente del token para el usuario autenticado. Si el token estaba asociado a
+        otro usuario, se reasigna (cambio de sesión en el mismo dispositivo).
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDeviceRequest'
+            examples:
+              android:
+                value:
+                  platform: ANDROID
+                  appVersion: 1.4.0
+                  deviceName: Galaxy A54 de Valeria
+      responses:
+        '200':
+          description: Dispositivo registrado/actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceToken'
+              examples:
+                ok:
+                  value:
+                    token: ExponentPushToken[xk2P9aLmQ0rT7vY3bN1c]
+                    userId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+                    platform: ANDROID
+                    appVersion: 1.4.0
+                    deviceName: Galaxy A54 de Valeria
+                    registeredAt: '2026-10-14T15:04:05Z'
+                    lastSeenAt: '2026-10-14T15:04:05Z'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+    delete:
+      tags: [devices]
+      operationId: unregisterDevice
+      summary: Dar de baja un dispositivo
+      description: Elimina el token (logout o permiso de push revocado). Idempotente.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '204':
+          description: Eliminado (o no existía).
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+
+  /internal/v1/notifications:
+    post:
+      tags: [internal]
+      operationId: sendNotification
+      summary: Enviar una notificación a usuarios (interno)
+      description: |
+        Aceptada en D15 (ADR-0016, UC-23). La usan n8n (`wf-02-recordatorio-evento`) y otros servicios para notificaciones que no
+        nacen de un evento de dominio. El servicio renderiza la plantilla del `type` en el
+        `locale` de cada destinatario y respeta sus preferencias.
+        Idempotente con `Idempotency-Key` (p. ej. `reminder:<eventId>:<userId>`); además,
+        `dedupeKey` evita entregar dos veces la misma notificación a un destinatario aunque llegue
+        con otra clave (p. ej. dos ejecuciones del cron de n8n).
+      servers:
+        - url: http://notification-service:7007
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendNotificationRequest'
+            examples:
+              recordatorio:
+                value:
+                  userIds: [0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a6b]
+                  type: EVENT_REMINDER
+                  dedupeKey: reminder:0192a3be-1234-7abc-8def-000000000042
+                  params:
+                    eventTitle: Taller de Docker para principiantes
+                    startsAt: '2026-10-20T22:00:00Z'
+                    venue: Auditorio de la Facultad de Tecnología, UMSA
+                  data:
+                    deepLink: bandada://events/0192a3be-1234-7abc-8def-000000000042
+                    eventId: 0192a3be-1234-7abc-8def-000000000042
+      responses:
+        '202':
+          description: Aceptada para entrega.
+          headers:
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, skipped]
+                properties:
+                  accepted:
+                    type: integer
+                    description: Destinatarios a los que se encoló la entrega.
+                  skipped:
+                    type: integer
+                    description: Destinatarios omitidos por preferencias.
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '409':
+          $ref: './shared/components.yaml#/components/responses/Conflict'
+        '422':
+          $ref: './shared/components.yaml#/components/responses/UnprocessableEntity'
+
+components:
+  schemas:
+    NotificationType:
+      type: string
+      enum:
+        - REGISTRATION_CONFIRMED
+        - REGISTRATION_FAILED
+        - EVENT_REMINDER
+        - NEW_COMMENT
+        - NEW_REACTION
+        - NEW_FOLLOWER
+        - GROUP_REQUEST
+        - TOPUP_PAID
+        - CONTENT_FLAGGED
+        - ALERT
+        - WELCOME
+        - REGISTRATION_CANCELLED
+        - EVENT_CANCELLED
+        - NEW_EVENT
+    DevicePlatform:
+      type: string
+      description: Plataforma del dispositivo (valores de `DeviceToken.platform`).
+      enum: [IOS, ANDROID, WEB]
+    Notification:
+      type: object
+      required: [id, userId, type, title, body, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/NotificationType'
+        title:
+          type: string
+          description: Renderizado en el idioma del destinatario.
+        body:
+          type: string
+        locale:
+          $ref: './shared/components.yaml#/components/schemas/Locale'
+        data:
+          type: object
+          description: Datos para navegación (`deepLink`) e IDs relacionados.
+          additionalProperties:
+            type: string
+          properties:
+            deepLink:
+              type: string
+        readAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    NotificationPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Notification'
+    NotificationChannels:
+      type: object
+      required: [push, email, inApp]
+      properties:
+        push:
+          type: boolean
+        email:
+          type: boolean
+        inApp:
+          type: boolean
+    NotificationPreferences:
+      type: object
+      required: [userId, channels, mutedTypes, updatedAt]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        channels:
+          $ref: '#/components/schemas/NotificationChannels'
+        mutedTypes:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/NotificationType'
+        updatedAt:
+          type: string
+          format: date-time
+    UpdateNotificationPreferencesRequest:
+      type: object
+      additionalProperties: false
+      required: [channels, mutedTypes]
+      properties:
+        channels:
+          $ref: '#/components/schemas/NotificationChannels'
+        mutedTypes:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/NotificationType'
+    RegisterDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [platform]
+      properties:
+        platform:
+          $ref: '#/components/schemas/DevicePlatform'
+        appVersion:
+          type: string
+          maxLength: 32
+        deviceName:
+          type: string
+          maxLength: 80
+        webPushSubscription:
+          type: object
+          description: "Solo `WEB`: suscripción Web Push (PushSubscription JSON)."
+          required: [endpoint, keys]
+          properties:
+            endpoint:
+              type: string
+              format: uri
+            keys:
+              type: object
+              required: [p256dh, auth]
+              properties:
+                p256dh:
+                  type: string
+                auth:
+                  type: string
+    DeviceToken:
+      type: object
+      required: [token, userId, platform, registeredAt]
+      properties:
+        token:
+          type: string
+        userId:
+          type: string
+          format: uuid
+        platform:
+          $ref: '#/components/schemas/DevicePlatform'
+        appVersion:
+          type: [string, 'null']
+        deviceName:
+          type: [string, 'null']
+        registeredAt:
+          type: string
+          format: date-time
+        lastSeenAt:
+          type: string
+          format: date-time
+    SendNotificationRequest:
+      type: object
+      additionalProperties: false
+      required: [userIds, type, params]
+      properties:
+        userIds:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: string
+            format: uuid
+        type:
+          $ref: '#/components/schemas/NotificationType'
+        dedupeKey:
+          type: string
+          maxLength: 200
+          description: Clave de deduplicación por destinatario (se combina con cada `userId`; ventana de 7 días).
+        params:
+          type: object
+          description: Variables ICU de la plantilla del `type`.
+          additionalProperties: true
+        data:
+          type: object
+          additionalProperties:
+            type: string
+        channels:
+          type: array
+          description: Restringe los canales (por defecto, todos los habilitados por el usuario).
+          items:
+            type: string
+            enum: [PUSH, EMAIL, IN_APP]
+  securitySchemes:
+    bearerAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/bearerAuth'
+    serviceAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/serviceAuth'

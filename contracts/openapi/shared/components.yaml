@@ -1,0 +1,496 @@
+openapi: 3.1.0
+info:
+  title: Bandada U — componentes compartidos
+  version: 1.1.0
+  summary: Esquemas, parámetros, cabeceras, respuestas y esquemas de seguridad comunes a todos los servicios.
+  description: |
+    Este archivo **no describe ningún endpoint**: solo agrupa los componentes que todos los
+    contratos OpenAPI de `bandadau-docs/contracts/openapi/*.yaml` referencian con
+    `$ref: './shared/components.yaml#/components/...'`.
+
+    **Nombres estables**: los componentes listados abajo forman parte del contrato entre
+    equipos. Renombrarlos o eliminarlos es un *breaking change* (ver `bandadau-docs/contracts/README.md`).
+
+    - Esquemas: `Problem`, `ValidationProblem`, `FieldError`, `CursorPageMeta`, `Uuid`,
+      `Credits`, `Locale`, `ThemePreference`, `Role`.
+    - Parámetros: `Cursor`, `Limit`, `IdempotencyKey`, `CorrelationId`, `AcceptLanguage`, `ActorId`.
+    - Cabeceras: `IdempotentReplayed`, `ContentLanguage`, `CorrelationId`, `RetryAfter`, `Location`.
+    - Respuestas: `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`,
+      `UnprocessableEntity`, `TooManyRequests`, `InternalServerError`, `ServiceUnavailable`.
+    - Seguridad: `bearerAuth` (usuarios) y `serviceAuth` (servicio a servicio, `/internal/v1`).
+
+    ## Problem Details (RFC 9457)
+    - `type`: URI estable `https://api.bandadau.com/problems/<code-en-kebab-case>`.
+    - `code`: identificador estable en `UPPER_SNAKE_CASE`; **los clientes traducen por `code`**.
+    - `title` / `detail`: texto localizado según `Accept-Language` (`es` por defecto, D14).
+
+    ## Changelog
+    - 1.1.0 (2026-10-14): `AcceptLanguage`, `ContentLanguage`, `Locale`, `ThemePreference` (D13/D14).
+    - 1.0.0 (2026-10-14): versión inicial.
+  contact:
+    name: Grupo 24 — Ingeniería de Software II
+paths: {}
+components:
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+      description: Identificador UUIDv7 generado por la aplicación (ordenable por tiempo).
+      examples:
+        - 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+
+    Credits:
+      type: integer
+      format: int64
+      description: Cantidad de créditos. Siempre entero; nunca decimales.
+      examples:
+        - 50
+
+    Locale:
+      type: string
+      enum: [es, en]
+      default: es
+      description: Idioma de la interfaz y de los textos generados por el servidor (D14). `es` es el idioma por defecto y de *fallback*.
+
+    ThemePreference:
+      type: string
+      enum: [SYSTEM, LIGHT, DARK]
+      default: SYSTEM
+      description: Preferencia de tema visual del usuario (D13). `SYSTEM` sigue el tema del dispositivo.
+
+    Role:
+      type: string
+      enum: [STUDENT, ORGANIZER, MODERATOR, ADMIN]
+      description: Rol de la plataforma. Un usuario tiene uno o más roles (`roles[]` en el JWT).
+
+    FieldError:
+      type: object
+      description: Error de validación de un campo concreto.
+      required: [field, code, message]
+      properties:
+        field:
+          type: string
+          description: Ruta del campo con error (notación de puntos, p. ej. `interests[3]`).
+          examples: [text]
+        pointer:
+          type: string
+          description: JSON Pointer (RFC 6901) al campo dentro del cuerpo de la petición.
+          examples: [/text]
+        code:
+          type: string
+          pattern: '^[A-Z][A-Z0-9_]*$'
+          description: Código estable del error de campo (p. ej. `REQUIRED`, `TOO_LONG`, `INVALID_FORMAT`).
+          examples: [TOO_LONG]
+        message:
+          type: string
+          description: Mensaje localizado para mostrar al usuario.
+          examples: [El texto no puede superar los 2000 caracteres.]
+
+    Problem:
+      type: object
+      description: |
+        Error en formato RFC 9457 (Problem Details), servido como `application/problem+json`.
+        Se permiten miembros de extensión adicionales.
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: URI que identifica el tipo de problema.
+          examples: ['https://api.bandadau.com/problems/not-found']
+        title:
+          type: string
+          description: Resumen corto, legible y localizado del tipo de problema.
+          examples: [Recurso no encontrado]
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+          description: Código de estado HTTP (repetido por conveniencia).
+          examples: [404]
+        detail:
+          type: string
+          description: Explicación localizada específica de esta ocurrencia.
+          examples: [No existe un evento con el identificador indicado.]
+        instance:
+          type: string
+          format: uri-reference
+          description: Referencia a la ocurrencia concreta (normalmente la ruta pedida).
+          examples: [/api/v1/events/0192f3b0-7c1e-7a2b-9c3d-4e5f60718293]
+        code:
+          type: string
+          pattern: '^[A-Z][A-Z0-9_]*$'
+          description: Código estable en `UPPER_SNAKE_CASE`; los clientes traducen por este valor.
+          examples: [NOT_FOUND]
+        traceId:
+          type: string
+          pattern: '^[0-9a-f]{32}$'
+          description: Trace ID de OpenTelemetry (W3C `traceparent`) para correlacionar con Grafana.
+          examples: [4bf92f3577b34da6a3ce929d0e0e4736]
+        errors:
+          type: array
+          description: Errores por campo (solo en errores de validación).
+          items:
+            $ref: '#/components/schemas/FieldError'
+      additionalProperties: true
+
+    ValidationProblem:
+      description: Problem Details con la lista de errores por campo (`code = VALIDATION_FAILED`).
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          required: [errors]
+          properties:
+            errors:
+              type: array
+              minItems: 1
+              items:
+                $ref: '#/components/schemas/FieldError'
+
+    CursorPageMeta:
+      type: object
+      description: |
+        Metadatos de paginación por cursor. Las listas se componen con `allOf`:
+        `{ items: [...], nextCursor: string|null }`. `nextCursor = null` indica la última página.
+        El cursor es opaco (base64url); el cliente no debe interpretarlo.
+      required: [nextCursor]
+      properties:
+        nextCursor:
+          type: [string, 'null']
+          description: Cursor opaco para pedir la página siguiente, o `null` si no hay más.
+          examples: [eyJpZCI6IjAxOTJmMWEyIn0]
+
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Cursor opaco devuelto como `nextCursor` por la página anterior. Omitir para la primera página.
+      schema:
+        type: string
+        maxLength: 512
+      example: eyJpZCI6IjAxOTJmMWEyIn0
+
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Cantidad máxima de elementos por página (1–50).
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 20
+      example: 20
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Clave de idempotencia (UUID, recomendado UUIDv7) generada por el cliente para esta
+        intención de operación (D3). Se conserva 24 h.
+        - Misma clave + misma petición → se devuelve la respuesta guardada con `Idempotent-Replayed: true`.
+        - Misma clave + petición distinta → `422 IDEMPOTENCY_KEY_REUSED`.
+        - Misma clave con la primera petición aún en curso → `409 IDEMPOTENCY_IN_PROGRESS`.
+      schema:
+        type: string
+        format: uuid
+      example: 0192f3c0-aaaa-7bbb-8ccc-dddddddddddd
+
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: Identificador de correlación de negocio. Si no se envía, el gateway/servicio genera uno y lo devuelve en la respuesta.
+      schema:
+        type: string
+        format: uuid
+      example: 0192f3c0-1234-7abc-8def-0123456789ab
+
+    AcceptLanguage:
+      name: Accept-Language
+      in: header
+      required: false
+      description: |
+        Idioma preferido para `title`/`detail` de errores y textos generados por el servidor (D14).
+        Valores soportados `es` y `en`; cualquier otro valor o su ausencia → `es`.
+        La respuesta indica el idioma usado en `Content-Language`.
+      schema:
+        type: string
+        default: es
+        examples: [es, en, 'en-US,en;q=0.9,es;q=0.8']
+      example: es
+
+    ActorId:
+      name: X-Actor-Id
+      in: header
+      required: true
+      description: |
+        Solo en `/internal/v1`. ID del usuario humano (administrador/moderador) en cuyo nombre
+        actúa el servicio llamante (p. ej. `admin-gateway`). Se usa para auditoría.
+      schema:
+        type: string
+        format: uuid
+      example: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+
+  headers:
+    IdempotentReplayed:
+      description: '`true` si la respuesta es una repetición guardada de una petición previa con la misma `Idempotency-Key`.'
+      schema:
+        type: boolean
+      example: false
+
+    ContentLanguage:
+      description: Idioma de los textos de la respuesta (`es` o `en`). El contenido creado por usuarios no se traduce.
+      schema:
+        $ref: '#/components/schemas/Locale'
+      example: es
+
+    CorrelationId:
+      description: Identificador de correlación (el recibido o uno generado).
+      schema:
+        type: string
+        format: uuid
+      example: 0192f3c0-1234-7abc-8def-0123456789ab
+
+    RetryAfter:
+      description: Segundos que el cliente debe esperar antes de reintentar.
+      schema:
+        type: integer
+        minimum: 1
+      example: 30
+
+    Location:
+      description: URL del recurso creado o del recurso a consultar para seguir el estado.
+      schema:
+        type: string
+        format: uri-reference
+      example: /api/v1/registrations/0192f3c1-2d3e-7f40-a152-637485960a1b
+
+  responses:
+    BadRequest:
+      description: La petición es inválida (JSON mal formado o fallo de validación de esquema).
+      headers:
+        Content-Language:
+          $ref: '#/components/headers/ContentLanguage'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ValidationProblem'
+          examples:
+            validacion:
+              summary: Fallo de validación
+              value:
+                type: https://api.bandadau.com/problems/validation-failed
+                title: Datos inválidos
+                status: 400
+                detail: Uno o más campos no cumplen las reglas.
+                instance: /api/v1/posts
+                code: VALIDATION_FAILED
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+                errors:
+                  - field: text
+                    pointer: /text
+                    code: TOO_LONG
+                    message: El texto no puede superar los 2000 caracteres.
+
+    Unauthorized:
+      description: Falta el token, es inválido o expiró.
+      headers:
+        WWW-Authenticate:
+          description: Desafío de autenticación (`Bearer`).
+          schema:
+            type: string
+          example: Bearer error="invalid_token"
+        Content-Language:
+          $ref: '#/components/headers/ContentLanguage'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            sinToken:
+              summary: Token ausente o expirado
+              value:
+                type: https://api.bandadau.com/problems/unauthorized
+                title: No autenticado
+                status: 401
+                detail: El token de acceso no es válido o expiró. Vuelve a iniciar sesión.
+                instance: /api/v1/users/me
+                code: UNAUTHORIZED
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+    Forbidden:
+      description: El usuario está autenticado pero no tiene permiso para esta operación.
+      headers:
+        Content-Language:
+          $ref: '#/components/headers/ContentLanguage'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            sinPermiso:
+              summary: Rol insuficiente
+              value:
+                type: https://api.bandadau.com/problems/forbidden
+                title: Acceso denegado
+                status: 403
+                detail: Necesitas el rol ORGANIZER para realizar esta acción.
+                instance: /api/v1/events
+                code: FORBIDDEN
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+    NotFound:
+      description: El recurso no existe o no es visible para el usuario.
+      headers:
+        Content-Language:
+          $ref: '#/components/headers/ContentLanguage'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noEncontrado:
+              summary: Recurso inexistente
+              value:
+                type: https://api.bandadau.com/problems/not-found
+                title: Recurso no encontrado
+                status: 404
+                detail: No existe un evento con el identificador indicado.
+                instance: /api/v1/events/0192f3b0-7c1e-7a2b-9c3d-4e5f60718293
+                code: NOT_FOUND
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+    Conflict:
+      description: |
+        Conflicto con el estado actual del recurso. Incluye `IDEMPOTENCY_IN_PROGRESS` (otra
+        petición con la misma `Idempotency-Key` aún se está procesando; reintentar tras `Retry-After`).
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+        Content-Language:
+          $ref: '#/components/headers/ContentLanguage'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            idempotenciaEnCurso:
+              summary: Petición idéntica en curso
+              value:
+                type: https://api.bandadau.com/problems/idempotency-in-progress
+                title: Petición en curso
+                status: 409
+                detail: Ya se está procesando una petición con esta Idempotency-Key. Reintenta en unos segundos.
+                instance: /api/v1/events/0192f3b0-7c1e-7a2b-9c3d-4e5f60718293/registrations
+                code: IDEMPOTENCY_IN_PROGRESS
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+    UnprocessableEntity:
+      description: |
+        La petición es sintácticamente válida pero viola una regla de negocio. Incluye
+        `IDEMPOTENCY_KEY_REUSED` (misma `Idempotency-Key` con un cuerpo distinto).
+      headers:
+        Content-Language:
+          $ref: '#/components/headers/ContentLanguage'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            claveReutilizada:
+              summary: Idempotency-Key reutilizada con otro cuerpo
+              value:
+                type: https://api.bandadau.com/problems/idempotency-key-reused
+                title: Clave de idempotencia reutilizada
+                status: 422
+                detail: La Idempotency-Key ya se usó con una petición diferente. Genera una clave nueva.
+                instance: /api/v1/posts
+                code: IDEMPOTENCY_KEY_REUSED
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+    TooManyRequests:
+      description: Se superó el límite de peticiones (p. ej. 10/min/IP en autenticación).
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+        Content-Language:
+          $ref: '#/components/headers/ContentLanguage'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            limite:
+              summary: Límite de peticiones superado
+              value:
+                type: https://api.bandadau.com/problems/rate-limited
+                title: Demasiadas peticiones
+                status: 429
+                detail: Has hecho demasiadas peticiones. Intenta de nuevo en 30 segundos.
+                instance: /api/v1/auth/login
+                code: RATE_LIMITED
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+    InternalServerError:
+      description: Error inesperado del servidor.
+      headers:
+        Content-Language:
+          $ref: '#/components/headers/ContentLanguage'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            interno:
+              summary: Error interno
+              value:
+                type: https://api.bandadau.com/problems/internal-error
+                title: Error interno
+                status: 500
+                detail: Ocurrió un error inesperado. Ya lo estamos revisando.
+                code: INTERNAL_ERROR
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+    ServiceUnavailable:
+      description: El servicio o una dependencia no está disponible temporalmente.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+        Content-Language:
+          $ref: '#/components/headers/ContentLanguage'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            noDisponible:
+              summary: Dependencia caída
+              value:
+                type: https://api.bandadau.com/problems/service-unavailable
+                title: Servicio no disponible
+                status: 503
+                detail: El servicio no está disponible en este momento. Intenta más tarde.
+                code: SERVICE_UNAVAILABLE
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Access token JWT firmado con **RS256** por `identity-service` (llaves publicadas en
+        `/.well-known/jwks.json`). Vida: 15 min. Claims: `sub` (userId), `roles[]`,
+        `universityId`, `typ=access`, `aud` (`app` o `admin`), `iss`, `exp`, `iat`, `jti`.
+
+    serviceAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Token de servicio JWT (RS256, `typ=service`) emitido por
+        `POST /api/v1/auth/service-token` (client credentials). Obligatorio en `/internal/v1/**`.
+        Claims: `sub` (nombre del servicio, p. ej. `admin-gateway`), `scope`, `aud`, `exp`.

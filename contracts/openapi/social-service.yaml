@@ -1,0 +1,2516 @@
+openapi: 3.1.0
+info:
+  title: Bandada U — social-service
+  version: 1.1.0
+  summary: Red social (perfiles, posts, feed, comentarios, reacciones, seguidores, grupos y denuncias).
+  description: |
+    API del bounded context **Social** (`social-service`, TypeScript + NestJS 11, Clean
+    Architecture, MongoDB `social`).
+
+    - Posts con texto (≤ 2000), hasta 4 imágenes **o** 1 video, hashtags (extraídos del texto)
+      y visibilidad `PUBLIC | FOLLOWERS | GROUP` (RF-06). Un post con medios queda
+      `PENDING_MEDIA` hasta que todos sus medios estén `APPROVED` en `media-service` (invariante 6).
+    - Publicación offline sin duplicados: `Idempotency-Key` + `clientId` UUIDv7 único por autor (D3, RF-08).
+    - Feed paginado por cursor con ranking ML (`feed-ranker`, D7; RF-09).
+    - 3 denuncias distintas ocultan el contenido automáticamente hasta revisión (RF-13).
+    - El contenido de los usuarios (posts, comentarios) **no** se traduce (D14).
+    - Errores RFC 9457 (`application/problem+json`); `title`/`detail` localizados según
+      `Accept-Language` (`es` por defecto) y respuesta con `Content-Language`. Los clientes traducen por `code`.
+    - Todas las respuestas devuelven `X-Correlation-Id`.
+    - Rutas `/internal/v1/**` (tag `internal`): solo red interna con `serviceAuth`; consumidas por
+      `admin-gateway` e `insights-service` (MCP `get_content_stats`, `list_flagged_content`).
+
+    ## Changelog
+    - 1.1.0 (2026-10-14): ADR-0016/D15 — `rejectGroupMember`, `leaveGroup`, `getProfileInternal`,
+      `listGroupsInternal`; enums `ReportReason`, `ReportResolution`, `CommentStatus`, `HiddenReason`
+      y `GroupMemberRole` (`OWNER`, `ADMIN`, `MEMBER`); `Comment.status`; denuncias con `reason`
+      enumerado + `details`; `resolveContentReport` recibe `resolution: KEEP|REMOVE`;
+      `listGroupMembers` y `resolveContentReport` dejan de ser propuestas.
+    - 1.0.0 (2026-10-14): versión inicial contract-first (D1, D3, D7, D14).
+  contact:
+    name: Grupo 24 — Ingeniería de Software II
+servers:
+  - url: http://api.bandada.localhost/api/v1
+    description: Desarrollo local (Traefik)
+  - url: https://api.bandadau.com/api/v1
+    description: Producción
+tags:
+  - name: profiles
+    description: Perfil académico de los estudiantes.
+  - name: posts
+    description: Publicaciones, comentarios y reacciones.
+  - name: feed
+    description: Feed personalizado.
+  - name: follows
+    description: Seguidores y sugerencias.
+  - name: groups
+    description: Grupos de estudio.
+  - name: reports
+    description: Denuncias de contenido.
+  - name: internal
+    description: Endpoints internos (`/internal/v1`), solo con token de servicio.
+security:
+  - bearerAuth: []
+paths:
+  /profiles/me:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [profiles]
+      operationId: getMyProfile
+      summary: Obtener mi perfil
+      description: |
+        Devuelve el perfil académico del usuario autenticado (UC-04). El perfil se crea
+        automáticamente al consumir `bandada.identity.user.registered.v1`.
+      responses:
+        '200':
+          description: Mi perfil.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+              examples:
+                ana:
+                  $ref: '#/components/examples/ProfileAna'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+    patch:
+      tags: [profiles]
+      operationId: updateMyProfile
+      summary: Editar mi perfil
+      description: |
+        Actualiza los campos presentes del perfil (UC-04, RF-05): nombre visible, avatar,
+        carrera, semestre, bio (≤ 280) e intereses (≤ 10). La universidad es de solo lectura.
+        `avatarMediaId` debe ser un medio `IMAGE` propio y `APPROVED`; `null` lo quita.
+        Idempotente por naturaleza.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+            examples:
+              editar:
+                summary: Actualizar bio e intereses
+                value:
+                  displayName: Ana Quispe
+                  career: Ingeniería de Sistemas
+                  semester: 6
+                  bio: Me gusta el desarrollo móvil y los hackatones. 🐦
+                  interests: [react-native, ia, hackatones]
+      responses:
+        '200':
+          description: Perfil actualizado.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+              examples:
+                ana:
+                  $ref: '#/components/examples/ProfileAna'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '422':
+          description: Avatar inválido (`MEDIA_NOT_FOUND`, `MEDIA_NOT_OWNED`, `MEDIA_NOT_APPROVED`, `INVALID_MEDIA_KIND`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                avatarNoAprobado:
+                  summary: Avatar aún en moderación
+                  value:
+                    type: https://api.bandadau.com/problems/media-not-approved
+                    title: Imagen no disponible
+                    status: 422
+                    detail: La imagen del avatar todavía está en revisión.
+                    instance: /api/v1/profiles/me
+                    code: MEDIA_NOT_APPROVED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  /profiles/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [profiles]
+      operationId: getProfile
+      summary: Ver el perfil de un estudiante
+      description: Perfil público de otro usuario, con contadores y si lo sigo (`followedByMe`).
+      responses:
+        '200':
+          description: Perfil.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+              examples:
+                luis:
+                  summary: Perfil de otro estudiante
+                  value:
+                    userId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                    displayName: Luis Mamani
+                    universityId: 0191c0de-1111-7aaa-8bbb-000000000001
+                    career: Ingeniería de Sistemas
+                    semester: 4
+                    bio: Fan del fútbol y de las bases de datos.
+                    interests: [postgres, futbol]
+                    avatarMediaId: null
+                    avatarUrl: null
+                    followersCount: 87
+                    followingCount: 120
+                    postsCount: 15
+                    followedByMe: true
+                    createdAt: '2026-09-20T10:00:00Z'
+                    updatedAt: '2026-10-02T18:30:00Z'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /posts:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [posts]
+      operationId: createPost
+      summary: Publicar un post
+      description: |
+        Crea un post (UC-05, RF-06, RF-08). Reglas:
+        - `text` ≤ 2000 caracteres; se requiere texto o al menos un medio (`EMPTY_POST`).
+        - `mediaIds`: hasta 4 imágenes **o** 1 video, todos propios y subidos con `media-service`.
+        - `visibility = GROUP` exige `groupId` y ser miembro `ACTIVE` del grupo.
+        - Hashtags extraídos del texto (`#calculo` → `calculo`).
+        - Sin medios → `PUBLISHED`; con medios → `PENDING_MEDIA` hasta que todos estén
+          `APPROVED` (se publica al consumir `bandada.media.asset.approved.v1`).
+        - `clientId` (UUIDv7 generado en el dispositivo) es único por autor: si ya existe un
+          post con ese `clientId`, se responde **200** con el post existente (cola offline que
+          reintenta después de expirar la `Idempotency-Key`).
+        Publica `bandada.social.post.created.v1` (y `post.published.v1` cuando corresponde).
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePostRequest'
+            examples:
+              conImagen:
+                summary: Post público con una imagen
+                value:
+                  clientId: 0192f2a0-1a2b-7c3d-8e4f-5a6b7c8d9e0f
+                  text: Comparto mis apuntes de #calculo2 del parcial 🙌
+                  mediaIds: [0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d]
+                  visibility: PUBLIC
+              enGrupo:
+                summary: Post de solo texto en un grupo
+                value:
+                  clientId: 0192f2a0-2b3c-7d4e-9f50-6a7b8c9d0e1f
+                  text: ¿Alguien resolvió el ejercicio 4 de la práctica de #fisica1?
+                  mediaIds: []
+                  visibility: GROUP
+                  groupId: 0192e0aa-bc12-7d34-8e56-f7a8b9c0d1e2
+      responses:
+        '201':
+          description: Post creado.
+          headers:
+            Location:
+              $ref: './shared/components.yaml#/components/headers/Location'
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+            X-Correlation-Id:
+              $ref: './shared/components.yaml#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+              examples:
+                pendiente:
+                  $ref: '#/components/examples/PostPendingMedia'
+        '200':
+          description: Ya existía un post del autor con el mismo `clientId`; se devuelve sin duplicar.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+              examples:
+                existente:
+                  $ref: '#/components/examples/PostPublished'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/GroupMembershipRequired'
+        '409':
+          $ref: './shared/components.yaml#/components/responses/Conflict'
+        '422':
+          description: |
+            Regla de negocio violada: `EMPTY_POST`, `INVALID_MEDIA_COMBINATION` (más de 4
+            imágenes o video + imágenes), `MEDIA_NOT_FOUND`, `MEDIA_NOT_OWNED`, `MEDIA_REJECTED`,
+            `GROUP_REQUIRED`, `GROUP_NOT_FOUND` o `IDEMPOTENCY_KEY_REUSED`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                combinacion:
+                  summary: Video con imágenes
+                  value:
+                    type: https://api.bandadau.com/problems/invalid-media-combination
+                    title: Combinación de medios no permitida
+                    status: 422
+                    detail: Un post puede tener hasta 4 imágenes o 1 video, no ambos.
+                    instance: /api/v1/posts
+                    code: INVALID_MEDIA_COMBINATION
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+                claveReutilizada:
+                  summary: Idempotency-Key reutilizada
+                  value:
+                    type: https://api.bandadau.com/problems/idempotency-key-reused
+                    title: Clave de idempotencia reutilizada
+                    status: 422
+                    detail: La Idempotency-Key ya se usó con una petición diferente.
+                    instance: /api/v1/posts
+                    code: IDEMPOTENCY_KEY_REUSED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /posts/{postId}:
+    parameters:
+      - $ref: '#/components/parameters/PostId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [posts]
+      operationId: getPost
+      summary: Ver un post
+      description: Devuelve el post si es visible para el usuario (autor, visibilidad, pertenencia al grupo). Si no es visible responde `404`.
+      responses:
+        '200':
+          description: Post.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+              examples:
+                publicado:
+                  $ref: '#/components/examples/PostPublished'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+    delete:
+      tags: [posts]
+      operationId: deletePost
+      summary: Eliminar mi post
+      description: |
+        El autor elimina su post (borrado lógico → `REMOVED`). Publica
+        `bandada.social.post.deleted.v1` (media-service borra los medios asociados).
+        Idempotente: eliminar un post ya eliminado responde `204`.
+      responses:
+        '204':
+          description: Post eliminado.
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /feed:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [feed]
+      operationId: getFeed
+      summary: Ver mi feed
+      description: |
+        Feed paginado por cursor que combina posts de personas seguidas, de mis grupos y
+        recomendados por el modelo `feed-ranker` (UC-06, RF-09). Solo posts `PUBLISHED`.
+        El cliente lo cachea para lectura offline (D6, `NetworkFirst`).
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página del feed.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedPage'
+              examples:
+                pagina:
+                  summary: Primera página
+                  value:
+                    items:
+                      - source: FOLLOWING
+                        score: 0.87
+                        post:
+                          id: 0192f2a0-5b6c-7d8e-9f01-a2b3c4d5e6f7
+                          clientId: 0192f2a0-1a2b-7c3d-8e4f-5a6b7c8d9e0f
+                          authorId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                          author:
+                            userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                            displayName: Ana Quispe
+                            avatarUrl: null
+                          text: Comparto mis apuntes de #calculo2 del parcial 🙌
+                          hashtags: [calculo2]
+                          visibility: PUBLIC
+                          groupId: null
+                          status: PUBLISHED
+                          media: []
+                          reactionCounts: {like: 12, helpful: 30, funny: 0, support: 2}
+                          commentsCount: 5
+                          myReaction: HELPFUL
+                          createdAt: '2026-10-14T13:00:00Z'
+                          updatedAt: '2026-10-14T13:00:05Z'
+                    nextCursor: eyJzIjowLjg3LCJpZCI6IjAxOTJmMmEwIn0
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+
+  /posts/{postId}/comments:
+    parameters:
+      - $ref: '#/components/parameters/PostId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [posts]
+      operationId: createComment
+      summary: Comentar un post
+      description: |
+        Agrega un comentario (≤ 500 caracteres) a un post visible y `PUBLISHED` (UC-07, RF-10).
+        Publica `bandada.social.comment.created.v1` (notifica al autor).
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCommentRequest'
+            examples:
+              comentario:
+                summary: Comentario
+                value:
+                  text: ¡Gracias! Me salvaste para el examen del viernes.
+      responses:
+        '201':
+          description: Comentario creado.
+          headers:
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+            X-Correlation-Id:
+              $ref: './shared/components.yaml#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+              examples:
+                comentario:
+                  $ref: '#/components/examples/CommentLuis'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          $ref: './shared/components.yaml#/components/responses/Conflict'
+        '422':
+          description: El post no admite comentarios (`POST_NOT_PUBLISHED`) o `IDEMPOTENCY_KEY_REUSED`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                noPublicado:
+                  summary: Post no publicado
+                  value:
+                    type: https://api.bandadau.com/problems/post-not-published
+                    title: Post no disponible
+                    status: 422
+                    detail: No se puede comentar un post que está oculto o en revisión.
+                    instance: /api/v1/posts/0192f2a0-5b6c-7d8e-9f01-a2b3c4d5e6f7/comments
+                    code: POST_NOT_PUBLISHED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+    get:
+      tags: [posts]
+      operationId: listComments
+      summary: Listar comentarios de un post
+      description: Comentarios `VISIBLE` del post, del más antiguo al más reciente, paginados por cursor. Los comentarios `HIDDEN` solo los ve su autor; los `REMOVED` no se devuelven.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de comentarios.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentPage'
+              examples:
+                pagina:
+                  summary: Un comentario
+                  value:
+                    items:
+                      - id: 0192f2b5-6a7b-7c8d-9eaf-b0c1d2e3f4a5
+                        postId: 0192f2a0-5b6c-7d8e-9f01-a2b3c4d5e6f7
+                        authorId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                        author:
+                          userId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                          displayName: Luis Mamani
+                          avatarUrl: null
+                        text: ¡Gracias! Me salvaste para el examen del viernes.
+                        status: VISIBLE
+                        createdAt: '2026-10-14T13:20:00Z'
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /posts/{postId}/reactions/me:
+    parameters:
+      - $ref: '#/components/parameters/PostId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    put:
+      tags: [posts]
+      operationId: setReaction
+      summary: Reaccionar a un post
+      description: |
+        Fija mi reacción al post (una por usuario y post; cambiable) (UC-07, RF-10).
+        Idempotente por naturaleza (PUT). Publica `bandada.social.reaction.set.v1` si cambió.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetReactionRequest'
+            examples:
+              util:
+                summary: Marcar como útil
+                value:
+                  type: HELPFUL
+      responses:
+        '200':
+          description: Estado de reacciones del post.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReactionState'
+              examples:
+                estado:
+                  summary: Reacción fijada
+                  value:
+                    postId: 0192f2a0-5b6c-7d8e-9f01-a2b3c4d5e6f7
+                    myReaction: HELPFUL
+                    reactionCounts: {like: 12, helpful: 31, funny: 0, support: 2}
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+    delete:
+      tags: [posts]
+      operationId: removeReaction
+      summary: Quitar mi reacción
+      description: Elimina mi reacción del post. Idempotente (sin reacción previa también responde `204`).
+      responses:
+        '204':
+          description: Reacción eliminada.
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /follows/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    put:
+      tags: [follows]
+      operationId: followUser
+      summary: Seguir a un estudiante
+      description: |
+        Empieza a seguir al usuario (UC-08, RF-11). Idempotente por naturaleza (PUT): seguir a
+        quien ya sigo responde `200` con la relación existente. Publica
+        `bandada.social.follow.created.v1` solo la primera vez.
+      responses:
+        '200':
+          description: Relación de seguimiento.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Follow'
+              examples:
+                sigue:
+                  summary: Ana sigue a Luis
+                  value:
+                    followerId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                    followeeId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                    createdAt: '2026-10-14T15:04:05Z'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '422':
+          description: No puedes seguirte a ti mismo (`CANNOT_FOLLOW_SELF`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                aSiMismo:
+                  summary: Seguirse a sí mismo
+                  value:
+                    type: https://api.bandadau.com/problems/cannot-follow-self
+                    title: Acción no permitida
+                    status: 422
+                    detail: No puedes seguirte a ti mismo.
+                    instance: /api/v1/follows/0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                    code: CANNOT_FOLLOW_SELF
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    delete:
+      tags: [follows]
+      operationId: unfollowUser
+      summary: Dejar de seguir
+      description: Deja de seguir al usuario. Idempotente (si no lo seguía también responde `204`).
+      responses:
+        '204':
+          description: Ya no lo sigues.
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /follows/suggestions:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [follows]
+      operationId: getFollowSuggestions
+      summary: Sugerencias de a quién seguir
+      description: |
+        Personas sugeridas por el modelo `follow-suggester` (carrera, grupos y grafo en común;
+        D7, RF-11), ordenadas por puntaje. Una sola página: `nextCursor` siempre es `null`.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Sugerencias.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FollowSuggestionPage'
+              examples:
+                sugerencias:
+                  summary: Una sugerencia
+                  value:
+                    items:
+                      - profile:
+                          userId: 0192f1a2-5d6e-7f80-8a12-93a4b5c6d7e8
+                          displayName: Carla Rojas
+                          avatarUrl: null
+                        career: Ingeniería de Sistemas
+                        score: 0.74
+                        reasons: [SAME_CAREER, MUTUAL_FOLLOWS]
+                        mutualFollowsCount: 6
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+
+  /groups:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [groups]
+      operationId: createGroup
+      summary: Crear un grupo de estudio
+      description: Crea un grupo público o privado; el creador queda como miembro `ACTIVE` con rol `OWNER` (UC-09, RF-12).
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGroupRequest'
+            examples:
+              calculo:
+                summary: Grupo privado de Cálculo II
+                value:
+                  name: Cálculo II — Paralelo B
+                  subject: Cálculo II
+                  privacy: PRIVATE
+      responses:
+        '201':
+          description: Grupo creado.
+          headers:
+            Location:
+              $ref: './shared/components.yaml#/components/headers/Location'
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+            X-Correlation-Id:
+              $ref: './shared/components.yaml#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+              examples:
+                grupo:
+                  $ref: '#/components/examples/GroupCalculo'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '409':
+          $ref: './shared/components.yaml#/components/responses/Conflict'
+        '422':
+          $ref: './shared/components.yaml#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+    get:
+      tags: [groups]
+      operationId: listGroups
+      summary: Buscar grupos
+      description: Busca grupos por nombre o materia (`query`), paginado por cursor. Los grupos privados aparecen en la búsqueda pero su contenido requiere membresía.
+      parameters:
+        - name: query
+          in: query
+          required: false
+          description: Texto a buscar en nombre o materia.
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 80
+          example: cálculo
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de grupos.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupPage'
+              examples:
+                resultado:
+                  summary: Un grupo
+                  value:
+                    items:
+                      - id: 0192e0aa-bc12-7d34-8e56-f7a8b9c0d1e2
+                        name: Cálculo II — Paralelo B
+                        subject: Cálculo II
+                        privacy: PRIVATE
+                        ownerId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                        membersCount: 23
+                        myMembership: null
+                        createdAt: '2026-09-01T12:00:00Z'
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+
+  /groups/{groupId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [groups]
+      operationId: getGroup
+      summary: Ver un grupo
+      description: Datos del grupo y mi membresía (`myMembership`, `null` si no pertenezco).
+      responses:
+        '200':
+          description: Grupo.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+              examples:
+                grupo:
+                  $ref: '#/components/examples/GroupCalculo'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /groups/{groupId}/join:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [groups]
+      operationId: joinGroup
+      summary: Unirse o solicitar ingreso a un grupo
+      description: |
+        Grupo `PUBLIC` → membresía `ACTIVE` inmediata. Grupo `PRIVATE` → solicitud `PENDING`
+        y se publica `bandada.social.group.join-requested.v1` (notifica al dueño) (UC-09, RF-12).
+        Idempotente por naturaleza: si ya existe una membresía `PENDING` o `ACTIVE`, se devuelve
+        sin cambios. Tras un `REJECTED` o `LEFT` se crea una solicitud nueva.
+      responses:
+        '200':
+          description: Membresía resultante.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupMembership'
+              examples:
+                pendiente:
+                  summary: Solicitud a grupo privado
+                  value:
+                    groupId: 0192e0aa-bc12-7d34-8e56-f7a8b9c0d1e2
+                    userId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                    role: MEMBER
+                    status: PENDING
+                    requestedAt: '2026-10-14T15:04:05Z'
+                    updatedAt: '2026-10-14T15:04:05Z'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /groups/{groupId}/members:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [groups]
+      operationId: listGroupMembers
+      summary: Listar miembros o solicitudes de un grupo
+      description: |
+        Miembros o solicitudes del grupo (UC-09, RF-12, D15). Los miembros `ACTIVE` pueden ver la
+        lista de miembros `ACTIVE`; solo el `OWNER` o un `ADMIN` del grupo pueden filtrar por `PENDING`.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/MembershipStatus'
+          example: PENDING
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de membresías.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupMembershipPage'
+              examples:
+                solicitudes:
+                  summary: Una solicitud pendiente
+                  value:
+                    items:
+                      - groupId: 0192e0aa-bc12-7d34-8e56-f7a8b9c0d1e2
+                        userId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                        role: MEMBER
+                        status: PENDING
+                        profile:
+                          userId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                          displayName: Luis Mamani
+                          avatarUrl: null
+                        requestedAt: '2026-10-14T15:04:05Z'
+                        updatedAt: '2026-10-14T15:04:05Z'
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/GroupMembershipRequired'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /groups/{groupId}/members/{userId}/approve:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/UserId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [groups]
+      operationId: approveGroupMember
+      summary: Aprobar solicitud de ingreso
+      description: |
+        El dueño del grupo aprueba una solicitud `PENDING` → `ACTIVE` (UC-09, RF-12).
+        Idempotente por naturaleza: aprobar a un miembro ya `ACTIVE` responde `200` sin cambios.
+      responses:
+        '200':
+          description: Membresía aprobada.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupMembership'
+              examples:
+                aprobada:
+                  summary: Miembro aprobado
+                  value:
+                    groupId: 0192e0aa-bc12-7d34-8e56-f7a8b9c0d1e2
+                    userId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                    role: MEMBER
+                    status: ACTIVE
+                    requestedAt: '2026-10-14T15:04:05Z'
+                    updatedAt: '2026-10-14T16:00:00Z'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          description: La membresía no está pendiente (`MEMBERSHIP_NOT_PENDING`, p. ej. `REJECTED` o `LEFT`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                noPendiente:
+                  summary: No pendiente
+                  value:
+                    type: https://api.bandadau.com/problems/membership-not-pending
+                    title: Solicitud no pendiente
+                    status: 409
+                    detail: Esta solicitud ya fue rechazada o retirada.
+                    instance: /api/v1/groups/0192e0aa-bc12-7d34-8e56-f7a8b9c0d1e2/members/0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7/approve
+                    code: MEMBERSHIP_NOT_PENDING
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  /groups/{groupId}/members/{userId}/reject:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/UserId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [groups]
+      operationId: rejectGroupMember
+      summary: Rechazar solicitud de ingreso
+      description: |
+        El `OWNER` o un `ADMIN` del grupo rechaza una solicitud `PENDING` → `REJECTED` (UC-09, RF-12,
+        D15). Idempotente por naturaleza: rechazar una solicitud ya `REJECTED` responde `200` sin
+        cambios. El usuario rechazado puede volver a solicitar ingreso más adelante (`joinGroup`).
+      responses:
+        '200':
+          description: Solicitud rechazada.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupMembership'
+              examples:
+                rechazada:
+                  summary: Solicitud rechazada
+                  value:
+                    groupId: 0192e0aa-bc12-7d34-8e56-f7a8b9c0d1e2
+                    userId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                    role: MEMBER
+                    status: REJECTED
+                    requestedAt: '2026-10-14T15:04:05Z'
+                    updatedAt: '2026-10-14T16:00:00Z'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          description: La membresía no está pendiente (`MEMBERSHIP_NOT_PENDING`, p. ej. ya `ACTIVE` o `LEFT`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                noPendiente:
+                  summary: No pendiente
+                  value:
+                    type: https://api.bandadau.com/problems/membership-not-pending
+                    title: Solicitud no pendiente
+                    status: 409
+                    detail: Esta persona ya es miembro del grupo; no se puede rechazar su solicitud.
+                    instance: /api/v1/groups/0192e0aa-bc12-7d34-8e56-f7a8b9c0d1e2/members/0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7/reject
+                    code: MEMBERSHIP_NOT_PENDING
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  /groups/{groupId}/leave:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [groups]
+      operationId: leaveGroup
+      summary: Salir de un grupo
+      description: |
+        El usuario autenticado sale del grupo (membresía `ACTIVE` → `LEFT`) o retira su solicitud
+        (`PENDING` → `LEFT`) (UC-09, RF-12, D15). Idempotente por naturaleza: si ya está `LEFT`
+        responde `200` sin cambios. El `OWNER` no puede salir mientras sea el único dueño
+        (`OWNER_CANNOT_LEAVE`).
+      responses:
+        '200':
+          description: Membresía resultante.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupMembership'
+              examples:
+                salio:
+                  summary: Salió del grupo
+                  value:
+                    groupId: 0192e0aa-bc12-7d34-8e56-f7a8b9c0d1e2
+                    userId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                    role: MEMBER
+                    status: LEFT
+                    requestedAt: '2026-10-14T15:04:05Z'
+                    updatedAt: '2026-10-20T09:00:00Z'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          description: El único dueño no puede salir del grupo (`OWNER_CANNOT_LEAVE`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                duenio:
+                  summary: Único dueño
+                  value:
+                    type: https://api.bandadau.com/problems/owner-cannot-leave
+                    title: No puedes salir del grupo
+                    status: 409
+                    detail: Eres el único dueño del grupo. Asigna otro dueño antes de salir.
+                    instance: /api/v1/groups/0192e0aa-bc12-7d34-8e56-f7a8b9c0d1e2/leave
+                    code: OWNER_CANNOT_LEAVE
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  /groups/{groupId}/posts:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [groups]
+      operationId: listGroupPosts
+      summary: Ver posts de un grupo
+      description: Posts `PUBLISHED` del grupo, del más reciente al más antiguo. En grupos privados requiere membresía `ACTIVE`.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de posts.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostPage'
+              examples:
+                vacia:
+                  summary: Grupo sin posts
+                  value:
+                    items: []
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/GroupMembershipRequired'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /reports:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    post:
+      tags: [reports]
+      operationId: reportContent
+      summary: Denunciar contenido
+      description: |
+        Denuncia un post o comentario con un motivo (UC-10, RF-13). Una denuncia por usuario y
+        contenido. Con 3 denuncias de usuarios distintos el contenido pasa a `HIDDEN` hasta su
+        revisión. Publica `bandada.social.content.reported.v1`.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportContentRequest'
+            examples:
+              denuncia:
+                summary: Denunciar un post
+                value:
+                  targetType: POST
+                  targetId: 0192f2a0-5b6c-7d8e-9f01-a2b3c4d5e6f7
+                  reason: HARASSMENT
+                  details: Contiene datos personales de otro estudiante sin su permiso.
+      responses:
+        '201':
+          description: Denuncia registrada.
+          headers:
+            Idempotent-Replayed:
+              $ref: './shared/components.yaml#/components/headers/IdempotentReplayed'
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+            X-Correlation-Id:
+              $ref: './shared/components.yaml#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentReport'
+              examples:
+                denuncia:
+                  $ref: '#/components/examples/ReportOpen'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          description: Ya denunciaste este contenido (`ALREADY_REPORTED`) o hay una petición idéntica en curso (`IDEMPOTENCY_IN_PROGRESS`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                yaDenunciado:
+                  summary: Denuncia repetida
+                  value:
+                    type: https://api.bandadau.com/problems/already-reported
+                    title: Ya denunciaste este contenido
+                    status: 409
+                    detail: Tu denuncia anterior está en revisión.
+                    instance: /api/v1/reports
+                    code: ALREADY_REPORTED
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '422':
+          description: No puedes denunciar tu propio contenido (`CANNOT_REPORT_OWN_CONTENT`) o `IDEMPOTENCY_KEY_REUSED`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                propio:
+                  summary: Contenido propio
+                  value:
+                    type: https://api.bandadau.com/problems/cannot-report-own-content
+                    title: Acción no permitida
+                    status: 422
+                    detail: No puedes denunciar tu propio contenido.
+                    instance: /api/v1/reports
+                    code: CANNOT_REPORT_OWN_CONTENT
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        '429':
+          $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /internal/v1/posts:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: listPostsByStatus
+      summary: Listar posts por estado (interno)
+      description: Cola de moderación de posts (por defecto `HIDDEN`), con la cantidad de denuncias (UC-18, RF-22). Usado por `admin-gateway` (`moderationQueue`) y MCP `list_flagged_content`.
+      servers:
+        - url: http://social-service:7002
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/PostStatus'
+            default: HIDDEN
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de posts.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModerationPostPage'
+              examples:
+                ocultos:
+                  summary: Un post oculto por denuncias
+                  value:
+                    items:
+                      - id: 0192f2a0-5b6c-7d8e-9f01-a2b3c4d5e6f7
+                        clientId: 0192f2a0-1a2b-7c3d-8e4f-5a6b7c8d9e0f
+                        authorId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                        author:
+                          userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                          displayName: Ana Quispe
+                          avatarUrl: null
+                        text: Comparto mis apuntes de #calculo2 del parcial 🙌
+                        hashtags: [calculo2]
+                        visibility: PUBLIC
+                        groupId: null
+                        status: HIDDEN
+                        media: []
+                        reactionCounts: {like: 12, helpful: 30, funny: 0, support: 2}
+                        commentsCount: 5
+                        myReaction: null
+                        createdAt: '2026-10-14T13:00:00Z'
+                        updatedAt: '2026-10-14T14:10:00Z'
+                        reportsCount: 3
+                        hiddenReason: REPORTED
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+  /internal/v1/posts/{postId}/status:
+    parameters:
+      - $ref: '#/components/parameters/PostId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    patch:
+      tags: [internal]
+      operationId: updatePostStatus
+      summary: Cambiar estado de un post (interno)
+      description: |
+        Decisión de moderación sobre un post (UC-18, RF-22): `PUBLISHED` (restaurar), `HIDDEN`
+        u `REMOVED`. Publica `bandada.social.post.hidden.v1` / `post.published.v1` /
+        `post.deleted.v1` según corresponda. Idempotente por naturaleza.
+      servers:
+        - url: http://social-service:7002
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/ActorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePostStatusRequest'
+            examples:
+              remover:
+                summary: Remover por moderación
+                value:
+                  status: REMOVED
+                  reason: Expone datos personales de terceros.
+      responses:
+        '200':
+          description: Post actualizado.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+              examples:
+                publicado:
+                  $ref: '#/components/examples/PostPublished'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+        '409':
+          description: Transición inválida (`INVALID_STATUS_TRANSITION`, p. ej. desde `REMOVED` o `PENDING_MEDIA`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
+              examples:
+                transicion:
+                  summary: Post ya removido
+                  value:
+                    type: https://api.bandadau.com/problems/invalid-status-transition
+                    title: Cambio de estado no permitido
+                    status: 409
+                    detail: Un post removido no puede volver a publicarse.
+                    instance: /internal/v1/posts/0192f2a0-5b6c-7d8e-9f01-a2b3c4d5e6f7/status
+                    code: INVALID_STATUS_TRANSITION
+                    traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  /internal/v1/reports:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: listContentReports
+      summary: Listar denuncias (interno)
+      description: Denuncias por estado (por defecto `OPEN`), de la más antigua a la más reciente (UC-18). Usado por `admin-gateway` (`contentReports`).
+      servers:
+        - url: http://social-service:7002
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ReportStatus'
+            default: OPEN
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de denuncias.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentReportPage'
+              examples:
+                abiertas:
+                  summary: Una denuncia abierta
+                  value:
+                    items:
+                      - id: 0192f2c9-1d2e-7f30-8a41-b52c63d74e85
+                        targetType: POST
+                        targetId: 0192f2a0-5b6c-7d8e-9f01-a2b3c4d5e6f7
+                        reporterId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                        reason: HARASSMENT
+                        details: Contiene datos personales de otro estudiante sin su permiso.
+                        status: OPEN
+                        resolution: null
+                        resolutionNote: null
+                        createdAt: '2026-10-14T14:00:00Z'
+                        resolvedAt: null
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+  /internal/v1/reports/{reportId}:
+    parameters:
+      - name: reportId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        example: 0192f2c9-1d2e-7f30-8a41-b52c63d74e85
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    patch:
+      tags: [internal]
+      operationId: resolveContentReport
+      summary: Resolver una denuncia (interno)
+      description: |
+        Resuelve una denuncia desde el panel (UC-18, D15; mutación GraphQL `resolveContentReport`).
+        `resolution = REMOVE` deja la denuncia `RESOLVED_REMOVED` y pasa el contenido a `REMOVED`
+        (publica `bandada.social.post.removed.v1` o `bandada.social.comment.hidden.v1` según el
+        tipo); `resolution = KEEP` la deja `RESOLVED_KEPT` y restaura el contenido (`PUBLISHED` /
+        `VISIBLE`) si estaba oculto por denuncias. Resuelve todas las denuncias abiertas del mismo
+        contenido. Idempotente.
+      servers:
+        - url: http://social-service:7002
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/ActorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveContentReportRequest'
+            examples:
+              mantener:
+                summary: Mantener el contenido
+                value:
+                  resolution: KEEP
+                  note: No infringe las normas de la comunidad.
+      responses:
+        '200':
+          description: Denuncia resuelta.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentReport'
+              examples:
+                resuelta:
+                  summary: Denuncia resuelta
+                  value:
+                    id: 0192f2c9-1d2e-7f30-8a41-b52c63d74e85
+                    targetType: POST
+                    targetId: 0192f2a0-5b6c-7d8e-9f01-a2b3c4d5e6f7
+                    reporterId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+                    reason: HARASSMENT
+                    details: Contiene datos personales de otro estudiante sin su permiso.
+                    status: RESOLVED_KEPT
+                    resolution: KEEP
+                    resolutionNote: No infringe las normas de la comunidad.
+                    createdAt: '2026-10-14T14:00:00Z'
+                    resolvedAt: '2026-10-14T16:30:00Z'
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /internal/v1/profiles/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: getProfileInternal
+      summary: Obtener el perfil de un usuario (interno)
+      description: |
+        Perfil de un usuario por su id para procesos de servicio (n8n `wf-01-bienvenida` lee la
+        carrera para sugerir grupos; D10, D15). `followedByMe` siempre es `false` (no hay usuario
+        autenticado). Si el perfil todavía no existe (usuario recién registrado) responde `404`.
+      servers:
+        - url: http://social-service:7002
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      responses:
+        '200':
+          description: Perfil.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+              examples:
+                nuevo:
+                  summary: Perfil de un estudiante recién registrado
+                  value:
+                    userId: 0192f1a2-5d6e-7f80-8a12-93a4b5c6d7e8
+                    displayName: Carla Rojas
+                    universityId: 0191c0de-1111-7aaa-8bbb-000000000001
+                    career: Ingeniería de Sistemas
+                    semester: 1
+                    bio: null
+                    interests: []
+                    avatarMediaId: null
+                    avatarUrl: null
+                    followersCount: 0
+                    followingCount: 0
+                    postsCount: 0
+                    followedByMe: false
+                    createdAt: '2026-10-14T15:04:05Z'
+                    updatedAt: '2026-10-14T15:04:05Z'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /internal/v1/groups:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: listGroupsInternal
+      summary: Listar grupos sugeridos por carrera (interno)
+      description: |
+        Grupos `PUBLIC` con más miembros `ACTIVE` de la carrera indicada, ordenados por
+        `membersCount` descendente (n8n `wf-01-bienvenida` y `wf-06-difusion-evento`; D10, D15).
+        `myMembership` siempre es `null` (no hay usuario autenticado).
+      servers:
+        - url: http://social-service:7002
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: career
+          in: query
+          required: false
+          description: Carrera de referencia (texto exacto del perfil). Sin ella se devuelven los grupos públicos más grandes.
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 100
+          example: Ingeniería de Sistemas
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de grupos.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupPage'
+              examples:
+                sugeridos:
+                  summary: Grupos de Ingeniería de Sistemas
+                  value:
+                    items:
+                      - id: 0192e0ab-0a1b-7c2d-8e3f-4a5b6c7d8e9f
+                        name: Programación I — Ayudantía
+                        subject: Programación I
+                        privacy: PUBLIC
+                        ownerId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                        membersCount: 64
+                        myMembership: null
+                        createdAt: '2026-08-20T12:00:00Z'
+                    nextCursor: null
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+  /internal/v1/stats/daily:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: getContentDailyStats
+      summary: Estadísticas diarias de contenido (interno)
+      description: |
+        Agregados por día (UTC) de posts, comentarios, reacciones, seguimientos y autores
+        activos, más los hashtags más usados en el rango. Para el dashboard del panel y la
+        herramienta MCP `get_content_stats`. Sin datos personales. Rango máximo 366 días.
+      servers:
+        - url: http://social-service:7002
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - name: topHashtags
+          in: query
+          required: false
+          description: Cantidad de hashtags más usados a devolver.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Estadísticas.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentDailyStats'
+              examples:
+                semana:
+                  summary: Dos días
+                  value:
+                    from: '2026-10-13'
+                    to: '2026-10-14'
+                    days:
+                      - date: '2026-10-13'
+                        postsCreated: 142
+                        commentsCreated: 389
+                        reactionsSet: 1204
+                        followsCreated: 77
+                        activeAuthors: 96
+                        postsHidden: 2
+                      - date: '2026-10-14'
+                        postsCreated: 158
+                        commentsCreated: 412
+                        reactionsSet: 1350
+                        followsCreated: 81
+                        activeAuthors: 103
+                        postsHidden: 1
+                    topHashtags:
+                      - hashtag: calculo2
+                        count: 64
+                      - hashtag: feriauniversitaria
+                        count: 41
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+components:
+  parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+    PostId:
+      name: postId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 0192f2a0-5b6c-7d8e-9f01-a2b3c4d5e6f7
+    GroupId:
+      name: groupId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 0192e0aa-bc12-7d34-8e56-f7a8b9c0d1e2
+    From:
+      name: from
+      in: query
+      required: true
+      description: Fecha inicial (UTC, inclusive).
+      schema:
+        type: string
+        format: date
+      example: '2026-10-01'
+    To:
+      name: to
+      in: query
+      required: true
+      description: Fecha final (UTC, inclusive).
+      schema:
+        type: string
+        format: date
+      example: '2026-10-14'
+
+  responses:
+    GroupMembershipRequired:
+      description: Se requiere ser miembro activo del grupo (`GROUP_MEMBERSHIP_REQUIRED`) o permisos insuficientes (`FORBIDDEN`).
+      content:
+        application/problem+json:
+          schema:
+            $ref: './shared/components.yaml#/components/schemas/Problem'
+          examples:
+            noMiembro:
+              summary: No es miembro
+              value:
+                type: https://api.bandadau.com/problems/group-membership-required
+                title: Solo para miembros
+                status: 403
+                detail: Debes ser miembro del grupo para ver o publicar su contenido.
+                instance: /api/v1/groups/0192e0aa-bc12-7d34-8e56-f7a8b9c0d1e2/posts
+                code: GROUP_MEMBERSHIP_REQUIRED
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  examples:
+    ProfileAna:
+      summary: Perfil de Ana
+      value:
+        userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+        displayName: Ana Quispe
+        universityId: 0191c0de-1111-7aaa-8bbb-000000000001
+        career: Ingeniería de Sistemas
+        semester: 6
+        bio: Me gusta el desarrollo móvil y los hackatones. 🐦
+        interests: [react-native, ia, hackatones]
+        avatarMediaId: 0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d
+        avatarUrl: http://minio.bandada.localhost/bandada-media/avatars/0192f29f.webp?X-Amz-Signature=abc123
+        followersCount: 154
+        followingCount: 98
+        postsCount: 42
+        followedByMe: false
+        createdAt: '2026-10-01T14:12:01Z'
+        updatedAt: '2026-10-14T15:04:05Z'
+
+    PostPendingMedia:
+      summary: Post con imagen en moderación
+      value:
+        id: 0192f2a0-5b6c-7d8e-9f01-a2b3c4d5e6f7
+        clientId: 0192f2a0-1a2b-7c3d-8e4f-5a6b7c8d9e0f
+        authorId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+        author:
+          userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+          displayName: Ana Quispe
+          avatarUrl: null
+        text: Comparto mis apuntes de #calculo2 del parcial 🙌
+        hashtags: [calculo2]
+        visibility: PUBLIC
+        groupId: null
+        status: PENDING_MEDIA
+        media:
+          - mediaId: 0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d
+            kind: IMAGE
+            status: PROCESSING
+            url: null
+            thumbnailUrl: null
+        reactionCounts: {like: 0, helpful: 0, funny: 0, support: 0}
+        commentsCount: 0
+        myReaction: null
+        createdAt: '2026-10-14T13:00:00Z'
+        updatedAt: '2026-10-14T13:00:00Z'
+
+    PostPublished:
+      summary: Post publicado
+      value:
+        id: 0192f2a0-5b6c-7d8e-9f01-a2b3c4d5e6f7
+        clientId: 0192f2a0-1a2b-7c3d-8e4f-5a6b7c8d9e0f
+        authorId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+        author:
+          userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+          displayName: Ana Quispe
+          avatarUrl: null
+        text: Comparto mis apuntes de #calculo2 del parcial 🙌
+        hashtags: [calculo2]
+        visibility: PUBLIC
+        groupId: null
+        status: PUBLISHED
+        media:
+          - mediaId: 0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d
+            kind: IMAGE
+            status: APPROVED
+            url: http://minio.bandada.localhost/bandada-media/u/0192f29f.jpg?X-Amz-Signature=abc123
+            thumbnailUrl: http://minio.bandada.localhost/bandada-media/u/0192f29f-thumb.webp?X-Amz-Signature=def456
+        reactionCounts: {like: 12, helpful: 30, funny: 0, support: 2}
+        commentsCount: 5
+        myReaction: HELPFUL
+        createdAt: '2026-10-14T13:00:00Z'
+        updatedAt: '2026-10-14T13:00:05Z'
+
+    CommentLuis:
+      summary: Comentario
+      value:
+        id: 0192f2b5-6a7b-7c8d-9eaf-b0c1d2e3f4a5
+        postId: 0192f2a0-5b6c-7d8e-9f01-a2b3c4d5e6f7
+        authorId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+        author:
+          userId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+          displayName: Luis Mamani
+          avatarUrl: null
+        text: ¡Gracias! Me salvaste para el examen del viernes.
+        status: VISIBLE
+        createdAt: '2026-10-14T13:20:00Z'
+
+    GroupCalculo:
+      summary: Grupo privado
+      value:
+        id: 0192e0aa-bc12-7d34-8e56-f7a8b9c0d1e2
+        name: Cálculo II — Paralelo B
+        subject: Cálculo II
+        privacy: PRIVATE
+        ownerId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+        membersCount: 1
+        myMembership:
+          role: OWNER
+          status: ACTIVE
+        createdAt: '2026-10-14T15:04:05Z'
+
+    ReportOpen:
+      summary: Denuncia abierta
+      value:
+        id: 0192f2c9-1d2e-7f30-8a41-b52c63d74e85
+        targetType: POST
+        targetId: 0192f2a0-5b6c-7d8e-9f01-a2b3c4d5e6f7
+        reporterId: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+        reason: HARASSMENT
+        details: Contiene datos personales de otro estudiante sin su permiso.
+        status: OPEN
+        resolution: null
+        resolutionNote: null
+        createdAt: '2026-10-14T14:00:00Z'
+        resolvedAt: null
+
+  schemas:
+    PostVisibility:
+      type: string
+      enum: [PUBLIC, FOLLOWERS, GROUP]
+    PostStatus:
+      type: string
+      enum: [PENDING_MEDIA, PUBLISHED, HIDDEN, REMOVED]
+    ReactionType:
+      type: string
+      enum: [LIKE, HELPFUL, FUNNY, SUPPORT]
+    GroupPrivacy:
+      type: string
+      enum: [PUBLIC, PRIVATE]
+    MembershipStatus:
+      type: string
+      enum: [PENDING, ACTIVE, REJECTED, LEFT]
+    GroupMemberRole:
+      type: string
+      enum: [OWNER, ADMIN, MEMBER]
+      description: Rol dentro del grupo (`GroupMemberRole`, ADR-0016). `ADMIN` puede aprobar o rechazar solicitudes.
+    ReportStatus:
+      type: string
+      enum: [OPEN, RESOLVED_KEPT, RESOLVED_REMOVED]
+    ReportTargetType:
+      type: string
+      enum: [POST, COMMENT]
+      description: Tipo de contenido denunciado (RF-13).
+    ReportReason:
+      type: string
+      enum: [SPAM, HARASSMENT, NSFW, VIOLENCE, MISINFORMATION, OTHER]
+      description: Motivo de la denuncia (`ReportReason`, ADR-0016).
+    ReportResolution:
+      type: string
+      enum: [KEEP, REMOVE]
+      description: Decisión del moderador sobre una denuncia (`ReportResolution`, ADR-0016).
+    CommentStatus:
+      type: string
+      enum: [VISIBLE, HIDDEN, REMOVED]
+      description: Estado de un comentario (`CommentStatus`, ADR-0016). Con 3 denuncias pasa a `HIDDEN` (RF-13).
+    HiddenReason:
+      type: string
+      enum: [MEDIA_FLAGGED, REPORTED, MODERATOR]
+      description: Motivo por el que un post está oculto (`HiddenReason`, ADR-0016).
+    MediaKind:
+      type: string
+      enum: [IMAGE, VIDEO]
+    MediaStatus:
+      type: string
+      enum: [PENDING_UPLOAD, PROCESSING, APPROVED, FLAGGED, REJECTED]
+
+    ProfileSummary:
+      type: object
+      required: [userId, displayName, avatarUrl]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        avatarUrl:
+          type: [string, 'null']
+          format: uri
+          description: URL prefirmada (15 min) de la miniatura del avatar.
+
+    Profile:
+      type: object
+      required: [userId, displayName, universityId, career, semester, bio, interests, avatarMediaId, avatarUrl, followersCount, followingCount, postsCount, followedByMe, createdAt, updatedAt]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+          minLength: 2
+          maxLength: 50
+        universityId:
+          type: string
+          format: uuid
+          readOnly: true
+          description: Universidad (solo lectura, viene de identity).
+        career:
+          type: [string, 'null']
+          maxLength: 100
+        semester:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 14
+        bio:
+          type: [string, 'null']
+          maxLength: 280
+        interests:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            minLength: 2
+            maxLength: 30
+        avatarMediaId:
+          type: [string, 'null']
+          format: uuid
+        avatarUrl:
+          type: [string, 'null']
+          format: uri
+        followersCount:
+          type: integer
+          format: int64
+        followingCount:
+          type: integer
+          format: int64
+        postsCount:
+          type: integer
+          format: int64
+        followedByMe:
+          type: boolean
+          description: Si el usuario autenticado sigue a este perfil (`false` en el propio).
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    UpdateProfileRequest:
+      type: object
+      minProperties: 1
+      properties:
+        displayName:
+          type: string
+          minLength: 2
+          maxLength: 50
+        career:
+          type: [string, 'null']
+          maxLength: 100
+        semester:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 14
+        bio:
+          type: [string, 'null']
+          maxLength: 280
+        interests:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 2
+            maxLength: 30
+        avatarMediaId:
+          type: [string, 'null']
+          format: uuid
+
+    PostMedia:
+      type: object
+      description: Proyección local del estado de un medio de `media-service`.
+      required: [mediaId, kind, status, url, thumbnailUrl]
+      properties:
+        mediaId:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/MediaKind'
+        status:
+          $ref: '#/components/schemas/MediaStatus'
+        url:
+          type: [string, 'null']
+          format: uri
+          description: URL prefirmada (15 min); `null` mientras no esté `APPROVED`.
+        thumbnailUrl:
+          type: [string, 'null']
+          format: uri
+
+    ReactionCounts:
+      type: object
+      required: [like, helpful, funny, support]
+      description: Conteo por tipo de reacción (cada clave es el valor de `ReactionType` en camelCase).
+      properties:
+        like:
+          type: integer
+          format: int64
+        helpful:
+          type: integer
+          format: int64
+        funny:
+          type: integer
+          format: int64
+        support:
+          type: integer
+          format: int64
+
+    Post:
+      type: object
+      required: [id, clientId, authorId, author, text, hashtags, visibility, groupId, status, media, reactionCounts, commentsCount, myReaction, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        clientId:
+          type: string
+          format: uuid
+          description: UUIDv7 generado en el dispositivo; único por autor.
+        authorId:
+          type: string
+          format: uuid
+        author:
+          $ref: '#/components/schemas/ProfileSummary'
+        text:
+          type: string
+          maxLength: 2000
+        hashtags:
+          type: array
+          items:
+            type: string
+          description: Hashtags extraídos del texto, sin `#` y en minúsculas.
+        visibility:
+          $ref: '#/components/schemas/PostVisibility'
+        groupId:
+          type: [string, 'null']
+          format: uuid
+        status:
+          $ref: '#/components/schemas/PostStatus'
+        media:
+          type: array
+          maxItems: 4
+          items:
+            $ref: '#/components/schemas/PostMedia'
+        reactionCounts:
+          $ref: '#/components/schemas/ReactionCounts'
+        commentsCount:
+          type: integer
+          format: int64
+        myReaction:
+          oneOf:
+            - $ref: '#/components/schemas/ReactionType'
+            - type: 'null'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PostPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Post'
+
+    ModerationPost:
+      allOf:
+        - $ref: '#/components/schemas/Post'
+        - type: object
+          required: [reportsCount, hiddenReason]
+          properties:
+            reportsCount:
+              type: integer
+              format: int64
+            hiddenReason:
+              description: Motivo por el que el post está oculto (`null` si no lo está).
+              oneOf:
+                - $ref: '#/components/schemas/HiddenReason'
+                - type: 'null'
+
+    ModerationPostPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ModerationPost'
+
+    CreatePostRequest:
+      type: object
+      required: [clientId, text, mediaIds, visibility]
+      properties:
+        clientId:
+          type: string
+          format: uuid
+          description: UUIDv7 generado en el dispositivo (cola offline).
+        text:
+          type: string
+          maxLength: 2000
+        mediaIds:
+          type: array
+          maxItems: 4
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        visibility:
+          $ref: '#/components/schemas/PostVisibility'
+        groupId:
+          type: string
+          format: uuid
+          description: Obligatorio si `visibility = GROUP`.
+
+    FeedItem:
+      type: object
+      required: [post, source, score]
+      properties:
+        post:
+          $ref: '#/components/schemas/Post'
+        source:
+          type: string
+          enum: [FOLLOWING, GROUP, RECOMMENDED, OWN]
+          description: Por qué aparece el post en el feed.
+        score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Puntaje del `feed-ranker`.
+
+    FeedPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/FeedItem'
+
+    Comment:
+      type: object
+      required: [id, postId, authorId, author, text, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        postId:
+          type: string
+          format: uuid
+        authorId:
+          type: string
+          format: uuid
+        author:
+          $ref: '#/components/schemas/ProfileSummary'
+        text:
+          type: string
+          minLength: 1
+          maxLength: 500
+        status:
+          $ref: '#/components/schemas/CommentStatus'
+        createdAt:
+          type: string
+          format: date-time
+
+    CommentPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Comment'
+
+    CreateCommentRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    SetReactionRequest:
+      type: object
+      required: [type]
+      properties:
+        type:
+          $ref: '#/components/schemas/ReactionType'
+
+    ReactionState:
+      type: object
+      required: [postId, myReaction, reactionCounts]
+      properties:
+        postId:
+          type: string
+          format: uuid
+        myReaction:
+          oneOf:
+            - $ref: '#/components/schemas/ReactionType'
+            - type: 'null'
+        reactionCounts:
+          $ref: '#/components/schemas/ReactionCounts'
+
+    Follow:
+      type: object
+      required: [followerId, followeeId, createdAt]
+      properties:
+        followerId:
+          type: string
+          format: uuid
+        followeeId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+
+    FollowSuggestion:
+      type: object
+      required: [profile, career, score, reasons, mutualFollowsCount]
+      properties:
+        profile:
+          $ref: '#/components/schemas/ProfileSummary'
+        career:
+          type: [string, 'null']
+        score:
+          type: number
+          minimum: 0
+          maximum: 1
+        reasons:
+          type: array
+          items:
+            type: string
+            enum: [SAME_CAREER, MUTUAL_FOLLOWS, SHARED_GROUPS, SHARED_INTERESTS]
+        mutualFollowsCount:
+          type: integer
+
+    FollowSuggestionPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/FollowSuggestion'
+
+    Group:
+      type: object
+      required: [id, name, subject, privacy, ownerId, membersCount, myMembership, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 3
+          maxLength: 80
+        subject:
+          type: string
+          minLength: 2
+          maxLength: 80
+          description: Materia del grupo.
+        privacy:
+          $ref: '#/components/schemas/GroupPrivacy'
+        ownerId:
+          type: string
+          format: uuid
+        membersCount:
+          type: integer
+          format: int64
+        myMembership:
+          description: Mi membresía, o `null` si no pertenezco.
+          oneOf:
+            - type: object
+              required: [role, status]
+              properties:
+                role:
+                  $ref: '#/components/schemas/GroupMemberRole'
+                status:
+                  $ref: '#/components/schemas/MembershipStatus'
+            - type: 'null'
+        createdAt:
+          type: string
+          format: date-time
+
+    GroupPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/Group'
+
+    CreateGroupRequest:
+      type: object
+      required: [name, subject, privacy]
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 80
+        subject:
+          type: string
+          minLength: 2
+          maxLength: 80
+        privacy:
+          $ref: '#/components/schemas/GroupPrivacy'
+
+    GroupMembership:
+      type: object
+      required: [groupId, userId, role, status, requestedAt, updatedAt]
+      properties:
+        groupId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        role:
+          $ref: '#/components/schemas/GroupMemberRole'
+        status:
+          $ref: '#/components/schemas/MembershipStatus'
+        profile:
+          $ref: '#/components/schemas/ProfileSummary'
+        requestedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    GroupMembershipPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/GroupMembership'
+
+    ReportContentRequest:
+      type: object
+      required: [targetType, targetId, reason]
+      properties:
+        targetType:
+          $ref: '#/components/schemas/ReportTargetType'
+        targetId:
+          type: string
+          format: uuid
+        reason:
+          $ref: '#/components/schemas/ReportReason'
+        details:
+          type: string
+          maxLength: 500
+          description: Explicación opcional del denunciante (obligatoria en la práctica si `reason = OTHER`).
+
+    ContentReport:
+      type: object
+      required: [id, targetType, targetId, reporterId, reason, details, status, resolution, resolutionNote, createdAt, resolvedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        targetType:
+          $ref: '#/components/schemas/ReportTargetType'
+        targetId:
+          type: string
+          format: uuid
+        reporterId:
+          type: string
+          format: uuid
+        reason:
+          $ref: '#/components/schemas/ReportReason'
+        details:
+          type: [string, 'null']
+          maxLength: 500
+        status:
+          $ref: '#/components/schemas/ReportStatus'
+        resolution:
+          description: Decisión del moderador (`null` mientras la denuncia está `OPEN`).
+          oneOf:
+            - $ref: '#/components/schemas/ReportResolution'
+            - type: 'null'
+        resolutionNote:
+          type: [string, 'null']
+          maxLength: 500
+        createdAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type: [string, 'null']
+          format: date-time
+
+    ContentReportPage:
+      allOf:
+        - $ref: './shared/components.yaml#/components/schemas/CursorPageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ContentReport'
+
+    ResolveContentReportRequest:
+      type: object
+      required: [resolution]
+      properties:
+        resolution:
+          $ref: '#/components/schemas/ReportResolution'
+        note:
+          type: string
+          maxLength: 500
+
+    UpdatePostStatusRequest:
+      type: object
+      required: [status, reason]
+      properties:
+        status:
+          type: string
+          enum: [PUBLISHED, HIDDEN, REMOVED]
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 500
+
+    ContentDailyStats:
+      type: object
+      required: [from, to, days, topHashtags]
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        days:
+          type: array
+          items:
+            type: object
+            required: [date, postsCreated, commentsCreated, reactionsSet, followsCreated, activeAuthors, postsHidden]
+            properties:
+              date:
+                type: string
+                format: date
+              postsCreated:
+                type: integer
+                format: int64
+              commentsCreated:
+                type: integer
+                format: int64
+              reactionsSet:
+                type: integer
+                format: int64
+              followsCreated:
+                type: integer
+                format: int64
+              activeAuthors:
+                type: integer
+                format: int64
+              postsHidden:
+                type: integer
+                format: int64
+        topHashtags:
+          type: array
+          items:
+            type: object
+            required: [hashtag, count]
+            properties:
+              hashtag:
+                type: string
+              count:
+                type: integer
+                format: int64
+
+  securitySchemes:
+    bearerAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/bearerAuth'
+    serviceAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/serviceAuth'
