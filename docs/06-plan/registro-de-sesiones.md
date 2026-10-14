@@ -50,6 +50,34 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Comentarios (UC-07): sheet nativo, modal IG en web y respuestas
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`); `main` (`bandadau-docs`/`bandadau-shared`) |
+| Objetivo | Mostrar comentarios (nativo: bottom sheet; web: modal IG) con respuestas y aprovechar el espacio en web |
+| UCs / HU | UC-07 |
+| Componentes | `bandadau-docs/contracts`, `bandadau-shared/contracts-ts`, `bandadau-frontend` |
+
+**Contrato (contract-first)**
+- `social-service.yaml` 1.1.0 → **1.2.0**: `Comment.parentId` + `Comment.replyCount`, `CreateCommentRequest.parentId` (respuestas, un nivel). Changelog actualizado.
+- `contracts-ts` regenerado (`pnpm contracts:gen`) y compilado.
+
+**Frontend**
+- `src/features/comments/{types,api}.ts` (`useComments`, `useCreateComment`, `groupThreads`), `components/{comment-thread,comment-composer}.tsx`, `comments-panel.{tsx,native.tsx,web.tsx}` (split por plataforma como Homy).
+- Nativo: `@gorhom/bottom-sheet` (`BottomSheetModal` + `BottomSheetFlatList` + `BottomSheetTextInput`, `keyboardBehavior="interactive"`, backdrop, snap 80%). Deps nuevas: `@gorhom/bottom-sheet@5.2.14`, `react-native-gesture-handler@~2.32.0`; `GestureHandlerRootView` + `BottomSheetModalProvider` en `app/_layout.tsx`.
+- Web: modal centrado con panel izquierdo (carrusel de medios) y derecho (comentarios con scroll + composer).
+- Feed: `PostCard` abre comentarios (icono + contador); `FeedRightRail` (perfil + sugerencias) en web ≥1200px para aprovechar el espacio.
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅ (bundle nativo con gorhom/reanimated).
+
+**Pendiente**
+- [ ] Probar el sheet en dispositivo (gestos/teclado) — no validado en device todavía.
+
+---
+
 ### 2026-10-14 — Feed responsive + carrusel Instagram y datos con imágenes
 
 | Campo | Valor |
