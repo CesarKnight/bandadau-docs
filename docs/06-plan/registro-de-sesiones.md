@@ -50,6 +50,28 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Polyfill Intl.PluralRules (Hermes) para i18n
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Que las traducciones/plurals funcionen en native (Hermes) |
+| UCs / HU | Transversal (i18n D14) |
+| Componentes | `bandadau-frontend` |
+
+**Causa**
+- Hermes **no implementa `Intl.PluralRules`** (ni `Intl.RelativeTimeFormat`). i18next (v24+) e `intl-messageformat` (ICU) lo requieren → en native los plurales ICU fallaban.
+
+**Archivos tocados**
+- `package.json`: `intl-pluralrules` (incluye datos CLDR de todos los locales; solo parchea si falta).
+- `app/_layout.tsx`: `import 'intl-pluralrules'` antes de inicializar i18n (junto con los guards de `@bandada/i18n` para `Intl.RelativeTimeFormat`).
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅.
+
+---
+
 ### 2026-10-14 — Compat Hermes (Intl) y versiones del SDK
 
 | Campo | Valor |
