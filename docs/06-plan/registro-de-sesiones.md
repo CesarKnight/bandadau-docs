@@ -50,6 +50,39 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Fase B: identidad mobile (UC-01/02/03) + stack de datos
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `feat/mobile-bootstrap` (`bandadau-frontend`) |
+| Objetivo | Implementar UC-01/02/03 en la app y fijar el stack de datos/rendimiento |
+| UCs / HU | UC-01, UC-02, UC-03 (implementación en curso); HU-01…HU-07 |
+| Componentes | `bandadau-frontend` |
+
+**Archivos tocados**
+- `bandadau-frontend/`: config (`app.config.ts` React Compiler; dependencias `expo-dev-client`, `@shopify/flash-list`, `react-native-css-interop`, `babel-plugin-react-compiler`; `app/index.tsx` gate de sesión).
+- Identidad: `src/features/auth/{types,schemas,api}.ts`, `src/auth/{pkce,handoff,session,open-url*,refresh-token*}.ts`, `src/lib/{api-client,api-error,http,ids,idempotency,query-keys,query-client}.ts`, `src/stores/{session,preferences}.store.ts`, `src/components/ui/virtual-list.tsx`.
+- Pantallas: `app/(auth)/{welcome,login,register,verify-email}.tsx`, `app/sso/callback.tsx`, `app/settings/index.tsx`.
+- `bandadau-frontend/AGENTS.md`: sección "Datos, rendimiento y compilador".
+
+**Decisiones**
+- **TanStack Query** como única vía a datos del servidor; **React Compiler** activado; **FlashList** (nativo) + **FlatList** (web) tras `VirtualList`.
+- Tipos de identidad aliaseados desde `@bandada/contracts-ts` (`identity.components['schemas'][…]`).
+- `react-native-css-interop` como dependencia directa (resolución pnpm de NativeWind v4).
+- pnpm 10.34.7 vía Corepack; **pnpm 12 no funciona con Corepack 0.34** (su bin es `pnpm`, no `bin/pnpm.cjs`) — no es un problema de Apple Silicon.
+
+**Pendientes**
+- [ ] `app/(tabs)/feed` con `getFeed` real (social-service no existe; usar mocks) y `VirtualList`.
+- [ ] Preferencias offline (cola) y persister de Query; notificaciones (UC-24); UC-04 avatar.
+- [ ] Refrendo humano de las actas §5.4 (`08-revisiones.md`).
+
+**Verificación**
+- `pnpm typecheck` (tsc) y `pnpm lint` (ESLint) en verde; `expo config` OK.
+- `pnpm build:web` (`expo export -p web`) construye y genera las rutas (static export).
+
+---
+
 ### 2026-10-14 — Actas ICONIX retroactivas del lote mobile (UC-01/02/03) y arranque de la app
 
 | Campo | Valor |
