@@ -30,6 +30,8 @@ flowchart LR
 
 ## 2. Mecanismo 1 — `Idempotency-Key` HTTP
 
+> **Verificado contra el código (C-9, 2026-10-15).** Node (`@bandada/idempotency-ts`: social, media, ticketing, insights) y wallet (Laravel, `DynamoIdempotencyStore`) usan la tabla DynamoDB descrita abajo. **identity y events (Spring) guardan el registro en su propia base PostgreSQL**, tabla `idempotency_keys` (`scope_key` PK, `status`, `request_hash`, `principal`, `lock_expires_at`, `response_*`, `expires_at`), con el mismo protocolo (24 h, lock de 30 s, 422/409, `IdempotencyFilter`); eso evita la no-atomicidad Dynamo↔Postgres para esos dos servicios, pero hace que la limpieza por TTL sea responsabilidad del servicio (índice `idx_idempotency_expires`).
+
 ### 2.1 Reglas del protocolo
 
 | Situación | Respuesta |
@@ -52,7 +54,7 @@ flowchart LR
 
 ### 2.2 Tabla DynamoDB `bandada-idempotency`
 
-Compartida; cada servicio **solo** usa su prefijo (`<service>#`). Facturación
+Compartida; cada servicio **solo** usa su prefijo (`<service>#`; en el código: `social-service#`, `media-service#`, `wallet-service#`, pero ticketing e insights usan `ticketing#` e `insights#`: divergencia cosmética, no se cruzan). Facturación
 on-demand. TTL habilitado sobre `expiresAt`.
 
 | Atributo | Tipo | Ejemplo / regla |
@@ -263,6 +265,8 @@ existe, se hace `ack` sin efecto (y, en participantes de la SAGA, ver §3.4).
 
 ### 3.1 PostgreSQL (identity, events, wallet)
 
+> Verificado: las tres bases tienen `processed_messages` (`message_id` PK, `consumer`, `processed_at`).
+
 ```sql
 INSERT INTO processed_messages (message_id, consumer) VALUES ($1, $2)
 ON CONFLICT (message_id) DO NOTHING;   -- 0 filas afectadas ⇒ duplicado
@@ -298,7 +302,7 @@ await session.withTransaction(async () => {
 });
 ```
 
-Índice TTL opcional: `processedAt` con `expireAfterSeconds: 1209600` (14 días).
+Índice TTL: `processedAt` con `expireAfterSeconds: 1209600` (14 días; `MongoInbox.ensureIndexes`).
 
 ### 3.3 DynamoDB (ticketing, notification, insights)
 
@@ -316,7 +320,7 @@ await ddb.send(new TransactWriteItemsCommand({ TransactItems: [
 ]}));
 ```
 
-`TransactionCanceledException` con `CancellationReasons[0].Code = ConditionalCheckFailed`
+`DynamoInbox` (`messaging-ts`) añade `consumer`, `processedAt` y el atributo TTL `expiresAt` (14 días) y hace un `GetItem` consistente previo para no ejecutar el handler en una redelivery. `TransactionCanceledException` con `CancellationReasons[0].Code = ConditionalCheckFailed`
 ⇒ duplicado. Límite: 100 ítems por transacción.
 
 ### 3.4 Participantes de la SAGA: duplicado ≠ silencio
@@ -332,9 +336,11 @@ DEBE volver a publicar la respuesta original (vía outbox), nunca ignorarlo en s
 |---|---|---|
 | events | `UNIQUE (event_id, user_id) WHERE status IN ('PENDING','CONFIRMED')` | Si la fila existente tiene la misma `idempotency_key` → devolver `202` con ella; si no → `409 ALREADY_REGISTERED` |
 | wallet | `ledger_entries.operation_ref UNIQUE` (`DEBIT:<registrationId>`, `REFUND:<registrationId>`, `TOPUP:<topUpId>`) | Re-publicar la respuesta con el asiento existente |
-| wallet | `top_ups.gateway_ref UNIQUE` | Webhook → `200` sin efecto |
+| wallet | `top_ups.gateway_ref UNIQUE` (parcial, `WHERE gateway_ref IS NOT NULL`) y `UNIQUE (user_id, idempotency_key)` en `top_ups` | Webhook → `200` sin efecto |
 | ticketing | Ítem `pk = REG#<registrationId>`, `sk = LOCK` con `attribute_not_exists(pk)` en la misma transacción que el ticket (GSI2 sirve para consultar) | Re-publicar `ticket-issued` con el ticket existente |
 | social | `posts { authorId: 1, clientId: 1 } unique`; ídem en `comments` | Devolver `201` con el post existente (mismo cuerpo que la primera vez) |
+
+> Verificado en el código: `ux_registrations_active` (events), `ux_ledger_operation_ref` y `ux_topups_gateway_ref` (wallet), `uniq_author_client` (social) y `REG#<id>`/`LOCK` (ticketing).
 
 > Un GSI de DynamoDB **no** impone unicidad; por eso ticketing usa un ítem de bloqueo
 > con `ConditionExpression`, no solo el GSI2.

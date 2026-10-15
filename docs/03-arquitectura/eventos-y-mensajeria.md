@@ -185,11 +185,11 @@ UPDATE outbox SET published_at = now(), attempts = attempts + 1 WHERE id = ANY($
 -- limpieza diaria: DELETE FROM outbox WHERE published_at < now() - interval '7 days';
 ```
 
-- Spring: `@Scheduled(fixedDelay = 500)` en `OutboxRelay`; `RabbitTemplate` con
+- Spring: `@Scheduled` en `OutboxRelay` con `fixedDelay` = `OUTBOX_RELAY_INTERVAL` (**por defecto `PT1S`** en identity y events, no 500 ms; el lote falla en el primer error, anota `attempts`/`last_error` y reintenta en el siguiente ciclo); `RabbitTemplate` con
   `spring.rabbitmq.publisher-confirm-type=correlated` y `publisher-returns=true`
   (`mandatory`). Esperar el `CorrelationData.getFuture()` con timeout de 5 s.
-- Laravel: comando long-running `php artisan bandada:outbox-relay` (bucle con
-  `usleep(500_000)`), contenedor propio, `restart: unless-stopped`.
+- Laravel (wallet): comando long-running `php artisan bandada:relay` (alias `bandada:outbox-relay` y `wallet:relay-outbox`; bucle con `usleep` de `OUTBOX_POLL_INTERVAL_MS` = 500 ms) que además hace las tareas periódicas (expiración de recargas y purga de filas publicadas con `retention_days = 7`), contenedor propio `wallet-relay`, `restart: unless-stopped`. Notification tiene `notifications:relay-outbox` (alias `bandada:relay`), inactivo mientras el servicio no publica.
+- **La limpieza diaria del SQL de arriba solo existe en wallet**: los relays de identity y events no purgan `outbox` (divergencia abierta; ver el informe de la revisión cruzada de C-9).
 - `SKIP LOCKED` permite varias réplicas del relay sin publicar el mismo lote en paralelo.
 - Alternativa opcional para reducir latencia: `NOTIFY outbox` tras el insert y
   `LISTEN` en el relay; el polling se mantiene como respaldo.
@@ -220,6 +220,8 @@ Change streams son una optimización opcional, no el mecanismo base.
 
 ### 5.3 DynamoDB (ticketing, insights; notification si publica)
 
+> Verificado contra el código (C-9, 2026-10-15): `DynamoOutbox` de `bandadau-shared/packages/messaging-ts` (usado por ticketing e insights) coincide con esta sección; notification-service es Laravel y su relay está inactivo.
+
 Ítem de outbox en **la tabla del servicio**, escrito en el mismo `TransactWriteItems`
 que el efecto. Para encontrar los pendientes se **sobrecarga GSI1** (atributos
 genéricos `gsi1pk`/`gsi1sk`), que ya existe en el diseño de tabla única:
@@ -228,11 +230,13 @@ genéricos `gsi1pk`/`gsi1sk`), que ya existe en el diseño de tabla única:
 |---|---|
 | `pk` / `sk` | `OUTBOX#<cloudEventId>` / `META` |
 | `gsi1pk` / `gsi1sk` | `OUTBOX#PENDING` / `<createdAt ISO>#<id>` |
-| `exchange`, `routingKey`, `payload`, `headers`, `createdAt`, `attempts` | — |
+| `exchange`, `routingKey`, `payload` (JSON string), `headers`, `createdAt`, `attempts`, `leaseUntil` (epoch ms, mientras se publica), `lastError` | — |
 
-Poller (cada 500 ms): `Query` GSI1 `gsi1pk = OUTBOX#PENDING` (`Limit 50`, orden
-ascendente) → publicar con confirm → `DeleteItem` con
-`ConditionExpression: attribute_exists(pk)`. Varias réplicas pueden publicar el mismo
+En ticketing GSI1 también sirve el listado `USER#<userId>` (atributos `gsi1pk`/`gsi1sk` sobrecargados, como prevé este diseño); GSI2 resuelve `REG#<registrationId>`.
+
+Poller (`@bandada/messaging-ts`, `DynamoOutbox`/`OutboxRelay`; cada 500 ms, lote de 100 por defecto): `Query` GSI1 `gsi1pk = OUTBOX#PENDING` (orden
+ascendente) → *lease* por ítem → publicar con confirm → `DeleteItem` con
+`ConditionExpression: attribute_exists(pk)` (un fallo de publicación anota `lastError` y quita el `leaseUntil`). Varias réplicas pueden publicar el mismo
 ítem (los GSI son eventualmente consistentes y no hay `SKIP LOCKED`): es aceptable
 porque el consumidor deduplica; para reducirlo, el poller toma un *lease* con
 `UpdateItem SET leaseUntil = :t IF attribute_not_exists(leaseUntil) OR leaseUntil < :now`.
