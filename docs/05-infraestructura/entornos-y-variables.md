@@ -110,6 +110,11 @@ Fuente: `bandadau-infra/docker-compose.yaml` y `.env.example` (cada puerto publi
 | `RABBITMQ_URL` 🔒 | AMQP por defecto (el compose arma uno por servicio, ver siguiente fila) | `amqp://bandada:bandada@rabbitmq:5672` |
 | `RABBITMQ_<SERVICIO>_USER` / `RABBITMQ_<SERVICIO>_PASSWORD` 🔒 | Usuario de RabbitMQ por servicio (RNF-07, I-4): `IDENTITY_SERVICE`, `SOCIAL_SERVICE`, `MEDIA_SERVICE`, `EVENTS_SERVICE`, `WALLET_SERVICE`, `TICKETING_SERVICE`, `NOTIFICATION_SERVICE`, `INSIGHTS_SERVICE`, `ADMIN_GATEWAY`. Migración: `infraestructura.md` §2.8 «Usuarios» | compose: `bandada`/`bandada`; `.env.example`: `<servicio>`/`<servicio>_dev` |
 | `JWT_KEK` 🔒 | KEK que cifra la llave privada RS256 en identity (`signing_keys`); cambiarla invalida las llaves guardadas; en prod ≥ 32 caracteres desde SSM | `dev-only-kek-change-me` |
+| `INTERNAL_SCOPES_ENFORCED` | D-7: events, social y media exigen scope `internal:read`/`internal:write` en `/internal/**` (los clientes de `SERVICE_CLIENTS` sin scopes reciben ambos) | `true` |
+| `RATE_LIMIT_ENABLED` / `AUTH_RATE_LIMIT_PER_MINUTE` / `HANDOFF_RATE_LIMIT_PER_MINUTE` / `RESEND_MIN_INTERVAL` / `RESEND_PER_HOUR` / `RATE_LIMIT_STORE` / `REGISTER_HIDE_EXISTING_ACCOUNTS` | Límites y anti-enumeración de identity (store `postgres`) | `true` / `60` / `10` / `PT60S` / `5` / `postgres` / `true` |
+| `SERVICE_TOKEN_TTL` / `MCP_TOKEN_TTL` | Vida de los tokens de servicio y de MCP (identity) | `PT5M` / `PT8H` |
+| `PAYMENT_GATEWAY_MODE` | wallet (D-14): `simulate` o `unavailable` (503 `PAYMENT_GATEWAY_UNAVAILABLE` para demostrar el fallo de pasarela) | `simulate` |
+| `EMAIL_ENABLED` / `VAPID_SUBJECT` / `VAPID_PUBLIC_KEY` 🔒 / `VAPID_PRIVATE_KEY` 🔒 / `WEB_PUSH_TTL_SECONDS` | notification: correo y Web Push (VAPID; claves vacías = Web Push desactivado; generar con `php artisan bandada:vapid-keys`, nunca en git) | `true` / `mailto:no-reply@…` / vacío / vacío / `86400` |
 | `COVER_CHECK` | events valida `coverMediaId` contra media-service (requiere `events-service` en `SERVICE_CLIENTS`; C-2) | `on` |
 | `SAGA_COMMAND_MAX_RETRIES` | Reintentos de comandos de la SAGA (C-6) | `3` |
 | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` 🔒 | Raíz de MinIO | `minio` / `minio_dev_pw` |
@@ -223,7 +228,7 @@ Laravel → `APP_DEBUG=false`, `LOG_CHANNEL=stderr`.
 | `RABBIT_DECLARE_TOPOLOGY` / `OUTBOX_RELAY_INTERVAL` | Topología externa / relay | `false` / `PT1S` |
 | `IDENTITY_SERVICE_URL` | Token de servicio (si falta, se deriva del origen de `JWKS_URL`) | `http://localhost:7001` |
 | `SERVICE_CLIENT_ID` / `SERVICE_CLIENT_SECRET` 🔒 | Token de servicio hacia media | `events-service` / `dev-secret-events` |
-| `COVER_CHECK` / `MEDIA_SERVICE_URL` / `MEDIA_TIMEOUT` | Validar portada contra media (`off` = sin llamadas; el Compose no lo activa) | `off` / `http://media-service:7003` / `PT2S` |
+| `COVER_CHECK` / `MEDIA_SERVICE_URL` / `MEDIA_TIMEOUT` | Validar portada contra media (`off` = sin llamadas; el Compose lo deja en `on`) | `off` / `http://media-service:7003` / `PT2S` |
 | `SAGA_STEP_TIMEOUT` | D2: 30 s por paso | `PT30S` |
 | `SAGA_RESEND_OFFSETS` | Reenvíos a los 5/10/20 s | `PT5S,PT10S,PT20S` |
 | `SAGA_COMPENSATION_BACKOFF` / `SAGA_COMPENSATION_BACKOFF_CAP` / `SAGA_COMPENSATION_ALERT_AFTER` | Compensaciones sin límite de reintentos, con alerta | `PT5S` / `PT60S` / `PT2M` |
