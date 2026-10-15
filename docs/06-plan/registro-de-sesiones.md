@@ -874,8 +874,12 @@ toast del shell mostraba la clave en vez del mensaje del MFE.
   (hero + panel de info/CTA) y **native** con columna única y **CTA fijo abajo** (safe-area); piezas compartidas en
   `event-detail-parts.tsx`. Corregido el bug de parámetro de ruta (`[eventId]`/`[ticketId]` leían `id` → detalle vacío).
 - **Tokens del pase:** `color.pass.*` ajustado para que el ticket se distinga del canvas (claro y oscuro) + contorno.
+- **Reveal "impresora" (UC-12):** el ticket sale de una **boca de impresión** (`PrinterOutput`, capas + degradados SVG) con
+  `TicketPass` aceptando `qrReveal` (el QR se imprime aparte con scan line); tokens `color.printer.*`. **Sonidos**
+  (`expo-audio`) sincronizados con la línea de tiempo: `print-feed`/`print-qr`/`confirm` (assets en `src/assets/sounds/`,
+  generados con `docs/tickets/generate-ticket-sounds.py`).
 
-**Commits:** `bandadau-shared` (`196d706`, `0b35e5f`, `36ce3b6`, `cbad8d0`); `bandadau-frontend` (`757043c`, `651b6c5`, `5f15518`, `48aaa37`, `87e47fd`, `3e7bcec`, `39ab056`, `5143077`, `2aa19cf`, `7783e2d`, `e85d3e6`, `2710cb5`).
+**Commits:** `bandadau-shared` (`196d706`, `0b35e5f`, `36ce3b6`, `cbad8d0`, `5b89846`); `bandadau-frontend` (`757043c`, `651b6c5`, `5f15518`, `48aaa37`, `87e47fd`, `3e7bcec`, `39ab056`, `5143077`, `2aa19cf`, `7783e2d`, `e85d3e6`, `2710cb5`, `4484a8a`, `f835df5`).
 
 **Pendientes**
 - [ ] `pnpm i18n:check` en la app falla por falta de `locales/{es,en}/errors.json` (preexistente): generarlo desde `@bandada/i18n`.
