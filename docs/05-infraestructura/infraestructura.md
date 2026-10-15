@@ -11,7 +11,7 @@
 > - Los frontends **no** van en Docker en local: se ejecutan con sus comandos (`pnpm dev`) y Traefik los reenvía desde
 >   `host.docker.internal`.
 > - Comandos reales: `make setup | up | seed | smoke | mock | down | reset | urls`.
-> - **AWS (§3 en adelante, CloudFormation, CI/CD de despliegue) sigue siendo diseño**: `bandadau-infra/aws/` aún no existe.
+> - **AWS (§4 en adelante, CloudFormation, CI/CD de despliegue) sigue siendo diseño**: `bandadau-infra/aws/` aún no existe.
 > Variables por componente: `entornos-y-variables.md`. Decisiones de implementación: ADR-0018.
 
 Cómo se levanta Bandada U en **local** (Docker Compose + Traefik), cómo se despliega la
@@ -19,6 +19,10 @@ Cómo se levanta Bandada U en **local** (Docker Compose + Traefik), cómo se des
 por repositorio (ADR-0017). Los nombres de servicios, puertos, imágenes, colas y tablas salen de
 `bandadau-docs/docs/03-arquitectura/catalogo-servicios.md` (normativo); este documento **no** los redefine.
 Variables de entorno, URLs por entorno y secretos: `entornos-y-variables.md`.
+
+> **Alcance de los estados**: §2 y §3 describen lo implementado (fase 1). §4 (AWS), §6 (backups) y la mayor parte de §5 (CI/CD de despliegue) son **diseño pendiente**
+> (`bandadau-infra/aws/` y `bandadau-infra/ci/actions/` no existen). Los componentes de la **fase 2** (insights-service, ollama/Piper, modelos ONNX, dashboards de Grafana,
+> ejecución de los workflows de n8n) están marcados "Pendiente fase 2" y su diseño se conserva.
 
 > Inspiración: el repositorio de infraestructura de Homy del mismo equipo (EC2 + RDS + S3 +
 > CloudFront, CloudFormation, Secrets Manager, CI en GitHub Actions, *deploy* por SSM, sin ALB
@@ -28,12 +32,12 @@ Variables de entorno, URLs por entorno y secretos: `entornos-y-variables.md`.
 
 ## 1. Principios
 
-1. **Un comando**: `make up` levanta todo en < 10 min en una máquina de 16 GB (RNF-16).
-2. **Paridad local ↔ AWS**: el mismo `docker-compose` (con *overrides*) corre en la laptop y
+1. **Un comando**: `make up` levanta todo (RNF-16: < 10 min en una máquina de 16 GB; la fase 1 recomienda ≥ 12 GB asignados a Docker). Primera vez: `cp .env.example .env && make setup && make up && make seed && make smoke`.
+2. **Paridad local ↔ AWS** (objetivo; el override de AWS está **pendiente**): el mismo `docker-compose.yaml` (con un *override* de prod) correría en la laptop y
    en el EC2; lo que en local es emulado (DynamoDB Local, MinIO, Mailpit, Postgres en
    contenedor) en AWS se reemplaza por el servicio gestionado **solo cambiando variables**.
 3. **Barato**: un host EC2, sin ALB, sin NAT Gateway, sin EKS. CloudFront es el único CDN/edge.
-   Objetivo RNF-18 (≤ USD 60/mes) con apagado programado (ver §6.4).
+   Objetivo RNF-18 (≤ USD 60/mes) con apagado programado (ver §4.4).
 4. **Mínimo privilegio** (RNF-07): un usuario de base de datos por servicio, un usuario de
    RabbitMQ por servicio, políticas IAM por prefijo de tabla/bucket, `/internal/**` bloqueado
    en el gateway.
@@ -46,212 +50,233 @@ Variables de entorno, URLs por entorno y secretos: `entornos-y-variables.md`.
 
 ## 2. Entorno local (Docker Compose)
 
+> **Estado: implementado (fase 1)**. Un solo archivo `bandadau-infra/docker-compose.yaml` en la **raíz** del repo (no hay carpeta `compose/`), operado con
+> el `Makefile` de la misma raíz. Verificado de punta a punta con `make smoke` (26/26). Lo que no existe todavía está marcado "Pendiente fase 2" o "pendiente".
+
 ### 2.1 Vista general
 
 ```mermaid
 flowchart TB
-    subgraph host["Laptop (Docker Desktop / OrbStack)"]
+    subgraph host["Laptop (Docker Desktop / OrbStack) - red bridge bandada"]
         TR["traefik :80<br/>dashboard :8080"]
-        subgraph net_edge["red: edge"]
-            TR
-        end
-        subgraph net_backend["red: backend"]
+        subgraph svc["perfil services"]
             ID["identity-service :7001"]
             SO["social-service :7002"]
             ME["media-service :7003"]
             EV["events-service :7004"]
-            WA["wallet-service :7005"]
+            WA["wallet-service :7005<br/>+ wallet-worker + wallet-relay"]
             TI["ticketing-service :7006"]
-            NO["notification-service :7007"]
-            IN["insights-service :7008"]
+            NO["notification-service :7007<br/>+ notification-worker + notification-relay"]
             AG["admin-gateway :7010"]
+            IN["insights-service :7008<br/>(pendiente fase 2)"]
         end
-        subgraph net_data["red: data"]
-            PG[("postgres:18 :5432")]
-            MG[("mongo:8 rs0 :27017")]
+        subgraph data["perfil infra: datos"]
+            PG[("postgres 18.6 :5432")]
+            MG[("mongo 8.0.19 rs0 :27017")]
             DY[("dynamodb-local :8000")]
-            MQ{{"rabbitmq:4-management<br/>:5672 / :15672"}}
-            S3[("minio :9000 / :9001")]
+            MQ{{"rabbitmq 4.2.9-management<br/>:5672 / :15672"}}
+            S3[("minio pgsty :9000 / :9001")]
         end
-        subgraph net_ops["red: ops"]
-            N8N["n8n :5678"]
-            LGTM["otel-lgtm<br/>Grafana :3300 · OTLP :4317/:4318"]
+        subgraph ops["perfil infra: operación"]
+            N8N["n8n 2.43.5 (SQLite) :5678"]
             MP["mailpit :8025 / :1025"]
-            OL["ollama :11434 (perfil llm)"]
         end
-        subgraph apps["perfil apps (o fuera de Docker con hot reload)"]
-            LA["landing :3000"]
-            SH["admin-shell :3001"]
-            M1["mfe-moderation :4201"]
-            M2["mfe-insights :4301"]
-            MO["mobile (Metro / web) :8081"]
+        subgraph obs["perfiles opcionales"]
+            LGTM["otel-lgtm (observability)<br/>Grafana :3300 · OTLP :4317/:4318"]
+            OL["ollama (llm, pendiente fase 2)"]
         end
     end
-    TR --> ID & SO & ME & EV & WA & TI & NO & IN & AG
-    TR --> LA & SH & M1 & M2 & MO
+    subgraph hostapps["Procesos en el host (pnpm dev)"]
+        LA["landing :3000"]
+        SH["admin-shell :3001"]
+        M1["mfe-moderation :4201"]
+        M2["mfe-insights :4301"]
+        MO["mobile (Metro / web) :8081"]
+    end
+    TR --> ID & SO & ME & EV & WA & TI & NO & AG
+    TR -.502 hasta la fase 2.-> IN
+    TR -->|host.docker.internal| LA & SH & M1 & M2 & MO
     ID & EV & WA --> PG
     SO & ME --> MG
-    TI & NO & IN --> DY
-    ME & IN --> S3
-    ID & SO & ME & EV & WA & TI & NO & IN <--> MQ
+    SO & ME & EV & WA & TI & NO --> DY
+    ME --> S3
+    ID & SO & ME & EV & WA & TI & NO & AG <--> MQ
     MQ <--> N8N
-    ID & SO & ME & EV & WA & TI & NO & IN & AG -.OTLP.-> LGTM
+    ID & N8N & NO --> MP
+    ID & SO & ME & EV & WA & TI & NO & AG -.OTLP opcional.-> LGTM
 ```
 
 ### 2.2 Perfiles de Compose
 
-Un solo proyecto Compose (`name: bandada`) compuesto por varios archivos en `bandadau-infra/compose/`
-(incluidos con `include:` desde `bandadau-infra/compose/compose.yaml`). Cada contenedor pertenece a un
-**perfil**; `COMPOSE_PROFILES` en `bandadau-infra/.env` decide qué se levanta.
+Un solo proyecto Compose (`name: bandada`; `COMPOSE_PROJECT_NAME`, o `PROJECT=<otro>` en `make`, para pruebas en paralelo). Cada contenedor de larga
+vida pertenece a un **perfil**; `COMPOSE_PROFILES=infra,services` en `.env` define los perfiles por defecto.
 
-| Perfil | Contenedores | Uso típico |
-|---|---|---|
-| `infra` | `traefik`, `postgres`, `mongo`, `mongo-init`, `dynamodb-local`, `dynamodb-init`, `rabbitmq`, `minio`, `minio-init`, `n8n`, `lgtm`, `mailpit` | Siempre. Base para desarrollar cualquier servicio desde el IDE |
-| `services` | los 9 servicios del catálogo §1 | Probar integraciones / SAGA de punta a punta |
-| `apps` | `landing`, `admin-shell`, `mfe-moderation`, `mfe-insights`, `mobile-web` (servidores de desarrollo o `nginx` sirviendo el *build*) | Demo local completa |
-| `llm` | `ollama` (+ `ollama-pull` que descarga el modelo una vez) | Agentes sin API de pago |
-| `tools` | `k6`, `seed` (one-shot) | Pruebas de carga y datos de demo |
+| Perfil | Contenedores | Uso típico | Estado |
+|---|---|---|---|
+| `infra` | `traefik`, `postgres`, `mongo-keyfile` (one-shot), `mongo`, `mongo-init` (one-shot), `dynamodb-local`, `dynamodb-init` (one-shot), `rabbitmq`, `minio`, `minio-init` (one-shot), `mailpit`, `n8n` | Siempre. Base para desarrollar cualquier servicio desde el IDE | Implementado |
+| `services` | `identity-service`, `social-service`, `media-service`, `events-service`, `wallet-service` (+ `wallet-worker`, `wallet-relay`), `ticketing-service`, `notification-service` (+ `notification-worker`, `notification-relay`), `admin-gateway` | Probar integraciones / SAGA de punta a punta | Implementado (8 servicios; `insights-service`: **pendiente fase 2**) |
+| `observability` | `lgtm` (`grafana/otel-lgtm:0.36.0`) | Grafana + OTLP. **OFF por defecto**: `make up-obs` | Implementado (los dashboards versionados siguen pendientes, ver §2.9) |
+| `llm` | *(vacío)* `ollama` (+ `ollama-pull`, `piper`) se definirán en la fase 2 | Agentes sin API de pago | **Pendiente fase 2** (placeholder comentado en el Compose) |
+| `apps`, `tools`, `bootstrap` | — | Diseño original (landing/panel/app en Docker, `k6`, `db-bootstrap` de RDS) | **No implementados**: los frontends corren en el host con `pnpm dev`; seed y smoke son scripts Node en el host; k6 y `db-bootstrap` quedan para fases posteriores |
 
 | Comando | Perfiles |
 |---|---|
-| `make infra-up` | `infra` |
-| `make up` | `infra,services` |
-| `make up-all` | `infra,services,apps` |
-| `make up PROFILES=infra,services,llm` | personalizado |
-| `make svc S=wallet-service` | levanta `infra` + solo ese servicio (los demás se corren desde el IDE) |
+| `make up-infra` | `infra` |
+| `make up` | `infra` + `services` (construye las imágenes con `--build` y espera con `scripts/wait-healthy.sh`) |
+| `make up-obs` | `infra` + `services` + `observability`, con `OTEL_SDK_DISABLED=false` |
+| `make down` / `make reset` | `--profile '*'`: detiene todo / además **borra los volúmenes** (`down -v`) |
 
-> Trabajo diario recomendado: `make infra-up` y correr **en el host** el servicio/app que se está
-> editando (hot reload). Traefik también enruta hacia `host.docker.internal:<puerto>` cuando la
-> variable `<SERVICIO>_UPSTREAM=host` está activa (ver `bandadau-infra/traefik/dynamic/`), así
-> `api.bandada.localhost` funciona igual tanto si el servicio corre en Docker como en el IDE.
+> Con `--profile services` sola, Compose rechaza los `depends_on` hacia servicios del perfil `infra`; por eso el `Makefile` usa `infra`+`services` o `'*'`.
+> `docker compose up --wait` falla con los one-shot que terminan en 0, de ahí `scripts/wait-healthy.sh`.
+
+> Trabajo diario recomendado: `make up-infra` y correr **en el host** el servicio que se está editando (hot reload) con `make host S=<servicio>`: detiene el contenedor
+> y levanta un proxy TCP (`alpine/socat`) con el alias de red del servicio apuntando a `host.docker.internal:<puerto>` (`make unhost S=<servicio>` lo revierte). Así Traefik y
+> el resto de contenedores siguen resolviendo `<servicio>:<puerto>`. Los frontends en el host se enrutan por `host.docker.internal` (`extra_hosts` de Traefik).
 
 ### 2.3 Redes
 
-| Red | Miembros | Motivo |
-|---|---|---|
-| `edge` | `traefik` + todo lo que recibe tráfico HTTP (servicios, apps, n8n, Grafana, MinIO consola, RabbitMQ UI, Mailpit) | Único punto de entrada |
-| `backend` | los 9 servicios + `n8n` | Llamadas `/internal/v1/**` servicio a servicio (no pasan por Traefik) |
-| `data` | bases, broker, MinIO + los servicios que los usan + `n8n` (RabbitMQ) | Aislar datos del edge |
-| `ops` | `lgtm`, `mailpit`, `ollama` + servicios | Telemetría, correo, LLM local |
+Implementado: **una sola red bridge `bandada`** (`<proyecto>_bandada`) compartida por todos los contenedores, con `init: true`, `restart: unless-stopped` y logs
+`json-file` rotados (10 MB × 3). La segmentación en cuatro redes del diseño original (`edge`, `backend`, `data`, `ops`) **no se implementó** en la fase 1; sigue siendo
+una opción de endurecimiento para AWS (**pendiente**).
 
-Los puertos de las bases (`5432`, `27017`, `8000`, `5672`, `9000`) se publican en `127.0.0.1`
-solo para depurar desde el host (DBeaver, Compass, `aws dynamodb --endpoint-url`).
+Puertos publicados en el host:
+
+| Solo en `127.0.0.1` | En todas las interfaces |
+|---|---|
+| PostgreSQL `5432`, MongoDB `27017`, DynamoDB Local `8000`, RabbitMQ AMQP `5672` y UI `15672` | Traefik `80`/`8080`, servicios `7001`–`7007` y `7010`, MinIO `9000`/`9001`, Mailpit `8025`/`1025`, n8n `5678`, Grafana/OTLP (con `observability`) |
+
+Sirven para depurar desde el host (DBeaver, Compass, `aws dynamodb --endpoint-url`). Todos son configurables por variable (`entornos-y-variables.md` §3).
 
 ### 2.4 Volúmenes
 
 | Volumen | Contenedor | Montaje | Nota |
 |---|---|---|---|
-| `pg-data` | postgres | `/var/lib/postgresql` | La imagen `postgres:18` cambió el `PGDATA` a un subdirectorio por versión; se monta el directorio padre (verificar en la doc de la imagen al implementar) |
-| `mongo-data`, `mongo-config` | mongo | `/data/db`, `/data/configdb` | |
-| `mongo-keyfile` | mongo | `/etc/mongo-keyfile` | *keyFile* requerido por replica set + auth (lo genera `mongo-init` la primera vez) |
-| `dynamodb-data` | dynamodb-local | `/home/dynamodblocal/data` | Arrancar con `-sharedDb -dbPath ./data` para persistir |
-| `rabbitmq-data` | rabbitmq | `/var/lib/rabbitmq` | |
+| `postgres-data` | postgres | `/var/lib/postgresql` | La imagen `postgres:18` cambió el `PGDATA` a `/var/lib/postgresql/18/docker`: se monta el directorio padre, no `/var/lib/postgresql/data` |
+| `mongo-data` | mongo | `/data/db` | |
+| `mongo-keyfile` | `mongo-keyfile` (escribe), `mongo` (lee) | `/keyfile` → `/etc/mongo-keyfile` (solo lectura) | *keyFile* requerido por replica set + auth; lo genera el job `mongo-keyfile` la primera vez (`chown 999:999`, `chmod 400`) |
+| `dynamodb-data` | dynamodb-local | `/data` (`-sharedDb -dbPath /data`) | El contenedor corre como `root` porque el volumen nombrado nace como root |
+| `rabbitmq-data` | rabbitmq | `/var/lib/rabbitmq` | `hostname: rabbitmq` fijo: el nombre del nodo (y por tanto sus datos) debe ser estable entre recreaciones |
 | `minio-data` | minio | `/data` | |
-| `n8n-data` | n8n | `/home/node/.n8n` | SQLite propio de n8n (no usa Postgres: la instancia Postgres tiene exactamente 3 bases) |
-| `lgtm-data` | lgtm | `/data` | Retención corta en local |
-| `ollama-models` | ollama | `/root/.ollama` | Modelos descargados (varios GB) |
-| `models-cache` | media-service, insights-service | `/var/cache/bandada/models` | Caché local de los ONNX descargados de MinIO/S3 |
+| `mailpit-data` | mailpit | `/data` (`MP_DATABASE=/data/mailpit.db`) | |
+| `n8n-data` | n8n | `/home/node/.n8n` | **SQLite** propia de n8n (`DB_TYPE=sqlite`, ADR-0016): la instancia Postgres tiene exactamente 3 bases |
+| `lgtm-data` | lgtm | `/data` | Solo con `observability` |
+| `ollama-models`, `models-cache` | — | — | **Pendiente fase 2** (ollama; caché de ONNX de media/insights) |
 
-`make reset` borra todos los volúmenes del proyecto (pide confirmación).
+`make reset` borra todos los volúmenes del proyecto (`down -v --remove-orphans`; el Makefile no pide confirmación).
+Los servicios montan además `./secrets` (identity, lectura/escritura) y `./secrets/qr-es256.pem` (ticketing, solo lectura).
 
 ### 2.5 Contenedores de infraestructura (perfil `infra`)
 
-| Servicio Compose | Imagen (fijar tag exacto al implementar) | Puertos host | Healthcheck | Depende de |
-|---|---|---|---|---|
-| `traefik` | `traefik:v3.x` | `80`, `8080` (dashboard, solo local) | `traefik healthcheck --ping` | — |
-| `postgres` | `postgres:18` | `127.0.0.1:5432` | `pg_isready -U postgres` | — |
-| `mongo` | `mongo:8` | `127.0.0.1:27017` | `mongosh --quiet --eval "db.adminCommand('ping').ok"` + estado del rs | — |
-| `mongo-init` | `mongo:8` (one-shot) | — | termina con código 0 | `mongo` healthy |
-| `dynamodb-local` | `amazon/dynamodb-local` | `127.0.0.1:8000` | (la imagen no trae curl) → lo cubre `dynamodb-init` | — |
-| `dynamodb-init` | `amazon/aws-cli` (one-shot) | — | reintenta `list-tables` hasta responder, crea tablas | `dynamodb-local` started |
-| `rabbitmq` | `rabbitmq:4-management` | `127.0.0.1:5672`, `15672` | `rabbitmq-diagnostics -q ping` | — |
-| `minio` | `minio/minio` | `9000`, `9001` | `mc ready local` | — |
-| `minio-init` | `minio/mc` (one-shot) | — | código 0 | `minio` healthy |
-| `n8n` | `n8nio/n8n` | `5678` | `wget -qO- http://localhost:5678/healthz` | `rabbitmq` healthy |
-| `lgtm` | `grafana/otel-lgtm` | `3300→3000`, `4317`, `4318` | `curl -f http://localhost:3000/api/health` | — |
-| `mailpit` | `axllent/mailpit` | `8025`, `1025` | `wget -qO- http://localhost:8025/livez` | — |
-| `ollama` (perfil `llm`) | `ollama/ollama` | `11434` | `ollama list` | — |
+Imágenes con tag exacto (no `latest`); verificado en `docker-compose.yaml`.
+
+| Servicio Compose | Imagen | Puertos host | Healthcheck | Depende de | Memoria |
+|---|---|---|---|---|---|
+| `traefik` | `traefik:v3.7.14` | `80`, `8080` (dashboard, solo local) | `traefik healthcheck --ping` | — | 128 MB |
+| `postgres` | `postgres:18.6` | `127.0.0.1:5432` | `pg_isready` | — | 384 MB |
+| `mongo-keyfile` | `mongo:8.0.19` (one-shot) | — | termina con código 0 | — | — |
+| `mongo` | `mongo:8.0.19` (`--replSet rs0 --keyFile … --wiredTigerCacheSizeGB 0.25`) | `127.0.0.1:27017` | `mongosh` ping con credenciales de root | `mongo-keyfile` completado | 512 MB |
+| `mongo-init` | `mongo:8.0.19` (one-shot) | — | termina con código 0 | `mongo` healthy | — |
+| `dynamodb-local` | `amazon/dynamodb-local:3.3.1` | `127.0.0.1:8000` | conexión TCP al puerto (la imagen no trae curl) | — | 384 MB |
+| `dynamodb-init` | `amazon/aws-cli:2.38.0` (one-shot) | — | termina con código 0 | `dynamodb-local` healthy | — |
+| `rabbitmq` | `rabbitmq:4.2.9-management` | `127.0.0.1:5672`, `127.0.0.1:15672` | `rabbitmq-diagnostics -q ping` | — | 640 MB |
+| `minio` | `pgsty/minio:RELEASE.2026-08-04T00-00-00Z` | `9000`, `9001` | `curl /minio/health/live` | — | 256 MB |
+| `minio-init` | `pgsty/minio:RELEASE.2026-08-04T00-00-00Z` (one-shot; trae `mc`) | — | termina con código 0 | `minio` healthy | — |
+| `mailpit` | `axllent/mailpit:v1.31.5` | `8025`, `1025` | `/mailpit readyz` | — | 128 MB |
+| `n8n` | `n8nio/n8n:2.43.5` | `5678` | `wget /healthz` | `rabbitmq`, `mailpit` healthy | 1 GB |
+| `lgtm` (perfil `observability`) | `grafana/otel-lgtm:0.36.0` | `3300→3000`, `4317`, `4318` | `curl /api/health` | — | 1.5 GB |
+| `ollama` (perfil `llm`) | — | `11434` | — | — | **Pendiente fase 2** |
+
+Decisiones que conviene no redescubrir:
+
+- **MongoDB fijado a 8.0.19**: las versiones 8.0.21+ y 8.3 abortan en kernels Linux ≥ 6.19 (SERVER-121912), p. ej. el de Docker Desktop reciente. No subir la versión sin verificarlo.
+- **MinIO usa la imagen comunitaria `pgsty/minio`**: la imagen oficial `minio/minio` ya no se publica; esta trae `mc` y `curl`, por lo que `minio-init` usa la misma imagen.
+- **n8n** usa SQLite en su volumen (no Postgres) y arranca con un entrypoint propio que importa credenciales y workflows (§2.8).
 
 ### 2.6 Servicios (perfil `services`)
 
-| Servicio Compose | Imagen | Puerto | Healthcheck | `depends_on` (condición) |
-|---|---|---|---|---|
-| `identity-service` | `bandada/identity-service` | 7001 | `GET /health/ready` | postgres healthy, rabbitmq healthy |
-| `social-service` | `bandada/social-service` | 7002 | `GET /health/ready` | mongo-init completed, rabbitmq, dynamodb-init completed |
-| `media-service` | `bandada/media-service` | 7003 | `GET /health/ready` | mongo-init, minio-init completed, rabbitmq, dynamodb-init |
-| `events-service` | `bandada/events-service` | 7004 | `GET /health/ready` | postgres, rabbitmq, dynamodb-init |
-| `wallet-service` | `bandada/wallet-service` | 7005 | `GET /health/ready` | postgres, rabbitmq, dynamodb-init |
-| `ticketing-service` | `bandada/ticketing-service` | 7006 | `GET /health/ready` | dynamodb-init, rabbitmq |
-| `notification-service` | `bandada/notification-service` | 7007 | `GET /health/ready` | dynamodb-init, rabbitmq, mailpit |
-| `insights-service` | `bandada/insights-service` | 7008 | `GET /health/ready` | dynamodb-init, minio-init, rabbitmq |
-| `admin-gateway` | `bandada/admin-gateway` | 7010 | `GET /health/ready` | identity-service healthy |
+| Servicio Compose | Imagen (`bandada/<svc>:${IMAGE_TAG:-local}`) | Puerto | Healthcheck | `depends_on` (condición) | Memoria |
+|---|---|---|---|---|---|
+| `identity-service` | `bandada/identity-service` | 7001 | `GET /health/ready` | postgres, rabbitmq, mailpit (healthy) | 512 MB |
+| `social-service` | `bandada/social-service` | 7002 | `GET /health/ready` | `mongo-init` y `dynamodb-init` completados, rabbitmq healthy | 256 MB |
+| `media-service` | `bandada/media-service` | 7003 | `GET /health/ready` | `mongo-init`, `minio-init`, `dynamodb-init` completados, rabbitmq healthy | 384 MB |
+| `events-service` | `bandada/events-service` | 7004 | `GET /health/ready` | postgres, rabbitmq healthy, `dynamodb-init` completado | 512 MB |
+| `wallet-service` | `bandada/wallet-service` | 7005 | `GET /health/ready` | postgres, rabbitmq healthy, `dynamodb-init` completado | 256 MB |
+| `ticketing-service` | `bandada/ticketing-service` | 7006 | `GET /health/ready` | rabbitmq healthy, `dynamodb-init` completado | 256 MB |
+| `notification-service` | `bandada/notification-service` | 7007 | `GET /health/ready` | rabbitmq, mailpit healthy, `dynamodb-init` completado | 256 MB |
+| `admin-gateway` | `bandada/admin-gateway` | 7010 | `GET /health/ready` | identity-service healthy (JWKS), rabbitmq healthy | 256 MB |
+| `insights-service` | — | 7008 | — | — | **Pendiente fase 2**: sin Dockerfile ni contenedor; Traefik ya enruta hacia él (502) |
 
-- Las imágenes se construyen con el `Dockerfile` **del propio servicio**
-  (`bandadau-backend/services/<x>/Dockerfile`, multi-stage, usuario no root); Compose solo las referencia con
-  `build.context: ../../bandadau-backend/services/<x>` (relativo a `bandadau-infra/compose/`; repo hermano). Igual que en Homy, el Dockerfile vive con el código.
-- Todas las imágenes incluyen `wget` o `curl` para el healthcheck
-  (`wget -qO- http://localhost:${PORT}/health/ready`), `start_period` 60 s para Spring y 20 s
-  para el resto, `interval` 10 s, `retries` 6.
-- **Procesos auxiliares (misma imagen, otro `command`)**: en los servicios Laravel el consumidor
-  y el relay del outbox son comandos artisan de larga vida (`eventos-y-mensajeria.md` §6), por lo
-  que se declaran como contenedores extra sin puerto HTTP: `wallet-service-consumer`
-  (`php artisan bandada:consume wallet-service.commands`), `wallet-service-outbox-relay`,
-  `notification-service-consumer` (y su relay si publica). Su healthcheck es un *heartbeat*
-  (archivo tocado cada 30 s). En Spring y NestJS el consumidor y el relay corren dentro del
-  mismo proceso del servicio.
-- Los servicios **no** dependen entre sí en el arranque (salvo `admin-gateway` → identity por
-  JWKS): la degradación elegante (RNF-03) se prueba apagando contenedores.
-- Variables comunes: anclas YAML `x-service-env` (RabbitMQ, OTLP, JWKS, DynamoDB) y un
-  `env_file: ../../bandadau-backend/services/<x>/.env` opcional para sobreescribir.
+- Las imágenes se construyen con el `Dockerfile` **del propio servicio**, en el repo hermano `bandadau-backend`: identity, events, wallet y notification con
+  `build.context: ../bandadau-backend/services/<x>`; los servicios Node (social, media, ticketing, admin-gateway) con `context: ../bandadau-backend`,
+  `dockerfile: services/<x>/Dockerfile` y `additional_contexts: { shared: ../bandadau-shared }` (para los paquetes `@bandada/*`). `make setup` compila antes `bandadau-shared`.
+- Healthcheck común: `wget -qO- http://127.0.0.1:<puerto>/health/ready` o, si no hay `wget`, `curl -fsS`; `interval` 10 s, `retries` 6, `start_period` 60 s para Spring y 20 s para el resto.
+- **Procesos auxiliares (misma imagen, otro `command`)**: en los servicios Laravel el consumidor y el relay del outbox son comandos artisan de larga vida (`eventos-y-mensajeria.md` §6),
+  declarados como contenedores extra sin puerto HTTP, con las **mismas variables** que el servicio web y `depends_on: <servicio> healthy`:
+
+  | Contenedor | Comando por defecto (variable que lo sobreescribe) | Función |
+  |---|---|---|
+  | `wallet-worker` | `php artisan wallet:consume-commands` (`WALLET_WORKER_CMD`) | Consume `wallet-service.commands` (SAGA) |
+  | `wallet-relay` | `php artisan wallet:relay-outbox` (`WALLET_RELAY_CMD`) | Outbox → RabbitMQ, expiración de recargas y purga |
+  | `notification-worker` | `php artisan notifications:consume` (`NOTIFICATION_WORKER_CMD`) | Consume `notification-service.events` |
+  | `notification-relay` | `php artisan notifications:relay-outbox` (`NOTIFICATION_RELAY_CMD`) | Inactivo: el servicio no publica eventos; existe para que el Compose sea sano y puede omitirse |
+
+  Su healthcheck no es HTTP: `grep -qa artisan /proc/1/cmdline` (el proceso artisan sigue siendo el PID 1; `interval` 30 s). En Spring y NestJS el consumidor y el relay
+  corren dentro del mismo proceso del servicio.
+- Los servicios **no** dependen entre sí en el arranque (salvo `admin-gateway` → identity por JWKS): la degradación elegante (RNF-03) se prueba apagando contenedores.
+- Variables comunes por ancla YAML (`x-service-env`) más un ancla por stack (`x-java-env`, `x-node-env`, `x-laravel-env`); el detalle está en `entornos-y-variables.md` §4.
+  No se usa `env_file` por servicio.
 
 ### 2.7 Traefik (gateway)
 
-- Configuración estática en `bandadau-infra/traefik/traefik.yml`: *entrypoint* `web` (:80), en prod
-  además `websecure` (:443 solo si no hay CloudFront, ver §6), proveedor Docker
-  (`exposedByDefault: false`) + proveedor *file* (`bandadau-infra/traefik/dynamic/*.yml`), `ping`,
-  métricas OTLP, *access log* JSON.
+- Configuración estática en `bandadau-infra/traefik/traefik.yml`: *entrypoints* `web` (`:80`) y `traefik` (`:8080`: dashboard con `api.insecure: true` solo en local, y `ping`),
+  **solo proveedor *file*** (`bandadau-infra/traefik/dynamic/{routers,middlewares}.yml`, con `watch`; no se usa el proveedor Docker ni *labels*), *access log* JSON filtrado a los
+  códigos 400–599. El dominio sale de `{{ env "BASE_DOMAIN" }}` (variable de entorno del contenedor). `websecure`/TLS y las métricas OTLP de Traefik: **pendiente** (AWS, §4).
 - Enrutamiento por `Host` + `PathPrefix` exactamente como el catálogo §4, con `BASE_DOMAIN`:
 
-| Router | Regla | Servicio |
-|---|---|---|
-| `identity` | ``Host(`api.${BASE_DOMAIN}`) && (PathPrefix(`/api/v1/auth`) \|\| PathPrefix(`/api/v1/users`) \|\| PathPrefix(`/api/v1/universities`) \|\| PathPrefix(`/.well-known`))`` | identity-service:7001 |
-| `social` | `… PathPrefix(/api/v1/profiles\|posts\|feed\|groups\|follows\|reports)` | social-service:7002 |
-| `media` | `/api/v1/media` | media-service:7003 |
-| `events` | `/api/v1/events`, `/api/v1/registrations` | events-service:7004 |
-| `wallet` | `/api/v1/wallet` | wallet-service:7005 |
-| `ticketing` | `/api/v1/tickets` | ticketing-service:7006 |
-| `notification` | `/api/v1/notifications`, `/api/v1/devices` | notification-service:7007 |
-| `insights` | `/api/v1/insights`, `/mcp` | insights-service:7008 |
-| `graphql` | `/graphql` (HTTP + WebSocket) | admin-gateway:7010 |
-| `internal-block` | `PathPrefix(/internal)` en `api.*` (prioridad máxima) | `noop@internal` + middleware que responde **403** |
-| `landing` | `Host(${BASE_DOMAIN}) \|\| Host(www.${BASE_DOMAIN})` | landing:3000 |
-| `app` | `Host(app.${BASE_DOMAIN})` | mobile-web:8081 |
-| `admin` | `Host(admin.${BASE_DOMAIN})` | admin-shell:3001 |
-| `mfe` | `Host(mfe.${BASE_DOMAIN}) && PathPrefix(/moderation)` / `/insights` | mfe-moderation:4201 / mfe-insights:4301 (*stripPrefix* solo en dev server si hace falta) |
-| `s3` | `Host(s3.${BASE_DOMAIN})` | minio:9000 (URLs prefirmadas accesibles desde el navegador/emulador) |
-| `n8n`, `grafana`, `rabbitmq`, `mailpit`, `minio-console` | `Host(n8n.${BASE_DOMAIN})`, … | UIs de operación |
+| Router | Regla | Servicio | Cadena de middlewares |
+|---|---|---|---|
+| `api-internal-block` | `Host(api.*) && (PathPrefix(/internal) \|\| PathPrefix(/api/v1/auth/service-token))`, prioridad 10000 | `noop@internal` | `deny-all` → **403** |
+| `identity-auth` | `Host(api.*) && PathPrefix(/api/v1/auth)`, prioridad 200 | identity-service:7001 | `api-auth-chain` |
+| `identity` | `… PathPrefix(/api/v1/users\|universities\|/.well-known)` | identity-service:7001 | `api-chain` |
+| `social` | `… PathPrefix(/api/v1/profiles\|posts\|feed\|groups\|follows\|reports)` | social-service:7002 | `api-chain` |
+| `media` | `/api/v1/media` | media-service:7003 | `api-chain` |
+| `events` | `/api/v1/events`, `/api/v1/registrations` | events-service:7004 | `api-chain` |
+| `wallet` | `/api/v1/wallet` | wallet-service:7005 | `api-chain` |
+| `ticketing` | `/api/v1/tickets` | ticketing-service:7006 | `api-chain` |
+| `notification` | `/api/v1/notifications`, `/api/v1/devices` | notification-service:7007 | `api-chain` |
+| `insights` | `/api/v1/insights`, `/mcp` | insights-service:7008 | `api-chain`; **502 hasta la fase 2** |
+| `graphql` | `/graphql` (HTTP + WebSocket `graphql-ws`) | admin-gateway:7010 | `cors`, `ratelimit-default`, `secure-headers` (sin `compress`, para no interferir con el *upgrade*) |
+| `landing` | `Host(${BASE_DOMAIN}) \|\| Host(www.${BASE_DOMAIN})` | `host.docker.internal:3000` | — |
+| `app` | `Host(app.${BASE_DOMAIN})` | `host.docker.internal:8081` | — |
+| `admin-shell` | `Host(admin.${BASE_DOMAIN})` | `host.docker.internal:3001` | — |
+| `mfe-moderation` / `mfe-insights` | `Host(mfe.${BASE_DOMAIN}) && PathPrefix(/moderation)` / `/insights` | `host.docker.internal:4201` / `:4301` | `cors` |
+| `s3` | `Host(s3.${BASE_DOMAIN})` | minio:9000 (URLs prefirmadas) | — |
+| `n8n`, `mailpit`, `rabbitmq`, `grafana`, `minio-console` | `Host(n8n.*)`, `mail.*`, `rabbit.*`, `grafana.*`, `minio.*` | n8n:5678, mailpit:8025, rabbitmq:15672, lgtm:3000, minio:9001 | — |
 
-- **Middlewares** (`bandadau-infra/traefik/dynamic/middlewares.yml`): `cors` (orígenes = app, admin, mfe,
-  landing del mismo `BASE_DOMAIN`; cabeceras `Authorization`, `Idempotency-Key`,
-  `X-Correlation-Id`, `traceparent`, `Accept-Language`; expone `Idempotent-Replayed`,
-  `Content-Language`), `ratelimit-auth` (10/min/IP en `/api/v1/auth/*`, RNF-06),
-  `ratelimit-default`, `secure-headers`, `correlation-id` (genera `X-Correlation-Id` si falta),
-  `ops-auth` (basic auth para n8n/Grafana en prod), `compress`.
-- `*.localhost` resuelve a `127.0.0.1` en navegadores modernos y macOS; en Linux/Android se
-  documenta la entrada de `/etc/hosts` o el uso de la IP LAN (`EXPO_PUBLIC_API_URL`) para el
-  teléfono físico.
+- **Middlewares** (`bandadau-infra/traefik/dynamic/middlewares.yml`):
+  - `cors` — **CORS con credenciales**: `accessControlAllowCredentials: true`, por lo que los orígenes se declaran **explícitos** con expresiones regulares (nunca `*`):
+    `^http://localhost:(3000|3001|4201|8081)$`, `^http://127\.0\.0\.1:(3000|3001|4201|8081)$` y `^https?://([a-z0-9-]+\.)?<BASE_DOMAIN>$`. Métodos `GET, POST, PUT, PATCH, DELETE, OPTIONS`.
+    Cabeceras permitidas: `Authorization`, `Content-Type`, `Idempotency-Key`, `X-Correlation-Id`, `traceparent`, `tracestate`, `Accept-Language` y **`X-Bandada-Client`**.
+    Cabeceras expuestas: `Idempotent-Replayed`, `Content-Language`, `X-Correlation-Id`, `Location`, `Retry-After`, `X-Unread-Count`. `maxAge` 600 s, `Vary` activado.
+    Traefik **sobrescribe** `Access-Control-Allow-Origin` en el camino `api.*` (si el servicio añade CORS propio, no se duplica).
+  - `ratelimit-default` (100/s, ráfaga 200) y `ratelimit-auth` (60/min, ráfaga 40): límites de **desarrollo**; la regla de prod (10/min/IP en `/api/v1/auth/*`, RNF-06) está **pendiente**.
+  - `secure-headers` (`nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`), `compress`, `deny-all` (`ipAllowList` con un rango inalcanzable: responde 403).
+  - Cadenas: `api-chain` = `cors` + `ratelimit-default` + `secure-headers` + `compress`; `api-auth-chain` = lo mismo con `ratelimit-auth`.
+  - **Pendiente**: `correlation-id` (el `X-Correlation-Id` lo propaga cada servicio), `ops-auth` (basic auth para n8n/Grafana en prod) y la verificación `X-Origin-Verify` de CloudFront.
+- `*.localhost` resuelve a `127.0.0.1` en Chrome/Firefox/macOS; en Safari o Linux, `make setup` imprime la línea de `/etc/hosts` a agregar. Para el teléfono físico se usa la IP LAN
+  (`EXPO_PUBLIC_API_URL`).
 
 ### 2.8 Inicialización de datos
 
 #### PostgreSQL — 3 bases, 3 usuarios
 
-`bandadau-infra/postgres/init/01-create-databases.sh` (montado en `/docker-entrypoint-initdb.d/`, solo
-corre con el volumen vacío). Las contraseñas llegan por variables (`IDENTITY_DB_PASSWORD`, …).
+`bandadau-infra/postgres/init/01-create-databases.sh` (montado en `/docker-entrypoint-initdb.d/`, solo corre con el volumen vacío). Las contraseñas llegan por variables
+(`IDENTITY_DB_PASSWORD`, `EVENTS_DB_PASSWORD`, `WALLET_DB_PASSWORD`). Es idempotente (`CREATE ROLE`/`CREATE DATABASE` condicionales con `\gexec`; reaplica la contraseña).
 
 ```sql
 -- por cada par (identity|events|wallet):
-CREATE ROLE identity LOGIN PASSWORD :'identity_pw';
-CREATE DATABASE identity_db OWNER identity;
+CREATE ROLE identity LOGIN PASSWORD :'pw';          -- si no existe
+CREATE DATABASE identity_db OWNER identity;         -- si no existe
 REVOKE CONNECT ON DATABASE identity_db FROM PUBLIC;
 GRANT CONNECT ON DATABASE identity_db TO identity;
 -- dentro de identity_db:
@@ -259,164 +284,174 @@ REVOKE ALL ON SCHEMA public FROM PUBLIC;
 ALTER SCHEMA public OWNER TO identity;
 ```
 
-- Los esquemas los crea **cada servicio** con sus migraciones (Flyway en Spring, migraciones de
-  Laravel en wallet); el init solo crea bases y usuarios.
-- En RDS no existe `docker-entrypoint-initdb.d`: el mismo script se ejecuta una vez con el
-  contenedor one-shot `db-bootstrap` (perfil `bootstrap`) usando el usuario maestro de RDS.
+- La instancia contiene **exactamente 3 bases** (`identity_db`, `events_db`, `wallet_db`): n8n no usa Postgres (SQLite propia).
+- Los esquemas los crea **cada servicio** con sus migraciones (Flyway en identity y events; migraciones de Laravel en wallet al arrancar el rol `web`); el init solo crea bases y usuarios.
+- En RDS no existe `docker-entrypoint-initdb.d`: el mismo script se ejecutaría una vez con un contenedor `db-bootstrap` usando el usuario maestro (**pendiente**, junto con AWS).
 
 #### MongoDB — replica set `rs0`
 
-- `mongo` arranca con `--replSet rs0 --bind_ip_all --keyFile /etc/mongo-keyfile/key` y usuario
-  raíz (`MONGO_INITDB_ROOT_*`).
-- `mongo-init` (one-shot, `bandadau-infra/mongo/init/init-replica.js` + `create-users.js`):
-  1. `rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "mongo:27017" }] })` si
-     `rs.status()` falla; espera a `PRIMARY`.
-  2. Crea los usuarios `social` (`readWrite` sobre la base `social`) y `media` (`readWrite` sobre `media`).
+- `mongo-keyfile` (one-shot) genera el keyfile en el volumen `mongo-keyfile`. `mongo` arranca con `--replSet rs0 --bind_ip_all --keyFile /etc/mongo-keyfile/key` y usuario raíz
+  (`MONGO_INITDB_ROOT_*`); imagen fijada a `8.0.19` (SERVER-121912).
+- `mongo-init` (one-shot, `bandadau-infra/mongo/init/{init.sh,init-replica.js,create-users.js}`), idempotente:
+  1. Espera a `mongod`, inicia `rs0` (1 nodo, miembro anunciado `mongo:27017`) si no existe y espera a `PRIMARY`.
+  2. Crea o actualiza los usuarios `social` (`readWrite` sobre la base `social`) y `media` (`readWrite` sobre `media`).
   3. No crea índices: cada servicio los asegura al arrancar (`createIndexes` idempotente).
-- Desde el host, conectarse con `mongodb://…@localhost:27017/?directConnection=true`
-  (el miembro del rs se anuncia como `mongo:27017`).
+- Desde el host, conectarse con `mongodb://…@localhost:27017/?directConnection=true` (el miembro del rs se anuncia como `mongo:27017`).
 
 #### DynamoDB Local — tablas
 
-`bandadau-infra/dynamodb/tables/*.json` (formato de entrada de `aws dynamodb create-table`) + script
-`bandadau-infra/dynamodb/create-tables.sh` que ejecuta `dynamodb-init`:
+`bandadau-infra/dynamodb/tables/*.json` (formato de entrada de `aws dynamodb create-table`), `dynamodb/ttl.txt` y el script `dynamodb/create-tables.sh` que ejecuta `dynamodb-init`:
 
 | Archivo | Tabla | Claves | GSIs | TTL |
 |---|---|---|---|---|
 | `idempotency.json` | `bandada-idempotency` | `pk` (S) | — | `expiresAt` |
-| `ticketing.json` | `bandada-ticketing` | `pk` (S), `sk` (S) | `GSI1` (`gsi1pk`,`gsi1sk`), `GSI2` (`gsi2pk`,`gsi2sk`) | — |
-| `notifications.json` | `bandada-notifications` | `pk`, `sk` | — | `expiresAt` |
-| `insights.json` | `bandada-insights` | `pk`, `sk` | `GSI1` (`gsi1pk`,`gsi1sk`) — ver propuesta en `06-modelo-estatico/insights.md` | `expiresAt` |
+| `ticketing.json` | `bandada-ticketing` | `pk` (S), `sk` (S) | `GSI1` (`gsi1pk`,`gsi1sk`), `GSI2` (`gsi2pk`,`gsi2sk`) | `expiresAt` |
+| `notifications.json` | `bandada-notifications` | `pk`, `sk` | `GSI1` (`gsi1pk`,`gsi1sk`) | `expiresAt` |
+| `insights.json` | `bandada-insights` | `pk`, `sk` | `GSI1` (`gsi1pk`,`gsi1sk`) — ver propuesta en `06-modelo-estatico/insights.md` | `expiresAt` (la tabla ya existe; el servicio es **pendiente fase 2**) |
 
-- Modo de facturación declarado `PAY_PER_REQUEST` (igual al de AWS) para que los mismos JSON
-  sirvan para CloudFormation.
-- El script es idempotente (`describe-table` antes de `create-table`) y luego aplica
-  `update-time-to-live`. **DynamoDB Local no garantiza el borrado por TTL**: el código siempre
-  filtra por `expiresAt` además de confiar en el TTL.
+- Imagen `amazon/dynamodb-local:3.3.1` con `-sharedDb -dbPath /data` (persistente en el volumen `dynamodb-data`). Modo de facturación `PAY_PER_REQUEST` (igual al de AWS) para que los mismos
+  JSON sirvan para CloudFormation.
+- El script es idempotente (`describe-table` antes de `create-table`) y luego activa el TTL leyendo `ttl.txt` (las **cuatro** tablas con `expiresAt`). **DynamoDB Local no garantiza el
+  borrado por TTL**: el código siempre filtra por `expiresAt` además de confiar en el TTL.
 - Credenciales ficticias en local (`AWS_ACCESS_KEY_ID=local`, región `us-east-1`).
+- **Ítems técnicos de inbox/outbox** (en la tabla de cada servicio, `pk`/`sk`; `idempotencia.md`):
+
+  | Ítem | Clave | Quién lo escribe | Notas |
+  |---|---|---|---|
+  | Outbox (publicaciones) | `pk = OUTBOX#<id>`, `sk = META`; los pendientes se listan por `GSI1` con `gsi1pk = OUTBOX#PENDING` | `@bandada/messaging-ts` (`DynamoOutbox`; lo usa ticketing-service) | Se reclama con *lease* y se borra al publicar |
+  | Inbox (mensajes procesados) | `pk = INBOX#<messageId>`, `sk = META` | `@bandada/messaging-ts` (ticketing) y `DynamoNotificationRepository` (notification; también `INBOX#group:<key>`) | TTL de 14 días en notification; el inbox y la escritura de negocio van en la misma `TransactWriteItems` |
+  | Entidades de ticketing | `TICKET#<ticketId>`/`META` (con `GSI1 = USER#<u>`/`STARTS#<fecha>#<id>` y `GSI2 = REG#<regId>`/`TICKET#<id>`), `REG#<registrationId>`/`LOCK` | ticketing-service | |
+  | Entidades de notification | `USER#<u>`/`NOTIF#<uuidv7>` (TTL `expiresAt`), `USER#<u>`/`PREF` (preferencias y `unreadCount`) | notification-service | |
+
+  Según el diseño (`idempotencia.md`), los servicios con Postgres (identity, events, wallet) y Mongo (social, media) guardan su inbox/outbox en su propia base (`database per service`); no verificado en detalle para cada uno.
 
 #### MinIO — buckets
 
-`minio-init` (`bandadau-infra/minio/init.sh`) con `mc`:
+`minio-init` (`bandadau-infra/minio/init.sh`) con `mc`, idempotente:
 
 | Bucket | Uso | Política |
 |---|---|---|
 | `bandada-media` | Fotos/videos de usuarios (`uploads/<ownerId>/<mediaId>/original`, `…/thumb.jpg`, `…/frames/`) | privado; acceso solo por URL prefirmada (RNF-08) |
-| `bandada-reports` | Audios de reportes generativos (`reports/<reportId>.mp3`) | privado |
+| `bandada-reports` | Audios de reportes generativos (`reports/<reportId>.mp3`) | privado (lo usará insights: fase 2) |
 | `bandada-models` | Modelos ONNX `models/<nombre>/<versión>/model.onnx` | privado; lectura por media/insights |
-| `bandada-public` | Modelos on-device descargables por la app (`mobile/…`) y portadas públicas de eventos | lectura anónima (solo local; en AWS va detrás de CloudFront) |
+| `bandada-public` | Modelos on-device descargables por la app (`mobile/…`) y portadas públicas de eventos | lectura anónima (`mc anonymous set download`; solo local; en AWS va detrás de CloudFront) |
 
-Además crea usuarios MinIO por servicio (`media-svc`, `insights-svc`) con políticas por bucket
-(simula IAM) y configura CORS para `PUT` prefirmado desde `app.${BASE_DOMAIN}`.
-`make models-sync` sube a `bandada-models` los ONNX exportados desde `bandadau-ml/`.
+Además crea los usuarios MinIO `media-svc` e `insights-svc` con políticas por bucket (`media-svc-policy`, `insights-svc-policy`; simulan IAM). El CORS del API S3 (PUT prefirmado
+desde la app web y el panel) se configura con `MINIO_API_CORS_ALLOW_ORIGIN=${CORS_ORIGINS}` (MinIO no usa CORS por bucket). Las URLs prefirmadas se firman con
+`S3_PUBLIC_ENDPOINT=http://localhost:9000` (path-style) y duran `UPLOAD_URL_TTL_SECONDS`. `make models-sync` (subir los ONNX de `bandadau-ml/`): **pendiente fase 2**.
 
 #### RabbitMQ — `definitions.json`
 
-`bandadau-infra/rabbitmq/definitions.json` se carga al arrancar (`load_definitions` en
-`bandadau-infra/rabbitmq/rabbitmq.conf`). Lo genera `bandadau-infra/rabbitmq/render-definitions.sh` a partir de
-`definitions.template.json` para insertar los *hashes* de contraseña desde `bandadau-infra/.env`.
+`bandadau-infra/rabbitmq/definitions.json` (versionado) se carga al arrancar (`load_definitions` en `bandadau-infra/rabbitmq/rabbitmq.conf`, montado en
+`/etc/rabbitmq/conf.d/20-bandada.conf`). Lo genera `bandadau-infra/rabbitmq/render-definitions.sh` (`make rabbit-defs`; `make setup`/`up` lo ejecutan) a partir de
+`definitions.template.json` sustituyendo las contraseñas de `bandadau-infra/.env`. **En local van en claro** en el JSON y RabbitMQ las hashea al importar (solo desarrollo).
+Imagen `rabbitmq:4.2.9-management`.
 
 - **vhost**: `/` (por defecto; las URLs de los servicios no indican vhost).
-- **Exchanges** (durables): `bandada.events` (topic), `bandada.commands` (topic), `bandada.dlx` (topic).
-- **Colas** (quorum, durables): exactamente las del catálogo §5 —
-  `events-service.saga-replies`, `wallet-service.commands`, `ticketing-service.commands`,
-  `social-service.events`, `media-service.events`, `notification-service.events`,
-  `insights-service.analytics`, `n8n.automation` — cada una con
-  `x-dead-letter-exchange: bandada.dlx` y `x-dead-letter-routing-key: <nombre-de-la-cola>`.
-- **DLQ**: una cola `<nombre>.dlq` por cola, enlazada a `bandada.dlx` con su nombre como
-  routing key (así la DLQ sabe de qué cola vino cada mensaje y el agente de monitoreo puede
-  contarlas por servicio).
-- **Bindings**: los del catálogo §5 (comandos sobre `bandada.commands`, el resto sobre
-  `bandada.events`). Política de reintentos en el consumidor (3 intentos con *backoff*, luego
-  `nack` sin requeue → DLQ); detalle en `bandadau-docs/docs/03-arquitectura/eventos-y-mensajeria.md`.
-- **Usuarios**: en local, el usuario compartido `bandada` (el de los `.env.example` de los
-  servicios) + `n8n` + `monitor`. En AWS (RNF-07): uno por servicio (`identity`, `social`, …, `n8n`) con permisos
-  `configure: ^$`, `write` sobre los exchanges que publica y `read` sobre su cola; usuario
-  `admin` solo para la UI; usuario `monitor` (tag `monitoring`, solo lectura) para la herramienta
-  MCP `get_service_health`.
+- **Exchanges** (durables, `topic`): `bandada.events`, `bandada.commands`, `bandada.dlx`.
+- **Colas principales** (quorum, durables), exactamente las del catálogo §5: `events-service.saga-replies`, `wallet-service.commands`, `ticketing-service.commands`,
+  `social-service.events`, `media-service.events`, `notification-service.events`, `insights-service.analytics`, `n8n.automation`. Cada una con
+  `x-dead-letter-exchange: bandada.dlx`, `x-dead-letter-routing-key: <nombre-de-la-cola>` y **`x-delivery-limit: 10`** (corta bucles de *poison messages* si el consumidor muere antes del ack).
+- **Reintentos con espera** (3 por cola principal): `<q>.retry.5s`, `<q>.retry.30s` y `<q>.retry.5m` — colas *classic* con `x-message-ttl` de 5 000 / 30 000 / 300 000 ms,
+  `x-dead-letter-exchange: ""` (exchange por defecto) y `x-dead-letter-routing-key: <q>`: al expirar el TTL el mensaje vuelve a la cola principal. El consumidor republica la copia con
+  `x-retry-count` y, agotados los 3 intentos, hace `nack` sin requeue (→ DLQ).
+- **DLQ**: una cola `<q>.dlq` (quorum) por cola principal, enlazada a `bandada.dlx` con el nombre de la cola principal como routing key (así la DLQ sabe de qué cola vino cada mensaje y el agente
+  de monitoreo puede contarlas por servicio).
+- **Policies** (en lugar de argumentos, para no romper la declaración idempotente del dueño de la cola): `cap-unconsumed` (`n8n.automation` e `insights-service.analytics`, sin consumidor en la fase 1)
+  y `cap-dlq` (`*.dlq`), ambas con `max-length` 10 000 y `overflow: drop-head`.
+- **Bindings** (33): los del catálogo §5 (comandos sobre `bandada.commands`, el resto sobre `bandada.events`, más los de las DLQ sobre `bandada.dlx`). Los servicios **no crean** esta topología: la
+  **verifican** (declaración pasiva) y, si la declaran (`RABBIT_DECLARE_TOPOLOGY`/`RABBITMQ_DECLARE_TOPOLOGY`, solo dev/tests), deben usar exactamente estos argumentos. Detalle en
+  `bandadau-docs/docs/03-arquitectura/eventos-y-mensajeria.md`.
+- **Cola dinámica fuera de `definitions.json`**: `admin-gateway.subscriptions.<instanceId>` la declara el propio admin-gateway al arrancar (**exclusiva y auto-delete**, una por instancia; ADR-0016,
+  catálogo §5) para alimentar las subscriptions GraphQL; desaparece al cerrarse la conexión.
+- **Usuarios** (en local): `bandada` (usuario compartido de los servicios, permisos `.*`), `n8n` (permisos `.*`), `monitor` (tag `monitoring`, solo lectura: `configure/write ^$`, `read .*`) y
+  `admin` (tag `administrator`, para la UI). En AWS (RNF-07) el diseño prevé un usuario por servicio con permisos `configure: ^$`, `write` sobre los exchanges que publica y `read` sobre su cola
+  (**pendiente**).
 
 #### n8n
 
-- Imagen oficial, base SQLite en `n8n-data`, `N8N_ENCRYPTION_KEY` fijo (si cambia, se pierden
-  las credenciales guardadas), zona horaria `America/La_Paz`.
-- Workflows **versionados en git** en `bandadau-infra/n8n/workflows/*.json`; `make n8n-import`
-  ejecuta `n8n import:workflow --separate --input=/workflows` dentro del contenedor y
-  `make n8n-export` hace lo inverso (antes de commitear).
-- Credenciales por variables de entorno (RabbitMQ `n8n`, SMTP Mailpit, token de servicio para
-  REST interno, bot de Telegram opcional). Detalle de workflows en
+- Imagen `n8nio/n8n:2.43.5` con **SQLite** en el volumen `n8n-data` (`DB_TYPE=sqlite`), `N8N_ENCRYPTION_KEY` fijo (si cambia, se pierden las credenciales guardadas), zona horaria `America/La_Paz`,
+  purga de ejecuciones a las 168 h. Propietario gestionado por variables si hay `N8N_OWNER_PASSWORD_HASH` (si no, se crea desde la UI).
+- Entrypoint propio (`bandadau-infra/n8n/scripts/entrypoint.sh`, montado en `/import/scripts`): renderiza las credenciales desde variables (`render-credentials.mjs` + `n8n/credentials/*.json.tpl`),
+  las importa con `n8n import:credentials`, importa los workflows (`n8n import:workflow --separate`), **publica** los que traen `"active": true` (`n8n publish:workflow`) y arranca `n8n start`.
+  Verificado contra n8n 2.43.5. No existen los objetivos `make n8n-import` / `make n8n-export` del diseño original.
+- Workflows **versionados en git** en `bandadau-infra/n8n/workflows/`: `wf-00-router` … `wf-06-difusion-evento`, y los de apoyo `wf-90-service-token`, `wf-91-dedupe`, `wf-99-error-handler`. Son de la
+  **fase 2** (dependen de `insights-service`, de la cola `n8n.automation` y de los reportes generativos); en la fase 1 el contenedor arranca y es sano, pero la ejecución de punta a punta de los
+  workflows no está verificada.
+- Credenciales siempre por variables de entorno (RabbitMQ `n8n`, SMTP Mailpit, token de servicio para REST interno, bot de Telegram opcional). Detalle de workflows en
   `bandadau-docs/docs/03-arquitectura/automatizacion-n8n.md` (D10).
-- `n8n` está en la red `backend` para llamar `/internal/v1/**` con token de servicio y en `data`
-  para consumir `n8n.automation`.
+- `n8n` comparte la red `bandada` con todo: llama `/internal/v1/**` con token de servicio y consume `n8n.automation`.
 
 ### 2.9 Observabilidad local
 
-`grafana/otel-lgtm` (Grafana + Loki + Tempo + Prometheus/Mimir + colector OTel) en un solo
-contenedor. Todos los servicios exportan OTLP a `http://lgtm:4318` (HTTP) o `lgtm:4317` (gRPC).
-Dashboards versionados en `bandadau-infra/observability/dashboards/` (SAGA, colas/DLQ, latencias por
-servicio) y aprovisionados por montaje. Ver `bandadau-docs/docs/03-arquitectura/observabilidad.md`.
+**Implementado parcialmente.** El perfil `observability` levanta `grafana/otel-lgtm:0.36.0` (Grafana + Loki + Tempo + Prometheus/Mimir + colector OTel; Grafana en `:3300`, OTLP en `:4317`/`:4318`,
+`GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD` = `admin`/`admin`) con `make up-obs`, que además pone `OTEL_SDK_DISABLED=false` en los servicios. Sin ese perfil los servicios dejan
+`OTEL_SDK_DISABLED=true` (no hay colector).
 
-### 2.10 Datos de demo y pruebas de carga
+- **Pendiente**: los dashboards versionados en `bandadau-infra/observability/dashboards/` (SAGA, colas/DLQ, latencias; la carpeta `observability/` está vacía) y su aprovisionamiento por montaje.
+- Algunos servicios (identity, wallet, notification) declaran en su `.env.example` que en la fase 1 **no incluyen exportador OTLP** y solo propagan `traceparent`: las trazas completas dependen de su
+  implementación. Ver `bandadau-docs/docs/03-arquitectura/observabilidad.md`.
 
-- `make seed`: contenedor one-shot que llama a las **APIs** (nunca escribe en bases ajenas):
-  universidades, usuarios por rol, grupos, posts, eventos (gratis y pagados), recargas.
-  Credenciales de los usuarios de demo en `bandadau-infra/seed/README.md` (solo dev).
-- `make load`: `k6` con los escenarios de `bandadau-infra/load/` (lecturas de feed, creación de posts,
-  inscripción concurrente al mismo evento para verificar cupos + idempotencia). Umbrales de
-  RNF-01/02 como `thresholds` de k6.
+### 2.10 Datos de demo, humo y gateway mock
+
+- `make seed` (`node seed/seed.mjs`, Node ESM sin dependencias, **se ejecuta en el host** contra los puertos publicados; no es un contenedor): llama a las **APIs** (nunca escribe en bases ajenas):
+  universidades UMSA y UCB, los usuarios demo (`admin`, `mod`, `org`, `org2`, `lucia`, `marco`), roles por `PATCH /internal/v1/users/{id}/roles` con token de servicio (cliente `bandada-seed`, directo por `localhost:7001`),
+  créditos de Lucía, un grupo, 3 posts y 3 eventos. Idempotente. Contraseña de desarrollo `Bandada#2026`; credenciales en `bandadau-infra/README.md` (solo dev).
+- `make smoke` (`node smoke/smoke.mjs`): recorre registro → verificación (código leído de Mailpit) → login → post → recarga idempotente → inscripción pagada con ticket ES256 verificado → `ALREADY_REGISTERED`
+  → notificación → `EVENT_FULL` → **caos** (recrea `ticketing-service` con `CHAOS_TICKETING_FAIL=true`, comprueba la compensación y lo restaura) → moderador y GraphQL (+ RBAC). 26 comprobaciones; sale ≠ 0 si
+  falla alguna. Opciones: `SMOKE_CHAOS=0` o `--no-chaos`, `--only=chaos`.
+- `make mock` / `make mock-stop` / `make mock-test`: **gateway mock** (Node 24, sin Docker) en `http://localhost:4010` que imita REST `/api/v1` y GraphQL `/graphql` a partir de `bandadau-docs/contracts/`,
+  para desarrollar frontends sin backend (`bandadau-infra/mock/README.md`).
+- `make check-infra` (`scripts/check-infra.sh`): verifica el perfil `infra` levantado (salud, topología de RabbitMQ, bases, tablas, buckets, UIs y rutas de Traefik). `make validate`: `docker compose config`,
+  sintaxis de scripts y de seed/smoke.
+- `make load` (`k6`, `bandadau-infra/load/`): **pendiente** (no existe todavía).
 
 ---
 
 ## 3. Estructura de la carpeta `bandadau-infra/`
 
+Estado real (fase 1). Lo marcado *(pendiente)* no existe todavía.
+
 ```
 bandadau-infra/
 ├── AGENTS.md  CLAUDE.md  README.md
-├── .env.example                  # BASE_DOMAIN, COMPOSE_PROFILES, contraseñas dev, flags de caos
-├── Makefile                      # punto de entrada del stack: make up, infra-up, seed… (se ejecuta desde bandadau-infra/)
-├── compose/
-│   ├── compose.yaml              # include de los demás + redes + volúmenes
-│   ├── infra.yaml                # perfil infra
-│   ├── services.yaml             # perfil services (build desde bandadau-backend/services/<x>/Dockerfile)
-│   ├── apps.yaml                 # perfil apps
-│   ├── tools.yaml                # perfiles tools / bootstrap / llm
-│   ├── override.host-upstreams.yaml  # enrutar a servicios corriendo en el IDE
-│   └── prod.yaml                 # override para el EC2 (imágenes de ECR, sin bases emuladas)
+├── .env.example                  # BASE_DOMAIN, COMPOSE_PROFILES, contraseñas dev, puertos, flags de caos (CHAOS_*), variables de servicios y n8n
+├── Makefile                      # punto de entrada: make setup, up, up-infra, up-obs, seed, smoke… (se ejecuta desde bandadau-infra/)
+├── docker-compose.yaml           # un solo archivo: perfiles infra, services, observability, llm (placeholder)
 ├── traefik/
 │   ├── traefik.yml               # estático
-│   └── dynamic/                  # routers file-provider, middlewares, host upstreams
+│   └── dynamic/{routers,middlewares}.yml   # file provider; dominio por {{ env "BASE_DOMAIN" }}
 ├── postgres/init/01-create-databases.sh
-├── mongo/init/{init-replica.js,create-users.js,keyfile.sh}
-├── dynamodb/{create-tables.sh,tables/*.json}
-├── rabbitmq/{rabbitmq.conf,definitions.template.json,render-definitions.sh}
+├── mongo/init/{init.sh,init-replica.js,create-users.js}   # el keyfile lo crea el job mongo-keyfile
+├── dynamodb/{create-tables.sh,ttl.txt,tables/*.json}
+├── rabbitmq/{rabbitmq.conf,definitions.template.json,definitions.json,render-definitions.sh}
 ├── minio/init.sh
-├── n8n/                          # workflows JSON (wf-00…wf-06), plantillas, scripts y credenciales de ejemplo
-├── observability/{dashboards/,alerts/,otel-collector.yaml}
-├── seed/                         # scripts del seed (TS, llaman APIs)
-├── load/                         # k6: scripts/*.js, thresholds.js, README
-├── aws/
-│   ├── cloudformation/
-│   │   ├── network.yaml          # VPC, subredes, SG (sin NAT)
-│   │   ├── data.yaml             # RDS, DynamoDB (4 tablas), buckets S3, backups
-│   │   ├── compute.yaml          # EC2 + EIP + IAM role + user-data + CloudWatch
-│   │   ├── edge.yaml             # ACM, CloudFront (api, landing, app, admin, mfe), Route53
-│   │   ├── ci.yaml               # ECR repos, rol OIDC de GitHub Actions
-│   │   └── scheduler.yaml        # EventBridge Scheduler start/stop del EC2 y RDS
+├── n8n/                          # workflows JSON (wf-00…wf-06, 90, 91, 99), credentials/*.json.tpl, scripts/{entrypoint.sh,render-credentials.mjs}
+├── secrets/                      # PEM de desarrollo (git-ignored; los genera make keys)
+├── scripts/                      # gen-keys.sh, wait-healthy.sh, check-infra.sh, host-upstream.sh, clone-all.sh, create-github-repos.sh
+├── seed/                         # seed.mjs + lib/ (Node ESM, llaman a las APIs)
+├── smoke/smoke.mjs               # humo de la fase 1
+├── mock/                         # gateway mock (REST + GraphQL) sin Docker
+├── observability/                # (vacía) dashboards y alertas: pendiente
+├── ci/templates/                 # plantillas de GitHub Actions por repo (bandadau-<repo>.yml → <repo>/.github/workflows/ci.yml)
+├── .github/workflows/ci.yml      # CI de este repo
+├── load/                         # k6 (pendiente)
+├── aws/                          # CloudFormation y scripts de despliegue (pendiente, ver §4)
+│   ├── cloudformation/{network,data,compute,edge,ci,scheduler}.yaml
 │   ├── params/{dev,prod}.env.example
 │   └── scripts/{deploy-stack.sh,host-deploy.sh,render-env.sh,deploy-static.sh,backup-mongo.sh}
-└── ci/
-    ├── actions/                  # composite actions reutilizables (uses: <org>/bandadau-infra/ci/actions/<acción>@main)
-    │   ├── docker-build-push/    # build + push a ECR con caché GHA y Trivy
-    │   ├── ssm-deploy/           # aws ssm send-command → host-deploy.sh <svc> <tag>
-    │   └── static-deploy/        # s3 sync + cache-control + invalidación CloudFront
-    └── templates/                # plantillas de workflow por tipo de componente (se copian al .github/workflows/ de cada repo)
+└── ci/actions/                   # composite actions reutilizables: docker-build-push, ssm-deploy, static-deploy (pendiente)
 ```
 
-Los workflows reales viven en el `.github/workflows/` **de cada repositorio** (GitHub solo los lee de ahí);
-`bandadau-infra/ci/` guarda las piezas reutilizables y las plantillas.
+Los workflows reales viven en el `.github/workflows/` **de cada repositorio** (GitHub solo los lee de ahí); `bandadau-infra/ci/` guarda las plantillas y, a futuro, las piezas reutilizables.
 
 ---
 
 ## 4. AWS — demo
+
+> **Estado: diseño pendiente** (fase posterior a la 1). No existe `bandadau-infra/aws/` ni `bandadau-infra/compose/prod.yaml`; las referencias a `compose.yaml` y `prod.yaml` de esta
+> sección describen el diseño objetivo, que partirá del `docker-compose.yaml` actual. Al llevarlo a AWS hay que verificar la imagen de MongoDB (local fijada a `8.0.19`, SERVER-121912),
+> la de MinIO (solo local) y la versión de PostgreSQL disponible en RDS.
 
 ### 4.1 Diagrama de despliegue
 
@@ -573,6 +608,11 @@ on-demand (≈ USD 35 esa semana).
 
 ## 5. CI/CD (GitHub Actions)
 
+> **Estado**: hoy existe un **`ci.yml` por repositorio** (en `<repo>/.github/workflows/`, copiado de `bandadau-infra/ci/templates/bandadau-<repo>.yml`). Los jobs de `bandadau-infra` son
+> `static` (`make validate` + shellcheck), `infra` (`make up-infra` + `make check-infra`) y `stack` (manual/cron: `make setup && make up && make seed && make smoke`); `bandadau-backend`
+> separa `node`, `java` y `php`; `bandadau-docs` valida contratos. **Pendiente** (diseño de esta sección): workflows separados por servicio con *path filters* (`svc-*.yml`, `app-*.yml`),
+> construcción y *push* de imágenes a ECR, despliegue por SSM, OIDC, EAS y despliegue de estáticos/MFEs (no verificado el detalle de cada `ci.yml`).
+
 ### 5.1 Flujo general
 
 ```mermaid
@@ -680,6 +720,8 @@ son de *build*: cambiarlas exige recompilar.
 
 ## 6. Backups y recuperación
 
+> **Estado: diseño pendiente** (AWS). En local los datos viven en volúmenes con nombre y `make reset` los borra; `make seed` los repuebla.
+
 | Dato | Mecanismo | Retención | Restauración |
 |---|---|---|---|
 | RDS (identity, events, wallet) | Backups automáticos + PITR; `DeletionPolicy: Snapshot` | 7 días (prod), 1 día (dev) | Restaurar a nueva instancia y cambiar el parámetro SSM del host |
@@ -700,15 +742,31 @@ Ensayo de restauración obligatorio antes de la Delivery Review (checklist en
 
 ```bash
 cd bandadau-infra
-make infra-up            # solo infraestructura
-make up                  # infra + servicios
-make up-all              # + apps
-make logs S=events-service
+cp .env.example .env && make setup   # primera vez: herramientas, corepack/pnpm, build de bandadau-shared, llaves (secrets/), definitions de RabbitMQ
+make up                  # infra + 8 servicios (construye imágenes) y espera a que estén healthy
+make up-infra            # solo infraestructura (para correr servicios en el IDE)
+make up-obs              # + Grafana LGTM y OTLP activado en los servicios
+make seed                # datos de demo (idempotente)
+make smoke               # humo de la fase 1 (SMOKE_CHAOS=0 omite el caos)
+make logs S=events-service   # logs (sin S: todos)
 make ps                  # estado y healthchecks
-make seed                # datos de demo
-make chaos-ticketing ON=true   # CHAOS_TICKETING_FAIL para la demo de rollback (recrea ticketing)
-make rabbit-dlq          # lista mensajes en DLQs
-make reset               # borra volúmenes (pide confirmación)
-make aws-deploy ENV=prod STACK=compute   # CloudFormation
-make aws-start ENV=prod / make aws-stop ENV=prod
+make restart S=<svc>     # reinicia servicios
+make build S=<svc>       # reconstruye imágenes (sin S: todas)
+make shell-postgres      # shell en un contenedor (make shell-<servicio>)
+make host S=identity-service    # redirige un servicio a tu IDE (make unhost S=... lo revierte)
+make check-infra         # verifica el perfil infra (salud, colas, bases, tablas, buckets, rutas)
+make validate            # compose config + sintaxis de scripts + seed/smoke
+make urls                # URLs, puertos y credenciales de demo
+make keys                # llaves de desarrollo (JWT RS256, QR ES256) en secrets/
+make rabbit-defs         # regenera rabbitmq/definitions.json desde la plantilla y .env
+make down                # detiene todo (conserva volúmenes)
+make reset               # detiene todo y BORRA los volúmenes (sin confirmación)
+make mock                # gateway mock en http://localhost:4010  (make mock-stop · make mock-test)
+make clone-all OWNER=<org>   # clona los 8 repos hermanos
 ```
+
+`PROJECT=<nombre>` cambia el nombre del proyecto Compose (pruebas en paralelo sin tocar el stack principal). La demo de rollback de la SAGA (D2) se activa recreando el contenedor con
+`CHAOS_TICKETING_FAIL=true` (variable de **ticketing-service**; el humo lo hace solo) y la de timeout con `CHAOS_WALLET_DELAY_MS` (variable de **wallet-service**): no hay objetivo `make chaos-*`.
+
+**Pendiente** (diseño de AWS y pruebas de carga): `make up-all`, `make svc`, `make rabbit-dlq`, `make load`, `make models-sync`, `make aws-deploy`, `make aws-start` / `make aws-stop`,
+`make n8n-import` / `make n8n-export`, `make mfe-rollback`.
