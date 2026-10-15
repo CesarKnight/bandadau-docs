@@ -96,7 +96,7 @@ está documentado y es trazable a su caso de uso ICONIX.
 
 ## 6. Modelo ML / DL
 
-- [ ] Notebook en `bandadau-ml/notebooks/` reproducible (semilla, versión de dataset, `requirements` fijos).
+- [ ] Pipeline reproducible en `bandadau-ml/` (scripts o notebooks en `notebooks/`; semilla, versión de dataset, `requirements` fijos).
 - [ ] Export ONNX validado contra el modelo original (tolerancia documentada).
 - [ ] `model-card.md`: datos, métricas (accuracy/F1/ROC), sesgos conocidos, umbrales, versión.
 - [ ] Subido a MinIO/S3 `models/<nombre>/<versión>/model.onnx` (no en git si > 50 MB).
