@@ -27,18 +27,19 @@ indicadas aquí son orientativas.
 ```
 bandadau-ml/
 ├── AGENTS.md
-├── pyproject.toml            # ruff, pytest; deps fijadas con uv/pip-tools
-├── notebooks/
-│   ├── 01-nsfw-finetune.ipynb
-│   ├── 02-violence.ipynb
-│   ├── 03-feed-ranker.ipynb
-│   ├── 04-suggestions.ipynb
-│   └── 05-anomalies.ipynb
-├── bandada_ml/               # utilidades testeables (export, métricas, publish)
-│   ├── export_onnx.py · publish.py · metrics.py · preprocessing.py
-├── data/                     # .gitignore (solo README con cómo descargar)
-└── reports/                  # métricas y model cards (Markdown, sí van a git)
+├── Dockerfile · Makefile · requirements.txt   # pipeline reproducible en Docker (CPU)
+├── scripts/                  # train.py (descarga checkpoint) · export_onnx.py · evaluate.py · eval_recall.py · publish_model.py
+├── src/bandada_ml/           # utilidades testeables: preprocessing.py · metrics.py · neutral_images.py · nsfw.py
+├── fixtures/<modelo>/        # imágenes sintéticas/neutras + tensores de referencia para tests de paridad
+├── models/<modelo>/<v>/      # metadata.json + model-card.md (.onnx y checkpoint NO van a git)
+├── tests/                    # pytest
+├── data/                     # .gitignore (solo README con cómo obtener datos)
+└── reports/                  # reportes de evaluación (reports/eval/ ignorado por git)
 ```
+
+Los notebooks `01…05` previstos originalmente **no existen aún**: el `nsfw-classifier` se produce con los
+scripts anteriores (`make train export evaluate`); el resto de modelos (violence, feed-ranker, sugerencias, anomalías)
+están pendientes.
 
 `metadata.json` (contrato entre `bandadau-ml/` y los servicios):
 
@@ -46,17 +47,36 @@ bandadau-ml/
 {
   "name": "nsfw-classifier",
   "version": "1.0.0",
-  "createdAt": "2026-10-14T00:00:00Z",
+  "createdAt": "2026-10-15T11:01:54Z",
   "framework": "pytorch→onnx", "opset": 17,
   "input": { "name": "pixel_values", "shape": [1, 3, 224, 224], "layout": "NCHW",
-             "resize": 224, "crop": "center", "mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225] },
-  "output": { "name": "logits", "labels": ["safe", "nsfw"], "activation": "softmax", "positiveLabel": "nsfw" },
+             "resize": 224, "resizeMode": "stretch", "crop": "none",
+             "mean": [0.5, 0.5, 0.5], "std": [0.5, 0.5, 0.5], "colorOrder": "RGB", "scale": 255 },
+  "output": { "name": "logits", "labels": ["normal", "nsfw"], "activation": "softmax", "positiveLabel": "nsfw" },
   "thresholds": { "block": 0.85, "review": 0.5 },
-  "metrics": { "recall@0.5": 0.93, "precision@0.5": 0.88, "auc": 0.97 },
-  "dataset": { "name": "…", "sha256": "…", "license": "…" },
-  "sha256": "<hash de model.onnx>"
+  "artifacts": { "fp32": { "file": "model.onnx", "sha256": "…" }, "int8": { "file": "model.int8.onnx", "sha256": "…" } },
+  "source": { "hfRepo": "Falconsai/nsfw_image_detection", "revision": "<commit fijo>", "license": "apache-2.0", "note": "checkpoint preentrenado, sin reentrenar" },
+  "dataset": { "name": "…", "sha256": null, "license": "…" },
+  "metrics": { "parity": { "…": "…" }, "neutral_set": { "…": "…" }, "latency_cpu_python_ort": { "…": "…" }, "recall@0.5": null, "recall_note": "…" },
+  "sha256": "<hash de model.onnx (fp32)>"
 }
 ```
+
+Valores reales en `bandadau-ml/models/nsfw-classifier/1.0.0/metadata.json` (ejemplo abreviado: `metrics` real lleva los números medidos).
+
+| Campo | Significado |
+|---|---|
+| `input.resizeMode` | `stretch`: se redimensiona **directo** a `resize`×`resize` (no conserva aspecto, no hay recorte). `crop` es `none`. |
+| `input.colorOrder` / `scale` | Orden de canales (`RGB`) y divisor de los bytes (`255`): `x = (pixel/scale − mean)/std`. |
+| `input.mean` / `std` | Normalización del checkpoint `Falconsai/nsfw_image_detection` (`ViTImageProcessor`): **0.5 / 0.5**, no los valores ImageNet (0.485…/0.229…). |
+| `artifacts.fp32/int8` | Archivos publicados con su `sha256`; el servicio elige cuál cargar. `sha256` raíz = fp32. |
+| `source` | Procedencia del checkpoint base: repo HF, revisión fija y licencia. |
+| `metrics.recall@0.5` | `null` mientras no se mida sobre un set curado (§5.1). **No** se inventan cifras. |
+
+Consistencia entrenamiento/servicio (verificada 2026-10-15): `bandadau-ml/src/bandada_ml/preprocessing.py`
+(PIL `BILINEAR` con antialias) y `OnnxImageClassifier` de media-service (`sharp` `fit: 'fill'`, `kernel: 'linear'`) leen/aplican el mismo
+contrato; las diferencias de interpolación entre PIL y sharp son de orden sub-píxel y las cubre el test de paridad con fixtures
+(`bandadau-ml/fixtures/nsfw-classifier/`).
 
 ---
 
@@ -69,7 +89,8 @@ bandadau-ml/
 | Problema | Clasificación binaria `safe` / `nsfw` de imágenes y frames |
 | Punto de partida | Checkpoint abierto ya entrenado para NSFW (p. ej. un ViT-base o MobileNet/EfficientNet publicado en Hugging Face con licencia Apache-2.0/MIT — verificar model card y licencia). Se **re-calibra** y ajusta (fine-tune de la cabeza) en lugar de entrenar desde cero |
 | Datos | Negativos: COCO 2017 (anotaciones CC BY 4.0; imágenes con licencias Flickr variadas) + fotos propias del equipo de apuntes/aulas/eventos. Positivos: **no se descargan ni versionan datasets explícitos en el repo**; se usa el checkpoint preentrenado y un set de validación pequeño, curado y guardado fuera del repo con acceso restringido. Para la demo se usa una imagen "no apta" sintética/no explícita acordada (p. ej. una imagen marcada por el propio modelo) |
-| Arquitectura | ViT-B/16 o EfficientNet-B0 (224×224) con cabeza de 2 clases |
+| Arquitectura | **Implementado**: ViT-B/16 (`Falconsai/nsfw_image_detection`, 224×224, 2 clases `normal`/`nsfw`), sin reentrenar (M-6). Alternativa prevista: EfficientNet-B0 |
+| Preprocesado | Resize directo 224×224 bilineal (sin crop central), RGB, `x/255`, `(x−0.5)/0.5`, NCHW (ver `metadata.json`) |
 | Métrica objetivo | **Recall ≥ 0.90** en clase `nsfw` (RNF-12) al umbral 0.5; precisión ≥ 0.80; AUC ≥ 0.95 |
 | Export | `torch.onnx.export` (o `optimum` para modelos HF), opset 17, eje batch dinámico; validar con `onnxruntime` que la salida difiere < 1e-4 del modelo PyTorch |
 | Cuantización | Opcional INT8 dinámica (`onnxruntime.quantization`) si mantiene recall ≥ 0.90 |
@@ -271,8 +292,9 @@ flowchart TD
 
 - **Imágenes**: `sharp` → tensor `Float32Array` NCHW normalizado según `metadata.json`. Se eliminan
   metadatos EXIF (privacidad: GPS) antes de guardar la versión servida.
-- **Video**: `ffmpeg -i in.mp4 -vf "fps=1/2,scale=224:224:force_original_aspect_ratio=increase,crop=224:224" -frames:v 30 frame_%02d.png`
-  (comando ilustrativo; verificar flags). Se ejecuta con `child_process.spawn` y timeout de 60 s.
+- **Video**: `ffmpeg -i in.mp4 -an -sn -vf "fps=1/2,scale=480:-2" -frames:v 30 -q:v 3 frame_%03d.jpg`
+  (implementación real de `FfmpegFrameExtractor`; intervalo y máximo configurables por `VIDEO_FRAME_INTERVAL_SECONDS` / `VIDEO_MAX_FRAMES`).
+  Cada frame se redimensiona luego al tamaño del modelo con el mismo preprocesado que las imágenes (stretch 224×224, sin crop). Se ejecuta con `child_process.spawn` y timeout de 60 s.
   Directorio temporal por job, borrado en `finally`.
 - **Agregación de puntajes**:
   - Por imagen/frame: `s = max(p_nsfw, p_violence)`.
@@ -287,6 +309,17 @@ flowchart TD
 - **Carga de modelos**: al arrancar (`onModuleInit`) se descargan de S3 a `/models-cache` si el
   `sha256` local no coincide; `InferenceSession` única por modelo, reutilizada. `/health/ready` falla
   si un modelo de moderación no cargó.
+
+### 4.4.1 Estado de implementación (fase 2, 2026-10-15)
+
+| Tema | Estado |
+|---|---|
+| Moderación | `MODERATION_MODE=onnx` → `OnnxModerationAdapter` (imágenes y video con ffmpeg); solo `scores: { nsfw }`. `violence-classifier`, CLIP, OCR y `nsfw-mobile` **no implementados** (opcionales) |
+| Formatos | HEIC no se decodifica: pasa a revisión humana (`FLAGGED`). INT8 cuantiza solo MatMul (Δprob ≤ 0.023 vs fp32) |
+| Salud | `/health/ready` incluye `moderation.state` (`READY` / `DEGRADED`) |
+| Persistencia | `frameScores` y `frameIndex` se guardan en `ModerationResult`; su exposición en OpenAPI/GraphQL está pendiente (requiere contrato) |
+| Procedencia | Checkpoint de terceros afinado con dataset propietario de licencia desconocida; sin fine-tune propio (ver model card) |
+| Recall | No medido: ver §5.1 |
 
 ### 4.5 Puertos (Clean Architecture)
 
@@ -309,13 +342,39 @@ bordes exactos (0.4999, 0.5, 0.8499, 0.85).
 
 | Tema | Práctica obligatoria |
 |---|---|
-| Model card | `bandadau-ml/reports/<modelo>-<versión>.md`: datos, licencias, métricas, umbrales, limitaciones, sesgos conocidos |
+| Model card | `bandadau-ml/models/<modelo>/<versión>/model-card.md`: datos, licencias, métricas, umbrales, limitaciones, sesgos conocidos |
 | Sesgo de tono de piel / cuerpo | Evaluar tasa de falsos positivos de `nsfw-classifier` por subgrupos (fotos de playa/deporte, distintos tonos de piel) con un set balanceado propio; si la diferencia de FPR > 5 pp, documentar y subir el umbral de BLOCK solo para revisión humana |
 | Contexto académico | Imágenes médicas/anatomía de carreras de salud son falsos positivos esperados → van a `REVIEW`, nunca BLOCK automático si el score < 0.85 |
 | Humano en el bucle | Todo `FLAGGED` lo decide un moderador (UC-18); los `REJECTED` automáticos se pueden apelar vía denuncia/revisión |
 | Ranking | Evitar burbujas: diversificación por autor y 20 % de cupo para "populares en tu carrera". No usar features sensibles (género, edad) |
 | Transparencia | La app indica "Recomendado para ti" en ítems que no son de seguidos |
 | Datos de entrenamiento | No se entrenan modelos con contenido privado de usuarios sin consentimiento; los logs de interacción usados para el ranker se anonimizan (hash de IDs) |
+
+### 5.1 Evaluación de recall (M-1, RNF-12) — estado: **pendiente de un set curado**
+
+El recall ≥ 0.90 **no está medido** (`recall@0.5: null` en `metadata.json`): el repo no contiene ni descarga contenido explícito.
+Lo que sí existe es el arnés reproducible, `bandadau-ml/scripts/eval_recall.py` (métricas en `src/bandada_ml/metrics.py`, con pruebas unitarias):
+
+```bash
+cd bandadau-ml
+python scripts/eval_recall.py --dry-run                                  # tubería con imágenes sintéticas inocuas; NO mide recall real (exit 0)
+BANDADA_EVAL_DIR=/ruta/privada/eval-set python scripts/eval_recall.py    # evaluación real al umbral thresholds.review (0.5)
+#   opciones: --threshold, --model-file model.int8.onnx, --recall-target 0.90, --out-dir, --update-metadata --min-positives 200
+```
+
+| Aspecto | Detalle |
+|---|---|
+| Estructura del set | `safe/` y `nsfw/`, **fuera del repo** (el script rechaza rutas dentro de `bandadau-ml`). Cada subcarpeta es un subgrupo: `safe/skin_tones/<tono>/`, `safe/beach_sports/`, `safe/medical/`, `nsfw/<categoría>/`… |
+| Salida | `reports/eval/eval-<modelo>-<fecha>.{json,md}`: precision, recall, F1, matriz de confusión, curva PR / average precision, recall (subgrupos `nsfw/*`) y FPR (subgrupos `safe/*`) |
+| Criterio | exit 0 si recall ≥ 0.90; **exit 1** si recall < 0.90; exit 2 si no es medible (sin positivos, set dentro del repo, falta ruta). El `--dry-run` nunca falla por recall |
+| Metadata | `--update-metadata` escribe `metrics."recall@0.5"` solo en evaluación real y con ≥ `--min-positives`; si no se usa, el campo sigue en `null` |
+| Sesgos | Por §5: diferencia de FPR entre subgrupos `safe/skin_tones/*` > 5 pp se documenta en el model card |
+
+Conjuntos candidatos (**no descargados**; verificar licencia y términos en la fuente antes de usar, y guardarlos fuera del repo con acceso restringido):
+negativos de contexto y subgrupos — COCO 2017 (anotaciones CC BY 4.0, imágenes con licencias Flickr variadas) y Open Images V7 (anotaciones CC BY 4.0, imágenes CC BY 2.0);
+tonos de piel — Monk Skin Tone Examples / Casual Conversations (verificar términos, algunos exigen solicitud). Para positivos no hay un dataset NSFW con licencia
+abierta clara y redistribuible: debe curarlo el equipo (p. ej. contenido adulto propio/consentido o un conjunto académico bajo acuerdo de uso), o delegarse a una
+revisión humana de una muestra de producción (`FLAGGED` → UC-18) anonimizada. **Hasta que exista ese set, RNF-12 se declara "no verificado"**, no "cumplido".
 
 ---
 
@@ -325,14 +384,14 @@ bordes exactos (0.4999, 0.5, 0.8499, 0.85).
 flowchart LR
     NB["Notebook<br/>entrena + evalúa"] --> EX["export ONNX/JSON<br/>+ metadata.json"]
     EX --> VT["validate: ORT vs framework<br/>pytest bandada_ml"]
-    VT --> PB["publish.py<br/>s3://…/models/name/version/"]
+    VT --> PB["publish_model.py<br/>s3://…/models/name/version/"]
     PB --> CFG["PR: subir NAME_MODEL_VERSION<br/>en bandadau-infra/.env.example y despliegue"]
     CFG --> SVC["Servicio carga versión<br/>y reporta modelVersion"]
 ```
 
 - **Versionado**: SemVer. Mayor = cambia la forma de entrada/salida (requiere cambio de código);
   menor = reentrenamiento compatible; parche = recalibración de umbral interno/cuantización.
-- **Promoción**: nunca se sobreescribe una versión publicada (`publish.py` falla si existe).
+- **Promoción**: nunca se sobreescribe una versión publicada (`publish_model.py` falla si existe).
 - **Rollback**: bajar `NAME_MODEL_VERSION` y reiniciar el servicio.
 - **Monitoreo**: métricas OTel `media_moderation_decisions_total{decision,model_version}`,
   `media_inference_duration_seconds`, `feed_ranker_fallback_total`. El `MonitoringAgent` alerta si
