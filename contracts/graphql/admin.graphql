@@ -1,6 +1,6 @@
 # =============================================================================
 # Bandada U — GraphQL del panel de administración (admin-gateway)
-# Versión: 1.1.0 (2026-10-14) — schema-first según D11, D13, D14 y D15 (ADR-0016).
+# Versión: 1.2.0 (2026-10-15) — schema-first según D11, D13, D14 y D15 (ADR-0016).
 # Servido por admin-gateway (NestJS 11 + Apollo Server 5) en /graphql
 # (HTTP + WebSocket `graphql-ws` para suscripciones).
 #
@@ -15,8 +15,25 @@
 #   del payload; los de autenticación/autorización como errores GraphQL con
 #   `extensions.code` = UNAUTHENTICATED | FORBIDDEN.
 # - Textos (`message` de UserError) localizados según `Accept-Language` (D14).
+# - WebSocket (`graphql-ws`, mismo endpoint /graphql): el gateway toma el token de `connectionParams.Authorization`
+#   (`"Bearer <jwt>"`, también `authorization`) o, si falta, de la cabecera `Authorization` de la petición de upgrade.
+#   Los clientes envían además `{ accessToken, locale }` (forma antigua del diseño): el gateway la tolera pero **no** la usa
+#   (el MFE de moderación manda ambas formas). Las suscripciones no usan caché de DataLoader.
+#
+# Códigos de negocio en `UserError.code` (los del Problem Details de origen, ver OpenAPI): `NOT_FOUND`, `VALIDATION_FAILED`,
+# `LAST_ADMIN`, `INVALID_STATUS_TRANSITION`, `UNIVERSITY_DOMAIN_TAKEN`, `CONCURRENT_MODIFICATION`, `SAGA_NOT_RETRYABLE`,
+# `MEDIA_NOT_FLAGGED` (el medio ya no está en `FLAGGED`: otro moderador lo resolvió), `ALREADY_MODERATED` (alias de
+# `MEDIA_NOT_FLAGGED` que el panel también reconoce), `CONFLICT` (conflicto genérico de estado),
+# `CANNOT_DEMOTE_SELF`, `CANNOT_SUSPEND_SELF`, `ROLES_REQUIRED` (salvaguardas del panel sobre uno mismo). Errores de
+# autenticación/autorización y de infraestructura se devuelven como errores GraphQL con `extensions.code`:
+# `UNAUTHENTICATED`, `FORBIDDEN`, `FEATURE_DISABLED` (campos de la fase 2), `SERVICE_UNAVAILABLE`, `DOWNSTREAM_ERROR`,
+# `QUERY_TOO_DEEP`, `QUERY_TOO_COMPLEX`, `GRAPHQL_VALIDATION_FAILED`, `INTERNAL_SERVER_ERROR`.
 #
 # Changelog
+# - 1.2.0 (2026-10-15): consolidación fase 1 — mutación `updateUniversity` (`UpdateUniversityInput`/`Payload`);
+#   `ModerationQueueFilter` documenta los filtros reales (`source`, `kind`, `minScore`: tipo y motivo se filtran en el
+#   cliente); `User.displayName` opcional documentado; autenticación del WebSocket (`Authorization` o
+#   `{ accessToken, locale }`); códigos de negocio documentados (`ALREADY_MODERATED`, `MEDIA_NOT_FLAGGED`, `CONFLICT`, ...).
 # - 1.1.0: ADR-0016/D15 — mutaciones `retrySaga` y `createMcpToken`/`revokeMcpToken`
 #   (solo ADMIN); enums alineados con el modelo de dominio (`GeneratedReportStatus.READY`,
 #   `AlertKind.MODERATION_ESCALATION`, `AgentKind.EXTERNAL_MCP`, `RegistrationFailureReason`,
@@ -382,7 +399,7 @@ input DateRangeInput {
 
 """Error de negocio devuelto por una mutación."""
 type UserError {
-  "Código estable (mismo `code` que los Problem Details REST)."
+  "Código estable (mismo `code` que los Problem Details REST; ver la lista en la cabecera de este archivo, p. ej. `ALREADY_MODERATED`, `MEDIA_NOT_FLAGGED`, `CONFLICT`)."
   code: String!
   "Mensaje localizado según Accept-Language."
   message: String!
@@ -417,7 +434,7 @@ type User {
   theme: ThemePreference!
   emailVerifiedAt: DateTime
   university: University
-  "Nombre visible (perfil social)."
+  "Nombre visible (perfil social). Nulo si el usuario aún no tiene perfil o el servicio social no responde (degradación parcial)."
   displayName: String
   career: String
   semester: Int
@@ -555,7 +572,10 @@ type ModerationItemConnection {
   totalCount: Int!
 }
 
-"""Filtro de la cola de moderación."""
+"""
+Filtro de la cola de moderación. Solo estos tres filtros se aplican en el servidor; el filtrado por tipo de contenido
+(imagen/video/publicación) o por motivo de denuncia se hace en el cliente sobre los elementos recibidos.
+"""
 input ModerationQueueFilter {
   source: ModerationSource
   kind: MediaKind
@@ -854,6 +874,21 @@ type CreateUniversityPayload {
   errors: [UserError!]!
 }
 
+"""Cambios parciales de una universidad: solo se modifican los campos presentes (al menos uno)."""
+input UpdateUniversityInput {
+  id: UUID!
+  name: String
+  "Reemplaza la lista completa de dominios permitidos (no puede quedar vacía)."
+  allowedDomains: [String!]
+  "Deshabilitar impide nuevos registros; no afecta a los usuarios existentes."
+  enabled: Boolean
+}
+
+type UpdateUniversityPayload {
+  university: University
+  errors: [UserError!]!
+}
+
 type ModerateMediaPayload {
   media: MediaAsset
   errors: [UserError!]!
@@ -1029,6 +1064,9 @@ type Mutation {
 
   """Habilita una universidad nueva."""
   createUniversity(input: CreateUniversityInput!): CreateUniversityPayload! @auth(requires: [ADMIN])
+
+  """Modifica nombre, dominios permitidos o habilitación de una universidad (identity `updateUniversity`). Error de negocio: `UNIVERSITY_DOMAIN_TAKEN`."""
+  updateUniversity(input: UpdateUniversityInput!): UpdateUniversityPayload! @auth(requires: [ADMIN])
 
   """Aprueba o rechaza un medio marcado."""
   moderateMedia(id: UUID!, decision: MediaReviewDecision!, note: String): ModerateMediaPayload!

@@ -54,7 +54,7 @@
 - **14a. El usuario suspendido tiene un access token vigente:** sigue siendo válido hasta su expiración (≤ 15 min, RF-03). Al intentar renovarlo, `refreshToken` falla con `401 ACCOUNT_SUSPENDED` y la app cierra sesión. Es una ventana residual aceptada y documentada.
 - **14b. El usuario suspendido intenta iniciar sesión:** `login` responde `403 ACCOUNT_SUSPENDED` con texto localizado según `Accept-Language`.
 - **17. Reactivar:** el Administrador pulsa "Reactivar"; `reactivateUser(userId)` → `PATCH /internal/v1/users/{userId}/status` `{ status: ACTIVE }`; el usuario vuelve a poder iniciar sesión (sus tokens revocados **no** se restauran).
-- **18. Gestionar universidades** (resto de RF-25): desde "Universidades" el Administrador ejecuta `createUniversity` / actualiza dominios permitidos; el gateway llama a `POST/PATCH /internal/v1/universities` (`createUniversity`, `updateUniversity`). Un dominio duplicado entre universidades devuelve `409 DOMAIN_ALREADY_ASSIGNED`.
+- **18. Gestionar universidades** (resto de RF-25): desde "Universidades" el Administrador ejecuta `createUniversity` / actualiza dominios permitidos; el gateway llama a `POST/PATCH /internal/v1/universities` (`createUniversity`, `updateUniversity`). Un dominio duplicado entre universidades devuelve `409 UNIVERSITY_DOMAIN_TAKEN`.
 
 **Postcondiciones**
 
@@ -234,7 +234,7 @@ sequenceDiagram
 | Tipo | Identificador |
 |---|---|
 | REST interno | `searchUsers` (`GET /internal/v1/users`), `updateUserRoles` (`PATCH /internal/v1/users/{userId}/roles`), `updateUserStatus` (`PATCH /internal/v1/users/{userId}/status`), `createUniversity`, `updateUniversity` |
-| GraphQL | `Query.users(filter, after, first)`, `Query.user(id)`, `Query.universities`, `Mutation.updateUserRoles`, `Mutation.suspendUser`, `Mutation.reactivateUser`, `Mutation.createUniversity`; `User.locale`, `User.theme` |
+| GraphQL | `Query.users(filter, after, first)`, `Query.user(id)`, `Query.universities`, `Mutation.updateUserRoles`, `Mutation.suspendUser`, `Mutation.reactivateUser`, `Mutation.createUniversity`, `Mutation.updateUniversity`; `User.locale`, `User.theme` |
 | Eventos | `bandada.identity.user.role-changed.v1`, `bandada.identity.user.suspended.v1` |
 
 Fragmento esperado en `bandadau-docs/contracts/graphql/admin.graphql`:
@@ -334,5 +334,5 @@ Escenario: Reactivar
 - PROPUESTA: agregar a decisiones-clave.md las rutas exactas `PATCH /internal/v1/users/{userId}/roles` y `PATCH /internal/v1/users/{userId}/status` (D1 solo dice "PATCH roles/status").
 - PROPUESTA: agregar a decisiones-clave.md la cabecera interna `X-Actor-User-Id` (el `admin-gateway` la envía junto al token de servicio para auditar quién hizo el cambio) y la tabla `user_audit_log` en `identity_db`.
 - PROPUESTA: agregar a decisiones-clave.md el evento `bandada.identity.user.reactivated.v1` (D12 no tiene evento de reactivación; sin él, `social-service` no puede volver a mostrar el perfil).
-- PROPUESTA: agregar los códigos de error `CANNOT_DEMOTE_SELF`, `LAST_ADMIN`, `ROLES_REQUIRED`, `CANNOT_SUSPEND_SELF`, `ACCOUNT_SUSPENDED`, `DOMAIN_ALREADY_ASSIGNED` al catálogo de códigos de Problem Details y a `@bandada/i18n`.
+- PROPUESTA: agregar los códigos de error `CANNOT_DEMOTE_SELF`, `LAST_ADMIN`, `ROLES_REQUIRED`, `CANNOT_SUSPEND_SELF`, `ACCOUNT_SUSPENDED`, `UNIVERSITY_DOMAIN_TAKEN` al catálogo (el código real es `UNIVERSITY_DOMAIN_TAKEN`, no `DOMAIN_ALREADY_ASSIGNED`; `CANNOT_DEMOTE_SELF`, `CANNOT_SUSPEND_SELF` y `ROLES_REQUIRED` los espera el panel pero aún no los emite el backend: ver `deuda-tecnica.md`) al catálogo de códigos de Problem Details y a `@bandada/i18n`.
 - PROPUESTA: decidir en la CDR si `suspendUser` admite `MODERATOR` (UC-18 "suspender autor") o si UC-18 debe escalar a un `ADMIN`.

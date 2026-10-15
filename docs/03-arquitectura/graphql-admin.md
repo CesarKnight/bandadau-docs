@@ -203,12 +203,13 @@ Cada instancia del gateway declara una cola **exclusiva, auto-delete, no durable
 - El payload del evento es mínimo: el resolver de la subscription completa datos
   con los data sources (p. ej. `Alert` completo desde insights).
 
-> Esta cola no figura en el catálogo §5 → **PROPUESTA** de ADR para agregarla.
+> La cola exclusiva `admin-gateway.subscriptions.<instanceId>` está en el catálogo §5 desde ADR-0016 (auto-delete, solo para alimentar suscripciones).
 
 ### 6.2 Autenticación del WebSocket
 
-- Cliente: `connectionParams: async () => ({ accessToken: await getToken(), locale })`.
-- `onConnect` valida el JWT (aud `bandada-admin`); inválido → cierre `4401 Unauthorized`.
+- Implementado: el gateway lee el token de `connectionParams.Authorization` (`Bearer <jwt>`, también `authorization`) o, si falta, de la cabecera `Authorization` del upgrade. Los clientes mandan también `{ accessToken, locale }` (forma original del diseño): se tolera pero el gateway no la usa.
+- El JWT se valida con `aud=bandada-admin` y rol; inválido → error `UNAUTHENTICATED`/`FORBIDDEN`.
+- Cliente (referencia): `connectionParams: () => ({ Authorization: `Bearer ${getToken()}`, locale })`.
 - Al expirar el token, el servidor cierra con `4401` en el siguiente evento/ping; el
   cliente reconecta y `connectionParams` (función) entrega el token nuevo.
 - El dominio WebSocket pasa por Traefik (`/graphql`, upgrade automático).
