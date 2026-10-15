@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — wallet-service
-  version: 1.0.1
+  version: 1.1.0
   summary: Billetera de créditos (saldo, movimientos, recargas y pasarela simulada).
   description: |
     API del bounded context **Billetera** (`wallet-service`, PHP 8.4 + Laravel 12,
@@ -18,7 +18,15 @@ info:
       `Accept-Language` (`es` por defecto) y respuesta con `Content-Language` (D14).
     - Rutas `/internal/v1/**` (tag `internal`) solo en red interna; el gateway las bloquea (403).
 
+    ## Decisiones de implementación (fase 1)
+    - El simulador de pasarela se habilita con `PAYMENT_SIMULATOR_ENABLED=true` (reemplaza `PAYMENT_GATEWAY=simulated`); con `false` `simulateTopUpPayment` responde `404`.
+    - Anti-replay del webhook: el cuerpo incluye `occurredAt` y se rechaza con `401` `WEBHOOK_EXPIRED` si difiere del reloj más de la variable PAYMENT_WEBHOOK_TOLERANCE_SECONDS (300 s).
+    - Un `topUpId` desconocido en el webhook responde `404` `TOPUP_NOT_FOUND` (no `200`).
+    - Las respuestas de la SAGA a `debit-credits`/`refund-credits` incluyen `idempotencyKey` (eco del comando).
+
     ## Changelog
+    - 1.1.0 (2026-10-15): consolidación fase 1 — `PAYMENT_SIMULATOR_ENABLED`, cabecera `X-Signature` + `occurredAt` en el cuerpo (`WEBHOOK_EXPIRED` 401), `TOPUP_NOT_FOUND` 404,
+      `INVALID_SIGNATURE`, `AMOUNT_MISMATCH` 422, `GATEWAY_REF_CONFLICT`/`TOPUP_NOT_PENDING`/`TOPUP_EXPIRED` 409, `INVALID_TOPUP_PACKAGE` y `INVALID_RANGE` 400.
     - 1.0.1 (2026-10-14): `getTopUp` deja de ser propuesta (D15, ADR-0016); paquetes `CREDITS_20/50/100` y
       cabecera `X-Signature` confirmados por ADR-0016.
     - 1.0.0 (2026-10-14): versión inicial contract-first (D1, D3, D14).
@@ -144,7 +152,7 @@ paths:
         Crea un `TopUp` en estado `PENDING` para uno de los paquetes (20/50/100 créditos) y
         devuelve la URL de checkout de la pasarela simulada (UC-15, RF-19).
         **Idempotente** con `Idempotency-Key` (D3): misma clave y mismo cuerpo → misma respuesta
-        con `Idempotent-Replayed: true`.
+        con `Idempotent-Replayed: true`. Paquete inexistente → `400` `INVALID_TOPUP_PACKAGE`.
       parameters:
         - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
         - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
@@ -248,8 +256,8 @@ paths:
       operationId: simulateTopUpPayment
       summary: '[SOLO DEV/DEMO] Simular el pago de una recarga'
       description: |
-        **Solo disponible en desarrollo/demo** (`PAYMENT_GATEWAY=simulated`); en producción
-        responde `404`. Simula la pasarela: genera un `gatewayRef`, firma un callback con HMAC y lo
+        **Solo disponible en desarrollo/demo** (`PAYMENT_SIMULATOR_ENABLED=true`); en producción
+        responde `404`. Si la recarga ya no está pendiente responde `409` `TOPUP_NOT_PENDING` (o `409` `TOPUP_EXPIRED` si venció). Simula la pasarela: genera un `gatewayRef`, firma un callback con HMAC y lo
         procesa por el mismo caso de uso que `paymentWebhook` (acreditación idempotente por
         `gatewayRef`). La página de checkout simulada de la app llama a este endpoint.
         Solo el dueño de la recarga puede invocarlo.
@@ -304,6 +312,10 @@ paths:
         pago ya fue procesado se responde `200` con `duplicate: true` sin volver a acreditar.
         Al pasar a `PAID` se crea un `LedgerEntry TOPUP` (`operationRef = TOPUP:<topUpId>`) y se
         publica `bandada.wallet.topup.paid.v1` (outbox).
+
+        Anti-replay: el cuerpo incluye `occurredAt`; si difiere del reloj del servidor más de la variable PAYMENT_WEBHOOK_TOLERANCE_SECONDS (300 s) → `401` `WEBHOOK_EXPIRED`.
+        Firma ausente o inválida → `401` `INVALID_SIGNATURE`. `topUpId` desconocido → `404` `TOPUP_NOT_FOUND`. `amountMinor`/`currency` que no coinciden con la recarga →
+        `422` `AMOUNT_MISMATCH`. Un `gatewayRef` ya asociado a otra recarga → `409` `GATEWAY_REF_CONFLICT`; recarga ya cerrada con otro estado → `409` `TOPUP_NOT_PENDING`.
       security: []
       parameters:
         - name: X-Signature
@@ -352,7 +364,7 @@ paths:
         '400':
           $ref: './shared/components.yaml#/components/responses/BadRequest'
         '401':
-          description: Firma ausente o inválida.
+          description: Firma ausente o inválida (`INVALID_SIGNATURE`) o callback fuera de la ventana anti-replay (`WEBHOOK_EXPIRED`).
           content:
             application/problem+json:
               schema:
@@ -378,7 +390,7 @@ paths:
       description: |
         Agregados de recargas, débitos y reembolsos por día en un rango. Lo consumen
         `admin-gateway` (`walletStats`) e `insights-service` (herramienta MCP `get_credit_stats`).
-        Datos agregados, sin información personal.
+        Datos agregados, sin información personal. Rango inválido (`from` > `to` o excesivo) → `400` `INVALID_RANGE`.
       servers:
         - url: http://wallet-service:7005
           description: Red interna (Docker/VPC)
@@ -635,7 +647,7 @@ components:
         amountMinor:
           type: integer
           format: int64
-          description: Debe coincidir con el precio del paquete; si no, `422 AMOUNT_MISMATCH`.
+          description: Debe coincidir con el precio del paquete; si no, `422` `AMOUNT_MISMATCH`.
         currency:
           type: string
         occurredAt:

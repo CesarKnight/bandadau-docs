@@ -24,7 +24,7 @@ info:
     - Los 404 usan siempre `NOT_FOUND` (no existe `POST_NOT_FOUND`); el recurso se indica en la extensión `resource`.
     - **Avatar con revisión**: `updateMyProfile` con `avatarMediaId` de un medio aún `PENDING_UPLOAD`/`PROCESSING` responde `200` y conserva el avatar anterior;
       el medio queda como avatar *pendiente* (campo interno `pendingAvatarMediaId`, **no se expone** en `Profile`) y se promueve a `avatarMediaId`
-      al llegar `bandada.media.asset.approved.v1` del mismo dueño (si ya estaba `APPROVED`, se promueve al instante). `FLAGGED`/`REJECTED` → `422 MEDIA_NOT_APPROVED`.
+      al llegar `bandada.media.asset.approved.v1` del mismo dueño (si ya estaba `APPROVED`, se promueve al instante). `FLAGGED`/`REJECTED` → `422` `MEDIA_NOT_APPROVED`.
       Un campo público `avatarStatus` (`PENDING|APPROVED|REJECTED`) queda como mejora futura (ver `deuda-tecnica.md`).
     - **Suspensión del autor**: al suspenderse un usuario (`bandada.identity.user.suspended.v1`) sus posts y comentarios pasan a `HIDDEN` con
       `hiddenReason = AUTHOR_SUSPENDED`; al reactivarse se restauran. En `/internal/v1` este motivo se presenta como `MODERATOR`.
@@ -101,7 +101,7 @@ paths:
       description: |
         Actualiza los campos presentes del perfil (UC-04, RF-05): nombre visible, avatar,
         carrera, semestre, bio (≤ 280) e intereses (≤ 10). La universidad es de solo lectura.
-        `avatarMediaId` debe ser un medio `IMAGE` propio: si está `APPROVED` se aplica al instante; si aún se procesa queda pendiente y el avatar anterior se conserva hasta su aprobación; `FLAGGED`/`REJECTED` → `422 MEDIA_NOT_APPROVED`; `null` lo quita.
+        `avatarMediaId` debe ser un medio `IMAGE` propio: si está `APPROVED` se aplica al instante; si aún se procesa queda pendiente y el avatar anterior se conserva hasta su aprobación; `FLAGGED`/`REJECTED` → `422` `MEDIA_NOT_APPROVED`; `null` lo quita.
         Idempotente por naturaleza.
       requestBody:
         required: true

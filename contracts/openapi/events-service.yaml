@@ -11,7 +11,7 @@ info:
     - `registerToEvent` responde **202** con la inscripción `PENDING`: el resultado final
       (`CONFIRMED` / `FAILED`) se obtiene haciendo *polling* a `GET /registrations/{registrationId}`
       (o por notificación push). Los errores síncronos posibles son solo los del paso 1
-      (`409 EVENT_FULL`, `409 ALREADY_REGISTERED`); los asíncronos quedan en `failureReason`
+      (`409` `EVENT_FULL`, `409` `ALREADY_REGISTERED`); los asíncronos quedan en `failureReason`
       (`INSUFFICIENT_FUNDS`, `WALLET_NOT_FOUND`, `TICKET_ISSUE_FAILED`, `TIMEOUT`, `SAGA_ABORTED`).
     - Una sola inscripción `PENDING`/`CONFIRMED` por (`eventId`, `userId`) aun ante reintentos
       o doble clic (índice único parcial + `Idempotency-Key`; RF-16, D3).
@@ -27,7 +27,7 @@ info:
     ## Decisiones de implementación (fase 1)
     - Los reenvíos de comandos de la SAGA se hacen a 5/10/20 s dentro de la ventana de 30 s de cada paso; las compensaciones se reintentan sin límite
       (backoff 5 s ×2, tope 60 s) con alerta a los 2 min.
-    - El contrato de `createEvent` no exigía fin: si no se envía `endsAt`, se usa `startsAt + EVENT_DEFAULT_DURATION` (2 h por defecto).
+    - El contrato de `createEvent` no exigía fin: si no se envía `endsAt`, se usa `startsAt` + EVENT_DEFAULT_DURATION (2 h por defecto).
 
     ## Changelog
     - 1.2.0 (2026-10-15): consolidación fase 1 — `endsAt` opcional en `createEvent` (por defecto `startsAt` + 2 h) y en `Event`;
@@ -65,9 +65,10 @@ paths:
       description: |
         Crea un evento en estado `DRAFT` (UC-11, RF-14). Requiere rol `ORGANIZER`.
         `priceCredits = 0` significa evento gratuito (la SAGA salta el débito).
-        `coverMediaId` debe ser una imagen propia `APPROVED` en `media-service` (`422 MEDIA_NOT_APPROVED`;
-        si `media-service` no responde, `503 MEDIA_UNAVAILABLE`).
-        Fin del evento: `endsAt` opcional; si falta, `startsAt` + 2 h (`EVENT_DEFAULT_DURATION`). Debe ser posterior a `startsAt`.
+        `coverMediaId` debe ser una imagen propia `APPROVED` en `media-service` (`422` `MEDIA_NOT_APPROVED`;
+        si `media-service` no responde, `503` `MEDIA_UNAVAILABLE`).
+
+        Fin del evento: `endsAt` opcional; si falta, `startsAt` + 2 h (variable EVENT_DEFAULT_DURATION). Debe ser posterior a `startsAt`.
       parameters:
         - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
       requestBody:
@@ -278,7 +279,7 @@ paths:
       description: |
         El organizador publica su evento `DRAFT` → `PUBLISHED` (UC-11). Publica
         `bandada.events.event.published.v1`. Idempotente por naturaleza: publicar un evento ya
-        `PUBLISHED` responde `200` sin cambios. Si quien llama no es el organizador del evento responde `403 NOT_EVENT_ORGANIZER`.
+        `PUBLISHED` responde `200` sin cambios. Si quien llama no es el organizador del evento responde `403` `NOT_EVENT_ORGANIZER`.
       responses:
         '200':
           description: Evento publicado.
@@ -332,7 +333,7 @@ paths:
         `bandada.events.event.cancelled.v1` (D12). El organizador (o un
         `ADMIN`) cancela un evento `DRAFT`/`PUBLISHED`; se inicia una SAGA `CANCELLATION` por cada
         inscripción `CONFIRMED` (sin la restricción de 24 h) y se responde **202**. Quien no es el organizador ni `ADMIN`
-        recibe `403 NOT_EVENT_ORGANIZER`.
+        recibe `403` `NOT_EVENT_ORGANIZER`.
       parameters:
         - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
       requestBody:
@@ -409,7 +410,7 @@ paths:
         Responde **202** con la inscripción `PENDING` y `Location` para hacer *polling* con
         `getRegistration` (sugerido cada `Retry-After` segundos).
         Si ya existe una inscripción `PENDING`/`CONFIRMED` del usuario para el evento con otra
-        `Idempotency-Key` → `409 ALREADY_REGISTERED`.
+        `Idempotency-Key` → `409` `ALREADY_REGISTERED`.
       parameters:
         - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
       responses:
@@ -635,9 +636,10 @@ paths:
       description: |
         Inicia la SAGA inversa `CANCELLATION` (UC-13, RF-17): anular ticket → reembolsar
         créditos → liberar cupo → `bandada.events.registration.cancelled.v1`. Solo para
-        inscripciones `CONFIRMED` y hasta 24 h antes del inicio del evento (`422 CANCELLATION_WINDOW_CLOSED` si ya pasó la ventana;
-        `409 INVALID_REGISTRATION_STATUS` si no está `CONFIRMED`). Responde **202** con
-        la inscripción `CANCELLATION_PENDING`; consultar el resultado con `getRegistration`.
+        inscripciones `CONFIRMED` y hasta 24 h antes del inicio del evento (`422` `CANCELLATION_WINDOW_CLOSED` si ya pasó la ventana;
+        `409` `INVALID_REGISTRATION_STATUS` si no está `CONFIRMED`).
+
+        Responde **202** con la inscripción en estado `CANCELLATION_PENDING`; consultar el resultado con `getRegistration`.
       parameters:
         - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
       responses:
@@ -1347,7 +1349,7 @@ components:
         endsAt:
           type: string
           format: date-time
-          description: Fin del evento (opcional, posterior a `startsAt`). Por defecto `startsAt` + 2 h (`EVENT_DEFAULT_DURATION`).
+          description: Fin del evento (opcional, posterior a `startsAt`). Por defecto `startsAt` + 2 h (variable EVENT_DEFAULT_DURATION).
         venue:
           type: string
           minLength: 3

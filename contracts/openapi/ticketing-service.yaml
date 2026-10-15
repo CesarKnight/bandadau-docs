@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — ticketing-service
-  version: 1.1.0
+  version: 1.2.0
   summary: Entradas (tickets) con QR firmado y validación en puerta.
   description: |
     API del bounded context **Entradas** (`ticketing-service`, TypeScript + NestJS 11,
@@ -19,7 +19,16 @@ info:
       lleva estado: la unicidad la garantiza la escritura condicional en DynamoDB.
     - Errores RFC 9457 con `code` estable; `title`/`detail` según `Accept-Language` (D14).
 
+    ## Decisiones de implementación (fase 1)
+    - El comando `issue-ticket` ahora trae `organizerId`, `staffUserIds` y `eventEndsAt`; ticketing los copia al ticket para autorizar la validación.
+      Si un comando antiguo no los trae, cualquier `ORGANIZER` puede validar salvo que `STRICT_ORGANIZER_CHECK=true`.
+    - Ventana de validación: desde `startsAt − 2 h` hasta el fin del evento (`eventEndsAt`; si falta, `startsAt + 12 h`). Fuera de ella → `422` `VALIDATION_WINDOW_CLOSED`.
+    - Orden de comprobación de `validateTicket`: firma (`422`) → evento (`422`) → ticket inexistente (`404` `TICKET_NOT_FOUND`) → organizador (`403` `NOT_EVENT_ORGANIZER`) → estado (`409`) → ventana (`422`).
+    - Un `ConcurrentTransitionError` en el consumidor se reintenta por la cola de espera de 5 s.
+    - `CHAOS_TICKETING_FAIL=true` (solo demo/pruebas) hace fallar toda emisión con `ticket-issue-failed` (`CHAOS_INJECTED`).
+
     ## Changelog
+    - 1.2.0 (2026-10-15): consolidación fase 1 — `VALIDATION_WINDOW_CLOSED` (422), `TICKET_NOT_FOUND` (404) y orden de errores de `validateTicket`; ventana de validación; `organizerId`/`staffUserIds`/`eventEndsAt` del comando `issue-ticket`.
     - 1.1.0 (2026-10-14): `getTicketSigningKeys` (JWKS ES256 del QR; D15, ADR-0016); claims del QR
       alineados con UC-14 (`tid`, `eid`, `rid`, `sub`, `iat`); URI de `type` de Problem corregida.
     - 1.0.0 (2026-10-14): versión inicial contract-first (D1, D3, D14).
@@ -193,6 +202,8 @@ paths:
         - `409` `TICKET_ALREADY_USED` (incluye `usedAt`) o `TICKET_VOIDED`.
         - `422` `INVALID_QR_SIGNATURE` / `TICKET_EVENT_MISMATCH` (si se envía `eventId` y no coincide).
         - `403` `NOT_EVENT_ORGANIZER`.
+        - `404` `TICKET_NOT_FOUND` (la firma es válida pero el ticket no existe).
+        - `422` `VALIDATION_WINDOW_CLOSED` (fuera de la ventana `startsAt − 2 h … fin del evento`).
 
         **Idempotente** con `Idempotency-Key` (D3): reintentar la misma validación devuelve la
         respuesta original (`Idempotent-Replayed: true`) en lugar de `409`.

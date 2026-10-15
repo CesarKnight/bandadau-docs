@@ -28,7 +28,7 @@ info:
       Los ejemplos de este contrato usan 900; los clientes deben leer `expiresIn` de la respuesta, no asumirlo.
     - Modo de moderación `MODERATION_MODE`: `allow-all` (por defecto en local; todo medio completado pasa a `APPROVED`), `manual` (todo pasa a `FLAGGED`
       para revisión humana) y, en la fase 2, el modelo ONNX. Los *magic bytes* del objeto no se verifican aún (solo `Content-Type` y tamaño).
-    - `decideMedia` solo actúa sobre medios `FLAGGED` (`409 MEDIA_NOT_FLAGGED` en otro caso); repetir la misma decisión responde `200` sin cambios ni evento.
+    - `decideMedia` solo actúa sobre medios `FLAGGED` (`409` `MEDIA_NOT_FLAGGED` en otro caso); repetir la misma decisión responde `200` sin cambios ni evento.
 
     ## Changelog
     - 1.2.0 (2026-10-15): consolidación fase 1 — `expiresIn` configurable (`UPLOAD_URL_TTL_SECONDS`), modos de moderación y `MEDIA_NOT_FLAGGED` documentados.
@@ -650,7 +650,7 @@ components:
           allOf:
             - $ref: '#/components/schemas/MediaPurpose'
           default: POST
-          description: Uso del medio. `AVATAR` y `EVENT_COVER` solo admiten `IMAGE` (si no, `422 UNSUPPORTED_MEDIA_TYPE`).
+          description: Uso del medio. `AVATAR` y `EVENT_COVER` solo admiten `IMAGE` (si no, `422` `UNSUPPORTED_MEDIA_TYPE`).
         mimeType:
           type: string
           enum: [image/jpeg, image/png, image/webp, image/heic, video/mp4, video/quicktime]

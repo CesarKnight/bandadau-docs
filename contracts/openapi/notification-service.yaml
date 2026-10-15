@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — notification-service
-  version: 1.1.0
+  version: 1.2.0
   summary: Notificaciones in-app, push y email; dispositivos y preferencias.
   description: |
     API del bounded context **Notificaciones** (`notification-service`, PHP 8.4 + Laravel 12,
@@ -18,7 +18,17 @@ info:
     - Las notificaciones in-app expiran a los 90 días (TTL DynamoDB).
     - Errores RFC 9457 con `code` estable.
 
+    ## Decisiones de implementación (fase 1)
+    - Título y cuerpo se renderizan con el `locale` guardado del destinatario, no con `Accept-Language`.
+    - `data.deepLink` es una URL web basada en `APP_DEEP_LINK_BASE` (`http://app.bandada.localhost` en dev; `https://app.<dominio>` en producción), p. ej. `http://app.bandada.localhost/tickets/<id>`,
+      no un esquema `bandada://` (los enlaces con esquema propio no transportan secretos y las Universal/App Links resuelven la ruta).
+    - `ALERT` solo notifica si el evento trae `recipientUserIds`; `WELCOME` es solo in-app (el correo lo envía n8n).
+    - Preferencias: los tipos ALERT y REGISTRATION_FAILED no se pueden silenciar: incluirlos en `mutedTypes` → `422` `TYPE_NOT_MUTABLE`.
+    - `listNotifications` devuelve la cabecera `X-Unread-Count`.
+
     ## Changelog
+    - 1.2.0 (2026-10-15): consolidación fase 1 — `X-Unread-Count` deja de ser propuesta; `mutedTypes` con `TYPE_NOT_MUTABLE` (422); `NOTIFICATION_NOT_FOUND` (404), `INVALID_DEVICE_TOKEN` (400);
+      `deepLink` con base `APP_DEEP_LINK_BASE` (http en dev).
     - 1.1.0 (2026-10-14): ADR-0016/D15 — `sendNotification` deja de ser propuesta y acepta `dedupeKey`;
       `NotificationType` agrega `WELCOME`, `REGISTRATION_CANCELLED`, `EVENT_CANCELLED`, `NEW_EVENT`.
     - 1.0.0 (2026-10-14): versión inicial contract-first (D1, D14).
@@ -65,8 +75,7 @@ paths:
             Content-Language:
               $ref: './shared/components.yaml#/components/headers/ContentLanguage'
             X-Unread-Count:
-              x-proposal: true
-              description: '**PROPUESTA**: total de notificaciones no leídas (para el badge).'
+              description: Total de notificaciones no leídas del usuario (para el badge)."
               schema:
                 type: integer
                 minimum: 0
@@ -85,7 +94,7 @@ paths:
                         body: Ya tienes tu entrada para «Taller de Docker para principiantes».
                         locale: es
                         data:
-                          deepLink: bandada://tickets/0192a3c5-7777-7aaa-8bbb-000000000101
+                          deepLink: http://app.bandada.localhost/tickets/0192a3c5-7777-7aaa-8bbb-000000000101
                           eventId: 0192a3be-1234-7abc-8def-000000000042
                           registrationId: 0192a3bf-aaaa-7bbb-8ccc-000000000777
                         readAt: null
@@ -97,7 +106,7 @@ paths:
                         body: Diego Mamani comentó tu publicación.
                         locale: es
                         data:
-                          deepLink: bandada://posts/0192a3a0-0000-7000-8000-000000000321
+                          deepLink: http://app.bandada.localhost/posts/0192a3a0-0000-7000-8000-000000000321
                           postId: 0192a3a0-0000-7000-8000-000000000321
                         readAt: '2026-10-14T13:10:00Z'
                         createdAt: '2026-10-14T12:58:41Z'
@@ -112,7 +121,7 @@ paths:
       tags: [notifications]
       operationId: markNotificationRead
       summary: Marcar una notificación como leída
-      description: Idempotente por naturaleza (si ya estaba leída conserva su `readAt`).
+      description: Idempotente por naturaleza (si ya estaba leída conserva su `readAt`). Notificación inexistente o ajena → `404` `NOTIFICATION_NOT_FOUND`.
       parameters:
         - name: notificationId
           in: path
@@ -203,6 +212,7 @@ paths:
       summary: Reemplazar mis preferencias de notificación
       description: |
         Reemplaza las preferencias completas (PUT idempotente). `ALERT` no aplica a estudiantes.
+        Silenciar los tipos ALERT o REGISTRATION_FAILED (`mutedTypes`) → `422` `TYPE_NOT_MUTABLE`.
         El idioma **no** se configura aquí: se toma de `User.locale` (identity, D14).
       parameters:
         - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
@@ -253,7 +263,7 @@ paths:
       summary: Registrar (o refrescar) un dispositivo para push
       description: |
         Upsert idempotente del token para el usuario autenticado. Si el token estaba asociado a
-        otro usuario, se reasigna (cambio de sesión en el mismo dispositivo).
+        otro usuario, se reasigna (cambio de sesión en el mismo dispositivo). Token vacío o con formato inválido → `400` `INVALID_DEVICE_TOKEN`.
       parameters:
         - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
         - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
@@ -340,7 +350,7 @@ paths:
                     startsAt: '2026-10-20T22:00:00Z'
                     venue: Auditorio de la Facultad de Tecnología, UMSA
                   data:
-                    deepLink: bandada://events/0192a3be-1234-7abc-8def-000000000042
+                    deepLink: http://app.bandada.localhost/events/0192a3be-1234-7abc-8def-000000000042
                     eventId: 0192a3be-1234-7abc-8def-000000000042
       responses:
         '202':

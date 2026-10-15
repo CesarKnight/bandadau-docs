@@ -32,8 +32,8 @@ info:
 
     La cookie se fija con `Set-Cookie` (`HttpOnly; SameSite=Strict; Path=/api/v1/auth; Max-Age=<refreshExpiresIn>`, `Secure`
     salvo `COOKIE_SECURE=false` en dev). En `refresh` y `logout` con cliente `web`/`admin` el cuerpo se omite y el servidor lee la
-    cookie (el `Origin`, si viene, debe estar en `CORS_ORIGINS`, si no `403 FORBIDDEN`); si no hay cookie, `401 INVALID_REFRESH_TOKEN`.
-    Un valor de `X-Bandada-Client` desconocido responde `400 VALIDATION_FAILED`.
+    cookie (el `Origin`, si viene, debe estar en `CORS_ORIGINS`, si no `403 FORBIDDEN`); si no hay cookie, `401` `INVALID_REFRESH_TOKEN`.
+    Un valor de `X-Bandada-Client` desconocido responde `400` `VALIDATION_FAILED`.
 
     ## Claims de los tokens
     Access token de usuario: `iss`, `aud` (`bandada-app` | `bandada-admin`), `sub` (userId), `typ=user`, `roles[]`, `uni`, `locale`, `scope` (vacío), `jti`, `iat`, `exp`.
@@ -86,8 +86,8 @@ paths:
         El contrato no recibe nombre: el `displayName` del usuario (evento `user.registered` → `Profile` inicial)
         se **deriva de la parte local del correo** (`ana.quispe` → `Ana Quispe`, máx. 80 caracteres) y el usuario lo edita luego en su perfil (UC-04).
         Con `REGISTER_HIDE_EXISTING_ACCOUNTS=true` (anti-enumeración, desactivado por defecto) un correo ya activo
-        también responde `201` y se avisa al titular por correo, en vez de `409 EMAIL_ALREADY_REGISTERED`.
-        Falta de `Idempotency-Key` → `400 IDEMPOTENCY_KEY_REQUIRED`.
+        también responde `201` y se avisa al titular por correo, en vez de `409` `EMAIL_ALREADY_REGISTERED`.
+        Falta de `Idempotency-Key` → `400` `IDEMPOTENCY_KEY_REQUIRED`.
       security: []
       parameters:
         - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
@@ -385,7 +385,7 @@ paths:
       description: |
         Intercambia un refresh token válido por un par nuevo (rotación). El refresh usado queda
         revocado. Si se presenta un refresh ya revocado, se revoca toda la familia de tokens
-        (posible robo) y se responde `401 REFRESH_TOKEN_REUSED` (RF-03). Cada rotación emite un
+        (posible robo) y se responde `401` `REFRESH_TOKEN_REUSED` (RF-03). Cada rotación emite un
         refresh nuevo (cuerpo en `native`, cookie en `web`/`admin`; ver «Modos de cliente»).
       parameters:
         - $ref: '#/components/parameters/ClientMode'
@@ -472,6 +472,7 @@ paths:
         sin volver a ingresar credenciales (D4, UC-03, RF-04). El cliente genera un
         `codeVerifier` y envía su `codeChallenge = BASE64URL(SHA256(codeVerifier))`.
         Para `targetApp = ADMIN` el usuario debe tener rol `MODERATOR` o `ADMIN`.
+        Sin ese rol → `403` `HANDOFF_TARGET_FORBIDDEN`.
       x-idempotency-exempt: Cada llamada debe producir un código nuevo de un solo uso; repetirla no tiene efectos acumulativos.
       requestBody:
         required: true
@@ -524,7 +525,7 @@ paths:
         La app destino canjea el código junto con el `codeVerifier` (PKCE) y recibe tokens
         emitidos para ella (`aud` de la app destino). El código se marca usado (`usedAt`) aunque
         el canje falle por PKCE. Código inexistente, expirado, ya usado, de otra app o PKCE
-        incorrecto → `401 HANDOFF_CODE_INVALID` (mismo código para no filtrar información).
+        incorrecto → `401` `HANDOFF_CODE_INVALID` (mismo código para no filtrar información).
       parameters:
         - $ref: '#/components/parameters/ClientMode'
       security: []
