@@ -929,3 +929,18 @@ el smoke ya no imprime JWTs.
 - [ ] Claude/Ollama/Piper/Polly sin probar contra servicios reales (solo dobles); audio en local desactivado (`TTS_PROVIDER=none`).
 - [ ] D-3 (CANNOT_DEMOTE_SELF… en identity), D-9 (`avatarStatus`), D-10, D-1 (`endsAt` en events).
 - [ ] I-2: despliegue AWS (EC2 + RDS + DynamoDB + S3/CloudFront) y CI/CD: solo diseño; requiere credenciales y decisiones del equipo.
+
+---
+
+### 2026-10-15 — Auditoría de la app Expo
+
+**Hecho:** auditoría solo lectura de `bandadau-frontend` (HEAD `eea8878` + cambios sin commitear del equipo) contra reglas duras,
+arquitectura, contract-first/idempotencia, cobertura de UC-01…17 y UC-24, DoD §0/§4 y divergencias docs↔código. Documento:
+[`auditoria-app-expo.md`](auditoria-app-expo.md) (semáforo, tablas de criterios y de UC, plan A-1…A-16 / B-1…B-14 / C-1…C-9).
+
+**Verificación:** `typecheck` OK, `lint` OK, `test` sin pruebas, `i18n:check` falla (198 errores: falta `errors.json`).
+
+**Hallazgos clave:** `Authorization` nunca se envía (`src/lib/http.ts:37`); mocks activos por defecto (`src/lib/env.ts:9`); sin cola offline,
+persister, PWA ni pruebas; UC-05/08/10/13/14/17 ausentes o simulados; `/profiles/{id}/posts` fuera de contrato.
+
+**Pendientes:** ejecutar B-1, B-2, B-3, B-6 primero; luego ver sección 5.4 del documento. No se modificó `bandadau-frontend`.

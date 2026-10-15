@@ -53,6 +53,9 @@ en `bandadau-docs`. Prioridad: **A** = antes de la entrega (10-nov), **B** = si 
 | E-2 | SSO app → panel (UC-03) | Verificar el flujo real desde la app con Universal/App Links y PKCE | A |
 | E-3 | `app.bandada.localhost` | Probar con `make up` cuando la app exista (cookie `bandada_rt` con `X-Bandada-Client: web`, CORS con credenciales) | A |
 
+> **Auditoría 2026-10-15:** el estado real de E-1…E-3 y el plan de ajustes (A-n hacer, B-n cambiar, C-n actualizar) están en [auditoria-app-expo.md](auditoria-app-expo.md).
+> Bloqueante: `Authorization` no se envía y los mocks están activos por defecto (B-1, B-3).
+
 ## 5. Fase 2 (sin código)
 
 `insights-service` (MCP, agentes, reportes, anomalías), `mfe-insights`, `bandadau-ml` (NSFW, violencia, CLIP, ranker de feed, Isolation Forest),
