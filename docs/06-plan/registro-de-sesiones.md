@@ -810,3 +810,31 @@ la presentación.
 - [ ] Unificar host de URLs prefirmadas en ejemplos (`minio.` vs `s3.bandada.localhost`).
 - [ ] Crear o quitar referencias a `contracts/mfe/mfe-manifest.schema.json` y `contracts/pacts/`.
 - [ ] Publicar los repos: `bandadau-infra/scripts/create-github-repos.sh <owner>` (requiere `gh auth login`).
+
+---
+
+### 2026-10-15 — Fase 1: implementación e integración local
+
+**Agente:** Claude Code (coordinador) + 11 subagentes · **Objetivo:** núcleo "clásico" funcionando en local con Docker.
+
+**Hecho (commits por repo):** `bandadau-shared` (8 paquetes @bandada/*), `bandadau-infra` (Compose con perfiles, Traefik,
+RabbitMQ definitions, init de bases, seed, smoke, mock gateway), `bandadau-backend` (identity, events, wallet,
+notification, social, media, ticketing, admin-gateway), `bandadau-admin` (shell Next.js + mfe-moderation Angular),
+`bandadau-landing`. `bandadau-frontend` (Expo) queda **a cargo del equipo** (agente detenido).
+
+**Verificación real:** `make up` 20 contenedores healthy · `make seed` 18/18 · `make smoke` **26/26** (registro, idempotencia,
+SAGA feliz, EVENT_FULL, compensación con CHAOS, RBAC GraphQL) · panel en `admin.bandada.localhost`: login, dashboard con datos
+reales de los 7 servicios, cola de moderación en vivo (WebSocket) con denuncias reales y acción «Retirar».
+
+**Bugs de integración encontrados y corregidos:** smoke del moderador sin cliente `admin` (audiencia JWT); CORS de Traefik sin
+credenciales ni `X-Bandada-Client`; admin-gateway serializaba `cursor=null` y pedía `limit` > 50; urql usaba GET (CSRF de Apollo);
+toast del shell mostraba la clave en vez del mensaje del MFE.
+
+**Pendientes**
+- [ ] Divergencias contrato/doc reportadas por los agentes (≈40): claims JWT (`typ`/`aud`), `IDEMPOTENCY_KEY_REQUIRED` vs `_MISSING`,
+      `x-delivery-limit` (4 vs 10), `updateUniversity` ausente en GraphQL, filtro `ids` de `searchUsers`, `ALREADY_MODERATED` y
+      `ModerationQueueFilter`, `avatarStatus` en Profile, `organizerId/staffUserIds` en `issue-ticket`, códigos faltantes en `@bandada/i18n`.
+- [ ] events-service debe enviar organizerId/staffUserIds a ticketing (hoy cualquier ORGANIZER valida; `STRICT_ORGANIZER_CHECK`).
+- [ ] 2 mensajes de prueba en `events-service.saga-replies` (inocuos).
+- [ ] Probar `app.bandada.localhost` (Expo) cuando el equipo termine la app; verificar SSO app → panel real (UC-03).
+- [ ] Fase 2: ML/DL, IA local, agentes, MCP, n8n, `insights-service`, `mfe-insights`.
