@@ -364,9 +364,16 @@ Imagen `rabbitmq:4.2.9-management`.
   `bandadau-docs/docs/03-arquitectura/eventos-y-mensajeria.md`.
 - **Cola dinámica fuera de `definitions.json`**: `admin-gateway.subscriptions.<instanceId>` la declara el propio admin-gateway al arrancar (**exclusiva y auto-delete**, una por instancia; ADR-0016,
   catálogo §5) para alimentar las subscriptions GraphQL; desaparece al cerrarse la conexión.
-- **Usuarios** (en local): `bandada` (usuario compartido de los servicios, permisos `.*`), `n8n` (permisos `.*`), `monitor` (tag `monitoring`, solo lectura: `configure/write ^$`, `read .*`) y
-  `admin` (tag `administrator`, para la UI). En AWS (RNF-07) el diseño prevé un usuario por servicio con permisos `configure: ^$`, `write` sobre los exchanges que publica y `read` sobre su cola
-  (**pendiente**).
+- **Usuarios** (en local): `admin` (tag `administrator`, para la UI), `monitor` (tag `monitoring`, solo lectura: `configure/write ^$`, `read .*`), `n8n` (permisos `.*`),
+  `bandada` (usuario compartido heredado; permisos `.*`) y, desde I-4 (RNF-07), **un usuario por servicio** con el nombre del servicio del catálogo (`identity-service`, `social-service`, `media-service`,
+  `events-service`, `wallet-service`, `ticketing-service`, `notification-service`, `insights-service`, `admin-gateway`). Permisos de cada uno en el vhost `/`:
+  `configure ^<svc>\..*$` (solo sus colas y las dinámicas del propio servicio), `write ^(<svc>\..*|bandada\.(events|commands|dlx)|amq\.default)$` y `read ^(<svc>\..*|bandada\.(events|commands|dlx))$`.
+  Se verificó con AMQP real (stack paralelo `PROJECT=test`): cada servicio consume/declara solo sus colas y publica en los exchanges; consumir o declarar una cola ajena da `403 ACCESS-REFUSED`.
+  - **Cómo se activa** (sin esto el stack sigue con el usuario compartido, porque `definitions.json` solo *añade* los usuarios): `docker-compose.yaml` arma `RABBITMQ_URL` por servicio con
+    `RABBITMQ_<SERVICIO>_USER` / `RABBITMQ_<SERVICIO>_PASSWORD` (defaults `bandada`/`bandada`; el `.env.example` ya trae los nueve pares). Para migrar un stack en marcha:
+    1) copia al `.env` los 18 pares de variables de `.env.example`; 2) `make rabbit-defs` (regenera `rabbitmq/definitions.json`; contraseña por defecto `<servicio>_dev`);
+    3) recrea RabbitMQ para que importe los usuarios, o impórtalos sin reiniciar: `curl -u admin:admin -H 'content-type: application/json' -X POST http://localhost:15672/api/definitions -d @rabbitmq/definitions.json`;
+    4) `docker compose --profile services up -d` recrea los servicios con su usuario. Una vez migrado se puede quitar `bandada` de la plantilla. En AWS la contraseña de cada usuario va a Secrets Manager.
 
 #### n8n
 
@@ -388,7 +395,17 @@ Imagen `rabbitmq:4.2.9-management`.
 `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD` = `admin`/`admin`) con `make up-obs`, que además pone `OTEL_SDK_DISABLED=false` en los servicios. Sin ese perfil los servicios dejan
 `OTEL_SDK_DISABLED=true` (no hay colector).
 
-- **Pendiente**: los dashboards versionados en `bandadau-infra/observability/dashboards/` (SAGA, colas/DLQ, latencias; la carpeta `observability/` está vacía) y su aprovisionamiento por montaje.
+- **Dashboards y alertas (I-3, implementado)**: con el perfil `observability`, `lgtm` monta por *provisioning de archivos* (carpeta Grafana «Bandada U»):
+  `observability/dashboards/*.json` (`bandada-red`: tasa/errores/latencia p50-p95-p99 por servicio; `bandada-saga`: inscripciones, compensaciones, duración, reenvíos y colas de la SAGA;
+  `bandada-rabbitmq`: profundidad, sin ack, consumidores y DLQ por cola), `observability/provisioning/alert-rules.yaml` y `observability/prometheus.yaml` (scrapes extra).
+  Fuentes de datos (Prometheus del LGTM): **RabbitMQ** (`rabbitmq:15692`, plugin `rabbitmq_prometheus`: `/metrics` y `/metrics/detailed?family=queue_coarse_metrics` por cola),
+  **Traefik** (`metrics.prometheus` en `traefik.yml`, `traefik:8080/metrics`: RED uniforme de los 9 servicios, también los PHP) y las métricas de negocio OTLP de la SAGA
+  (`saga_duration_seconds`, `saga_compensations_total`, `saga_step_resends_total`, `saga_compensation_stuck_total`, de Micrometer en events-service; los paneles de SAGA se llenan cuando el servicio exporta OTLP,
+  `make up-obs`). Reglas (grupo `bandada-alerts`, evaluación 1 min): `SagaCompensationRateHigh` (> 25 % durante 5 min), `ApiLatencyP95High` (> 1 s), `ApiErrorRateHigh` (> 5 % de 5xx),
+  `DlqHasMessages` (> 0 durante 1 min), `ServiceDown` (cola principal sin consumidores durante 2 min: servicio o worker caído; el healthcheck HTTP no se mide aquí porque los servicios no se scrapean directamente)
+  y `ScrapeTargetDown`. No hay contact point configurado (se ven en *Alerting → Alert rules*; conectar correo/Slack queda para producción).
+  Verificado con `PROJECT=test` + perfil `observability` (traefik, rabbitmq, lgtm): los tres *targets* en `up`, las 3 carpetas/dashboards y 6 reglas provisionadas, todas las consultas de los paneles resuelven
+  y `ServiceDown` pasa a *pending* en un broker sin consumidores. **Traefik debe recrearse** (`docker compose up -d traefik`) para leer el bloque `metrics` de su configuración estática.
 - Algunos servicios (identity, wallet, notification) declaran en su `.env.example` que en la fase 1 **no incluyen exportador OTLP** y solo propagan `traceparent`: las trazas completas dependen de su
   implementación. Ver `bandadau-docs/docs/03-arquitectura/observabilidad.md`.
 

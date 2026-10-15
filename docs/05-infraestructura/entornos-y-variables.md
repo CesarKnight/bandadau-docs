@@ -107,7 +107,11 @@ Fuente: `bandadau-infra/docker-compose.yaml` y `.env.example` (cada puerto publi
 | `RABBITMQ_DEFAULT_USER` / `RABBITMQ_DEFAULT_PASS` 🔒 | Usuario compartido de desarrollo (servicios) | `bandada` / `bandada` |
 | `RABBITMQ_ADMIN_PASSWORD` 🔒 | Usuario `admin` (UI) | `admin` |
 | `RABBITMQ_N8N_PASSWORD` 🔒 / `RABBITMQ_MONITOR_PASSWORD` 🔒 | Usuarios `n8n` y `monitor` (solo lectura) | `n8n_dev` / `monitor_dev` |
-| `RABBITMQ_URL` 🔒 | AMQP que reciben los servicios | `amqp://bandada:bandada@rabbitmq:5672` |
+| `RABBITMQ_URL` 🔒 | AMQP por defecto (el compose arma uno por servicio, ver siguiente fila) | `amqp://bandada:bandada@rabbitmq:5672` |
+| `RABBITMQ_<SERVICIO>_USER` / `RABBITMQ_<SERVICIO>_PASSWORD` 🔒 | Usuario de RabbitMQ por servicio (RNF-07, I-4): `IDENTITY_SERVICE`, `SOCIAL_SERVICE`, `MEDIA_SERVICE`, `EVENTS_SERVICE`, `WALLET_SERVICE`, `TICKETING_SERVICE`, `NOTIFICATION_SERVICE`, `INSIGHTS_SERVICE`, `ADMIN_GATEWAY`. Migración: `infraestructura.md` §2.8 «Usuarios» | compose: `bandada`/`bandada`; `.env.example`: `<servicio>`/`<servicio>_dev` |
+| `JWT_KEK` 🔒 | KEK que cifra la llave privada RS256 en identity (`signing_keys`); cambiarla invalida las llaves guardadas; en prod ≥ 32 caracteres desde SSM | `dev-only-kek-change-me` |
+| `COVER_CHECK` | events valida `coverMediaId` contra media-service (requiere `events-service` en `SERVICE_CLIENTS`; C-2) | `on` |
+| `SAGA_COMMAND_MAX_RETRIES` | Reintentos de comandos de la SAGA (C-6) | `3` |
 | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` 🔒 | Raíz de MinIO | `minio` / `minio_dev_pw` |
 | `MEDIA_S3_ACCESS_KEY` / `MEDIA_S3_SECRET_KEY` 🔒 | Usuario MinIO de media-service (política por bucket) | `media-svc` / `media_svc_dev_pw` |
 | `INSIGHTS_S3_ACCESS_KEY` / `INSIGHTS_S3_SECRET_KEY` 🔒 | Usuario MinIO de insights-service (fase 2; ya se crea) | `insights-svc` / `insights_svc_dev_pw` |
@@ -117,7 +121,7 @@ Fuente: `bandadau-infra/docker-compose.yaml` y `.env.example` (cada puerto publi
 | `SPRING_PROFILES_ACTIVE` | Perfil de identity y events (`dev` imprime el código de verificación en el log) | `dev` |
 | `<SVC>_SERVICE_CLIENT_SECRET` 🔒 | Secreto de client credentials de cada servicio (`ADMIN_GATEWAY`, `SOCIAL`, `MEDIA`, `EVENTS`, `WALLET`, `TICKETING`, `NOTIFICATION`, `INSIGHTS`, `N8N`, `SEED`) | `dev-secret-<svc>` |
 | `SERVICE_CLIENTS` 🔒 | Lista `id:secret,…` que registra identity (incluye `bandada-seed` y `n8n`) | ver `.env.example` |
-| `QR_SIGNING_KEY_PATH` / `QR_SIGNING_KID` / `QR_KEY_ID` | Llave ES256 del QR (`make keys` → `secrets/qr-es256.pem`), `kid` y alias heredado | `/run/secrets/qr-es256.pem` / `tk-2026-10` / `dev-1` |
+| `QR_SIGNING_KEY_PATH` / `QR_SIGNING_KID` | Llave ES256 del QR (`make keys` → `secrets/qr-es256.pem`) y su `kid` | `/run/secrets/qr-es256.pem` / `tk-2026-10` |
 | `WALLET_APP_KEY` 🔒 / `NOTIFICATION_APP_KEY` 🔒 | `APP_KEY` de Laravel (valores de desarrollo ya generados) | `base64:…` |
 | `PAYMENT_WEBHOOK_SECRET` 🔒 | HMAC del webhook de pagos | `dev-webhook-secret` |
 | `CORS_ORIGINS` | Orígenes permitidos (los usan los servicios y MinIO; Traefik tiene su propia lista, ver `infraestructura.md` §2.7) | `http://localhost:3000,…,http://app.${BASE_DOMAIN},…` |
@@ -205,7 +209,7 @@ Laravel → `APP_DEBUG=false`, `LOG_CHANNEL=stderr`.
 | `S3_FORCE_PATH_STYLE` | MinIO | `true` |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` 🔒 | Usuario MinIO del servicio | `media-svc` / `media_svc_dev_pw` (Compose: `MEDIA_S3_ACCESS_KEY` / `MEDIA_S3_SECRET_KEY`) |
 | `S3_BUCKET_MEDIA` / `S3_BUCKET_MODELS` | Buckets | `bandada-media` / `bandada-models` |
-| `UPLOAD_URL_TTL_SECONDS` | Vida del PUT prefirmado (contrato `expiresIn`). **Servicio: `900`** (rango 30–3600); **Compose: `300`** | `900` / `300` |
+| `UPLOAD_URL_TTL_SECONDS` | Vida del PUT prefirmado (contrato `expiresIn`). **`900`** en servicio, contrato, Compose e infra `.env.example` (rango 30–3600) | `900` |
 | `MAX_IMAGE_BYTES` / `MAX_VIDEO_BYTES` | Límites (RF-06: video ≤ 50 MB, ADR-0016) | `10485760` / `52428800` |
 | `MODERATION_MODE` | Fase 1: `allow-all` (`APPROVED` al completar) \| `manual` (`FLAGGED` → cola de moderadores) | `allow-all` |
 | `RATE_LIMIT_PER_MINUTE` / `OUTBOX_POLL_MS` / `STALE_PROCESSING_MS` / `MESSAGING_ENABLED` | Operación | `300` / `500` / `30000` / `true` |
@@ -242,7 +246,6 @@ Otros comandos: `wallet:expire-topups`, `bandada:check-env`, `bandada:declare-to
 | `RABBITMQ_URL` / `RABBITMQ_PREFETCH` / `RABBITMQ_DECLARE_TOPOLOGY` / `OUTBOX_POLL_INTERVAL_MS` | Broker (topología externa) | `amqp://…@rabbitmq:5672` / `20` / `false` / `500` |
 | `JWT_USER_AUDIENCES` / `JWT_INTERNAL_AUDIENCE` / `JWKS_CACHE_TTL` | Validación de JWT | `bandada-app,bandada-admin` / `bandada-internal` / `300` |
 | `PAYMENT_SIMULATOR_ENABLED` | Variable **real** que habilita `simulateTopUpPayment` (404 si es `false`; solo dev/demo) | `true` |
-| `SIMULATE_PAYMENT_ENABLED` | Alias heredado que sigue definiendo el `.env.example` de infra y el Compose; el servicio no lo lee | `true` |
 | `PAYMENT_GATEWAY` | Compose: fija la pasarela simulada | `simulated` |
 | `PAYMENT_WEBHOOK_SECRET` 🔒 / `PAYMENT_WEBHOOK_TOLERANCE_SECONDS` | HMAC `X-Signature: sha256=<hex>` (≥ 16 caracteres) y ventana anti-replay | `dev-webhook-secret` / `300` |
 | `PAYMENT_CHECKOUT_BASE_URL` | Página de la pasarela simulada | `http://app.bandada.localhost/wallet/checkout` |
@@ -260,7 +263,6 @@ Otros comandos: `wallet:expire-topups`, `bandada:check-env`, `bandada:declare-to
 | `QR_SIGNING_KEY_PATH` 🔒 | Ruta del par **ES256** (PKCS#8 PEM P-256) del JWS del QR (UC-14). Dev: `bandadau-infra/secrets/qr-es256.pem` (`make keys`); en Compose se monta de solo lectura en `/run/secrets/qr-es256.pem` | `/run/secrets/qr-es256.pem` |
 | `QR_SIGNING_KID` | `kid` del JWS | `tk-2026-10` |
 | `QR_PREVIOUS_JWKS_PATH` | Opcional: JWKS (solo claves públicas) de llaves rotadas aún aceptadas | vacío |
-| `QR_KEY_ID` | Alias heredado que sigue definiendo infra; el servicio no lo lee | `dev-1` |
 | `CHAOS_TICKETING_FAIL` | Demo del rollback de la SAGA (D2): `issue-ticket` responde `ticket-issue-failed`; se lee **al arrancar**. Nunca en producción | `false` |
 | `STRICT_ORGANIZER_CHECK` | `true`: si el comando no trae `organizerId`/`staffUserIds`, solo ADMIN valida | `true` |
 | `VALIDATION_OPENS_BEFORE_MINUTES` / `VALIDATION_DEFAULT_DURATION_MINUTES` | Ventana de validación del QR | `120` / `720` |
@@ -422,8 +424,8 @@ Reglas:
 | V-3 | `bandadau-backend/services/ticketing-service/AGENTS.md` | `QR_SIGNING_KEY=change-me-32-bytes-min` sugería HMAC; UC-14 exige JWS **ES256** | Ruta a PEM P-256 + publicar la llave pública | ✔ **Resuelta e implementada**: `QR_SIGNING_KEY_PATH` (PEM P-256, `make keys`) + `QR_SIGNING_KID`; `qrPayload` = JWS compacto **ES256** y clave pública en `GET /tickets/signing-keys`. |
 | V-4 | `bandadau-backend/services/identity-service/AGENTS.md` | `JWT_PRIVATE_KEY_PATH` (archivo) vs `seguridad-y-sso.md` §2.2 (`signing_keys` + `JWT_KEK`) | Archivo solo en `local`; prod con `signing_keys` | ✔ **Implementada en el servicio**: el par RS256 se genera al primer arranque y se guarda cifrado en `signing_keys` con `JWT_KEK`; `JWT_PRIVATE_KEY_PATH` solo importa una llave existente como la primera. El Compose local solo define la ruta (el perfil `dev` relaja `JWT_KEK`). |
 | V-5 | `bandadau-backend/services/insights-service/AGENTS.md` | `PIPER_URL` implica un contenedor Piper que no está en el catálogo §3 | Agregar Piper al catálogo (ADR) o ejecutar Piper dentro de la imagen de insights | ✔ **Resuelta por ADR-0016** (contenedor opcional del perfil `llm`). **Pendiente fase 2** (el perfil `llm` está vacío en el Compose). |
-| V-6 | `bandadau-backend/services/*/AGENTS.md` | `RABBITMQ_URL` con usuario compartido `bandada` | Aceptable en local; en prod un usuario por servicio (RNF-07) | Abierta (el `definitions.json` local crea solo `bandada`, `n8n`, `monitor` y `admin`; el modelo por servicio es de AWS, pendiente). |
+| V-6 | `bandadau-backend/services/*/AGENTS.md` | `RABBITMQ_URL` con usuario compartido `bandada` | Un usuario por servicio (RNF-07) | **Resuelta en infra (I-4)**: `definitions.json` crea un usuario por servicio y el compose los usa vía `RABBITMQ_<SERVICIO>_USER/PASSWORD`; el stack en marcha migra cuando se aplique (`infraestructura.md` §2.8). Los `.env.example` de los servicios conservan `bandada` para correr en el IDE. |
 | V-7 | `notification-service`, `wallet-service` | `AWS_DEFAULT_REGION` vs `AWS_REGION` | Aceptar ambos (documentado en §4.1) | ✔ **Resuelta en el Compose**: define `AWS_REGION` y `AWS_DEFAULT_REGION`. |
 | V-8 | `bandadau-backend/services/admin-gateway/AGENTS.md` | `RABBITMQ_URL` en el gateway sin cola en el catálogo §5 | Definir el origen de las subscriptions | ✔ **Resuelta por ADR-0016 e implementada**: cola exclusiva *auto-delete* `admin-gateway.subscriptions.<instanceId>` (la declara el gateway; catálogo §5; canal `qAdminGatewaySubscriptionsQueue` en `bandada-events.yaml`). |
-| V-9 | `media-service` vs Compose | `UPLOAD_URL_TTL_SECONDS`: el servicio y el contrato usan `900`; `docker-compose.yaml` y `bandadau-infra/.env.example` fijan `300` | Alinear el Compose con el contrato (`900`) | Abierta (el valor del Compose gana en `make up`). |
-| V-10 | `wallet-service`, `ticketing-service` vs infra | Alias heredados que el código no lee: `SIMULATE_PAYMENT_ENABLED` (el servicio usa `PAYMENT_SIMULATOR_ENABLED`) y `QR_KEY_ID` (usa `QR_SIGNING_KID`) | Retirar los alias del Compose y del `.env.example` de infra | Abierta (inofensiva). |
+| V-9 | `media-service` vs Compose | `UPLOAD_URL_TTL_SECONDS`: el servicio y el contrato usan `900`; `docker-compose.yaml` y `bandadau-infra/.env.example` fijan `300` | Alinear el Compose con el contrato (`900`) | ✔ **Resuelta** (C-1): Compose e infra `.env.example` en `900`. |
+| V-10 | `wallet-service`, `ticketing-service` vs infra | Alias heredados que el código no lee: `SIMULATE_PAYMENT_ENABLED` (el servicio usa `PAYMENT_SIMULATOR_ENABLED`) y `QR_KEY_ID` (usa `QR_SIGNING_KID`) | Retirar los alias del Compose y del `.env.example` de infra | ✔ **Resuelta** (C-5): alias retirados de compose, `.env.example` y README de infra. |
