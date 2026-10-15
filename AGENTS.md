@@ -30,9 +30,8 @@ los demás repos implementan lo que está aquí, no lo redefinen. Lee primero `.
 ## Comandos
 
 ```bash
-make contracts-lint   # spectral lint contracts/openapi/*.yaml --ruleset contracts/.spectral.yaml
-                      # + asyncapi validate + graphql-inspector validate + ajv (MCP)
+make contracts-lint   # spectral (OpenAPI) + asyncapi validate + graphql-inspector introspect (SDL) + ajv compile (MCP)
 make links            # verifica enlaces relativos de docs/
 ```
 
-(El `Makefile` se agrega en R0 — ver `docs/06-plan/backlog.md` HT-03.)
+(`Makefile` y `scripts/check-links.mjs` implementan HT-03; las herramientas van fijadas por versión vía `npx`.)

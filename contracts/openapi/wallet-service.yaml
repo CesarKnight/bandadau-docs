@@ -315,7 +315,7 @@ paths:
         '409':
           $ref: './shared/components.yaml#/components/responses/Conflict'
         '503':
-          description: La pasarela no está disponible (`PAYMENT_GATEWAY_UNAVAILABLE`; `PAYMENT_GATEWAY_MODE=unavailable` o `outcome: UNAVAILABLE`).
+          description: "La pasarela no está disponible (`PAYMENT_GATEWAY_UNAVAILABLE`; `PAYMENT_GATEWAY_MODE=unavailable` o `outcome: UNAVAILABLE`)."
           headers:
             Retry-After:
               $ref: './shared/components.yaml#/components/headers/RetryAfter'
