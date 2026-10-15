@@ -151,7 +151,7 @@ una de cancelación).
 | Enum nuevo | Valores |
 |---|---|
 | `CommentStatus` | `VISIBLE`, `HIDDEN`, `REMOVED` |
-| `HiddenReason` | `MEDIA_FLAGGED`, `REPORTED`, `MODERATOR` |
+| `HiddenReason` | `MEDIA_FLAGGED`, `REPORTED`, `MODERATOR`, `AUTHOR_SUSPENDED` |
 | `GroupMemberRole` | `OWNER`, `ADMIN`, `MEMBER` |
 | `ReportTargetType` | `POST`, `COMMENT` |
 | `ReportReason` | `SPAM`, `HARASSMENT`, `NSFW`, `VIOLENCE`, `MISINFORMATION`, `OTHER` |

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — events-service
-  version: 1.1.0
+  version: 1.2.0
   summary: Eventos y talleres, inscripciones y orquestación de la SAGA de inscripción.
   description: |
     API del bounded context **Eventos** (`events-service`, Java 25 + Spring Boot 4, DDD táctico,
@@ -24,7 +24,15 @@ info:
     - Rutas `/internal/v1/**` (tag `internal`): solo red interna con `serviceAuth`; consumidas
       por `admin-gateway` e `insights-service` (MCP `list_failed_sagas`, `get_registration_stats`).
 
+    ## Decisiones de implementación (fase 1)
+    - Los reenvíos de comandos de la SAGA se hacen a 5/10/20 s dentro de la ventana de 30 s de cada paso; las compensaciones se reintentan sin límite
+      (backoff 5 s ×2, tope 60 s) con alerta a los 2 min.
+    - El contrato de `createEvent` no exigía fin: si no se envía `endsAt`, se usa `startsAt + EVENT_DEFAULT_DURATION` (2 h por defecto).
+
     ## Changelog
+    - 1.2.0 (2026-10-15): consolidación fase 1 — `endsAt` opcional en `createEvent` (por defecto `startsAt` + 2 h) y en `Event`;
+      filtros `organizerId` y `status` de `listEvents` dejan de ser propuestas; códigos `NOT_EVENT_ORGANIZER` (403), `MEDIA_UNAVAILABLE` (503);
+      reintentos de la SAGA documentados.
     - 1.1.0 (2026-10-14): ADR-0016/D15 — `listEventsInternal` y `retrySaga`; `cancelEvent` y
       `listEventRegistrations` dejan de ser propuestas; `RegistrationFailureReason` alineado
       (`EVENT_FULL`, `TIMEOUT`, `SAGA_ABORTED`; reemplaza `SAGA_TIMEOUT`) y `SagaStep` sin `CONFIRM`.
@@ -57,7 +65,9 @@ paths:
       description: |
         Crea un evento en estado `DRAFT` (UC-11, RF-14). Requiere rol `ORGANIZER`.
         `priceCredits = 0` significa evento gratuito (la SAGA salta el débito).
-        `coverMediaId` debe ser una imagen propia `APPROVED` en `media-service`.
+        `coverMediaId` debe ser una imagen propia `APPROVED` en `media-service` (`422 MEDIA_NOT_APPROVED`;
+        si `media-service` no responde, `503 MEDIA_UNAVAILABLE`).
+        Fin del evento: `endsAt` opcional; si falta, `startsAt` + 2 h (`EVENT_DEFAULT_DURATION`). Debe ser posterior a `startsAt`.
       parameters:
         - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
       requestBody:
@@ -148,7 +158,7 @@ paths:
         Eventos ordenados por `startsAt` ascendente, filtrables por rango. Con `public=true` el
         endpoint es accesible **sin JWT** (landing) y solo devuelve eventos `PUBLISHED` con
         datos públicos. Sin `public`, requiere JWT y devuelve eventos `PUBLISHED`; un
-        organizador puede ver además sus borradores con `organizerId` = su propio id (*propuesto*).
+        organizador puede ver además sus borradores con `organizerId` = su propio id.
       security:
         - {}
         - bearerAuth: []
@@ -179,16 +189,14 @@ paths:
         - name: organizerId
           in: query
           required: false
-          x-proposal: true
-          description: '*Propuesto*: filtra por organizador. Si es el propio usuario, incluye sus `DRAFT`.'
+          description: 'Filtra por organizador. Si es el propio usuario, incluye sus `DRAFT`.'
           schema:
             type: string
             format: uuid
         - name: status
           in: query
           required: false
-          x-proposal: true
-          description: '*Propuesto*: filtra por estado (`DRAFT` solo con `organizerId` propio).'
+          description: 'Filtra por estado (`DRAFT` solo con `organizerId` propio).'
           schema:
             $ref: '#/components/schemas/EventStatus'
         - $ref: './shared/components.yaml#/components/parameters/Cursor'
@@ -270,7 +278,7 @@ paths:
       description: |
         El organizador publica su evento `DRAFT` → `PUBLISHED` (UC-11). Publica
         `bandada.events.event.published.v1`. Idempotente por naturaleza: publicar un evento ya
-        `PUBLISHED` responde `200` sin cambios.
+        `PUBLISHED` responde `200` sin cambios. Si quien llama no es el organizador del evento responde `403 NOT_EVENT_ORGANIZER`.
       responses:
         '200':
           description: Evento publicado.
@@ -323,7 +331,8 @@ paths:
         Aceptada en D15 (ADR-0016): dispara `EventStatus.CANCELLED` y el evento
         `bandada.events.event.cancelled.v1` (D12). El organizador (o un
         `ADMIN`) cancela un evento `DRAFT`/`PUBLISHED`; se inicia una SAGA `CANCELLATION` por cada
-        inscripción `CONFIRMED` (sin la restricción de 24 h) y se responde **202**.
+        inscripción `CONFIRMED` (sin la restricción de 24 h) y se responde **202**. Quien no es el organizador ni `ADMIN`
+        recibe `403 NOT_EVENT_ORGANIZER`.
       parameters:
         - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
       requestBody:
@@ -626,7 +635,8 @@ paths:
       description: |
         Inicia la SAGA inversa `CANCELLATION` (UC-13, RF-17): anular ticket → reembolsar
         créditos → liberar cupo → `bandada.events.registration.cancelled.v1`. Solo para
-        inscripciones `CONFIRMED` y hasta 24 h antes del inicio del evento. Responde **202** con
+        inscripciones `CONFIRMED` y hasta 24 h antes del inicio del evento (`422 CANCELLATION_WINDOW_CLOSED` si ya pasó la ventana;
+        `409 INVALID_REGISTRATION_STATUS` si no está `CONFIRMED`). Responde **202** con
         la inscripción `CANCELLATION_PENDING`; consultar el resultado con `getRegistration`.
       parameters:
         - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
@@ -1273,6 +1283,10 @@ components:
         startsAt:
           type: string
           format: date-time
+        endsAt:
+          type: string
+          format: date-time
+          description: Fin del evento (UTC). Opcional en la respuesta hasta que events-service lo exponga; por defecto `startsAt` + 2 h.
         venue:
           type: string
           maxLength: 200
@@ -1330,6 +1344,10 @@ components:
           type: string
           format: date-time
           description: Debe ser futura.
+        endsAt:
+          type: string
+          format: date-time
+          description: Fin del evento (opcional, posterior a `startsAt`). Por defecto `startsAt` + 2 h (`EVENT_DEFAULT_DURATION`).
         venue:
           type: string
           minLength: 3

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — media-service
-  version: 1.1.0
+  version: 1.2.0
   summary: Multimedia (subida directa a S3, pipeline de moderación ML/DL, etiquetado y OCR).
   description: |
     API del bounded context **Media** (`media-service`, TypeScript + NestJS 11 con
@@ -23,7 +23,15 @@ info:
     `Accept-Language` (`es` por defecto) y respuesta con `Content-Language`. Todas las respuestas
     devuelven `X-Correlation-Id`. Rutas `/internal/v1/**` (tag `internal`): solo red interna con `serviceAuth`.
 
+    ## Decisiones de implementación (fase 1)
+    - `expiresIn` de `createUpload` es el valor de `UPLOAD_URL_TTL_SECONDS` (30–3600): **900 por defecto** en el servicio y **300 en el Compose local**.
+      Los ejemplos de este contrato usan 900; los clientes deben leer `expiresIn` de la respuesta, no asumirlo.
+    - Modo de moderación `MODERATION_MODE`: `allow-all` (por defecto en local; todo medio completado pasa a `APPROVED`), `manual` (todo pasa a `FLAGGED`
+      para revisión humana) y, en la fase 2, el modelo ONNX. Los *magic bytes* del objeto no se verifican aún (solo `Content-Type` y tamaño).
+    - `decideMedia` solo actúa sobre medios `FLAGGED` (`409 MEDIA_NOT_FLAGGED` en otro caso); repetir la misma decisión responde `200` sin cambios ni evento.
+
     ## Changelog
+    - 1.2.0 (2026-10-15): consolidación fase 1 — `expiresIn` configurable (`UPLOAD_URL_TTL_SECONDS`), modos de moderación y `MEDIA_NOT_FLAGGED` documentados.
     - 1.1.0 (2026-10-14): ADR-0016/D15 — `purpose` (`MediaPurpose`: `POST`, `AVATAR`, `EVENT_COVER`) en
       `createUpload` y `MediaAsset`; `completeUpload` responde 202; `getMediaInternal` y `getMediaUrls`;
       filtros `ownerId` y `since` en `listFlaggedMedia`; imágenes ≤ 10 MB y video ≤ 50 MB confirmados.
@@ -697,7 +705,7 @@ components:
             type: string
         expiresIn:
           type: integer
-          description: Segundos de validez de `uploadUrl` (900).
+          description: Segundos de validez de `uploadUrl` (`UPLOAD_URL_TTL_SECONDS`; 900 por defecto, 300 en el Compose local).
 
     MediaAsset:
       type: object

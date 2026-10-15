@@ -31,7 +31,7 @@ info:
     Cada cola declara `x-dead-letter-exchange: bandada.dlx` y `x-dead-letter-routing-key: <nombre-de-cola>`. Por cada cola existe `<nombre-de-cola>.dlq` (durable, `x-queue-type: quorum`) enlazada a `bandada.dlx` con routing key `<nombre-de-cola>`. Los mensajes conservan la cabecera `x-death`. El agente de monitoreo (`get_service_health`) alerta `DLQ_BACKLOG` si alguna DLQ tiene mensajes; se re-encolan manualmente desde la UI de RabbitMQ tras corregir la causa.
 
     ## Propuestas (`x-proposal: true`)
-    - Valor `AUTHOR_SUSPENDED` en `PostHiddenData.reason` (no figura en `HiddenReason` del modelo de dominio).
+    Ninguna vigente: `AUTHOR_SUSPENDED` en `PostHiddenData.reason` quedó confirmado por la implementación (fase 1).
 
     ## Changelog
     - 1.2.0 (2026-10-15): consolidación fase 1 — `issue-ticket` agrega `organizerId` (requerido), `staffUserIds` y
@@ -2330,8 +2330,7 @@ components:
           format: uuid
         reason:
           description: |-
-            `HiddenReason` (ADR-0016) más `AUTHOR_SUSPENDED` (**propuesta**, no figura en `HiddenReason`: contenido ocultado en bloque al suspender al autor y restaurado con `user.reactivated.v1`).
-          x-proposal: true
+            `HiddenReason` (ADR-0016) más `AUTHOR_SUSPENDED` (confirmado en la fase 1: contenido ocultado en bloque al suspender al autor y restaurado con `user.reactivated.v1`).
           type: string
           enum:
           - MEDIA_FLAGGED
