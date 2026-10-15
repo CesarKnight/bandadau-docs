@@ -63,7 +63,8 @@ Reglas:
 **Cambios**
 - `app/profile/[userId].tsx`: layout **responsive igual al feed** (header full-width con atrás, columna centrada `maxWidth 480`, right rail) y **scroll al post tocado** (`postId` → `scrollToIndex`, `viewPosition 0.3`; `onScrollToIndexFailed` → `scrollToOffset`).
 - `app/(tabs)/profile.tsx`: la **grilla usa los posts reales** del usuario (`useUserPosts`); al tocar uno navega al feed con `postId`. Botón **⋯** que abre el menú.
-- `src/features/profile/components/profile-menu*.tsx`: menú de opciones (**Editar perfil, Configuración, Abrir panel** si MODERATOR/ADMIN, **Cerrar sesión**) — bottom sheet nativo/web-móvil, modal en web desktop.
+- `src/features/profile/components/profile-menu*.tsx`: menú de opciones (**Editar perfil, Configuración, Abrir panel** si MODERATOR/ADMIN, **Cerrar sesión**) — bottom sheet nativo/web-móvil, **popover anclado al botón ⋯** en web desktop.
+- `app/(tabs)/profile.tsx`: se quitaron los botones inline (Editar/Ajustes) — ahora viven en el menú; el botón **⋯** queda en la **esquina superior derecha de la portada** (`top: 8`, `right: 12`; se corregía el doble inset).
 - `src/components/screens/app-header.tsx` (nuevo) y `Screen` con **`showBack`**: norma de que las pantallas secundarias (perfil/editar, ajustes, tickets, grupos, notificaciones, evento, escáner) tengan botón atrás.
 - `src/components/ui/feed-list.tsx`: `numColumns`/`columnWrapperStyle`, `listRef` y `onScrollToIndexFailed`.
 - `app/(tabs)/events.tsx`: header + columna centrada y **grilla de 2 columnas en web** (aprovecha el ancho).
