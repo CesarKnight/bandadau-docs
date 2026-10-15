@@ -25,7 +25,7 @@ info:
     - `title` / `detail`: texto localizado según `Accept-Language` (`es` por defecto, D14).
 
     ## Códigos de error transversales
-    Además de los códigos propios de cada operación, todos los servicios pueden devolver: `VALIDATION_FAILED` (400/422 según el servicio, con `errors[]`),
+    Además de los códigos propios de cada operación, todos los servicios pueden devolver: `VALIDATION_FAILED` (siempre 400, con `errors[]`; ticketing dejó de usar 422, D-8),
     `MALFORMED_REQUEST` (400), `INVALID_CURSOR` (400), `IDEMPOTENCY_KEY_REQUIRED` (400), `IDEMPOTENCY_KEY_INVALID` (400),
     `IDEMPOTENCY_KEY_REUSED` (422), `IDEMPOTENCY_IN_PROGRESS` (409), `CONCURRENT_MODIFICATION` (409), `NOT_ACCEPTABLE` (406),
     `RATE_LIMITED` (429), `DEPENDENCY_UNAVAILABLE` (503). Códigos de campo (`errors[].code`): `REQUIRED`, `INVALID_FORMAT`, `INVALID_VALUE`, `TOO_SHORT`, `TOO_LONG`, `TOO_SMALL`, `TOO_LARGE`, `OUT_OF_RANGE`.
