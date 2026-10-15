@@ -50,6 +50,31 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-14 — Publicación de los repos en GitHub (ThonkasM)
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `main` (frontend: `feat/mobile-bootstrap`) |
+| Objetivo | Crear los repositorios en GitHub y subir el historial inicial |
+| UCs / HU | — (plataforma) |
+| Componentes | los 9 repos del workspace |
+
+**Hecho**
+- Commits pendientes cerrados antes de subir: `bandadau-backend` (servicios), `bandadau-admin` (shell + mfe-moderation), `bandadau-landing`, `bandadau-infra` (mock/). `bandadau-brand` se **inicializó como repo git** (no lo era).
+- `.gitignore` de `bandadau-backend`: se excluyó `services/*/bin/` (clases `.class` compiladas) y `services/*/.deptrac.cache`.
+- Creados y subidos (públicos, owner `ThonkasM`): `bandadau-{docs,shared,backend,frontend,admin,landing,infra,ml,brand}`. `bandadau-frontend` sube la rama **`feat/mobile-bootstrap`** (main queda en el commit inicial).
+
+**Pendientes**
+- [ ] Decidir si `feat/mobile-bootstrap` se fusiona a `main` en `bandadau-frontend`.
+- [ ] Añadir CI por repo (`bandadau-infra/ci/templates` → `<repo>/.github/workflows/ci.yml`).
+- [ ] Revisar si `bandadau-brand` entra en el catálogo/ADR del workspace (hoy es carpeta + repo nuevo).
+
+**Verificación**
+- `gh repo list ThonkasM` → los 9 repos `PUBLIC`; `git push -u` de cada rama OK.
+
+---
+
 ### 2026-10-14 — Grilla del perfil y feed del usuario
 
 | Campo | Valor |
