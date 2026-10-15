@@ -99,7 +99,7 @@ Catálogo mínimo de códigos transversales: `VALIDATION_FAILED`, `MALFORMED_REQ
 `CONCURRENT_MODIFICATION`, `PRECONDITION_FAILED`, `PRECONDITION_REQUIRED`,
 `IDEMPOTENCY_KEY_REUSED` (422), `IDEMPOTENCY_IN_PROGRESS` (409),
 `IDEMPOTENCY_KEY_REQUIRED` (400), `RATE_LIMITED` (429), `DEPENDENCY_UNAVAILABLE` (503),
-`DEPENDENCY_TIMEOUT` (504), `INTERNAL_ERROR`. Códigos de negocio por servicio
+`DEPENDENCY_TIMEOUT` (504), `INVALID_CURSOR` (400), `IDEMPOTENCY_KEY_INVALID` (400), `NOT_ACCEPTABLE` (406), `INTERNAL_ERROR`. Códigos de negocio por servicio
 (`EVENT_FULL`, `ALREADY_REGISTERED`, `INSUFFICIENT_FUNDS`, `EMAIL_DOMAIN_NOT_ALLOWED`,
 `TICKET_ALREADY_USED`, `MEDIA_REJECTED`…) se declaran en su OpenAPI.
 
@@ -107,14 +107,14 @@ Catálogo mínimo de códigos transversales: `VALIDATION_FAILED`, `MALFORMED_REQ
 
 - `Authorization: Bearer <JWT>` emitido por identity (RS256), validado por JWKS
   (`/.well-known/jwks.json`) con caché; nunca se llama a identity por petición.
-- Claims usados: `sub`, `roles[]`, `universityId`, `locale`, `typ` (`user|service`).
+- Claims usados: `sub`, `roles[]`, `uni` (universityId), `locale`, `typ` (`user|service`), `aud` (`bandada-app|bandada-admin|bandada-internal`); ver `seguridad-y-sso.md` §2.
 - Roles por operación declarados en OpenAPI (`x-roles: [ORGANIZER]`) y aplicados en el borde
   (guard / filtro), y las reglas de propiedad (dueño del post, organizador del evento) en el caso de uso.
-- `/internal/v1/**` exige `typ=service` y el gateway Traefik lo bloquea (403).
+- `/internal/v1/**` exige `typ=service` y `aud=bandada-internal` (en la fase 1 no se exigen scopes) y el gateway Traefik lo bloquea (403).
 
 ## 6. Paginación por cursor
 
-- Parámetros: `cursor` (opaco), `limit` (por defecto 20, máximo 100; fuera de rango → 422).
+- Parámetros: `cursor` (opaco), `limit` (por defecto 20, rango 1–50; fuera de rango → `400 VALIDATION_FAILED`).
 - Respuesta `{ items, nextCursor }`; `nextCursor: null` = fin. Sin `total` (caro) salvo
   endpoints internos de estadística.
 - Cursor = base64url de `{"k": <valor de orden>, "id": "<uuidv7>"}`; el servidor lo valida

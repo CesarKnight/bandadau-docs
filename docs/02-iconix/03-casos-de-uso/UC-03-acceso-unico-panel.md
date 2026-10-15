@@ -43,7 +43,7 @@ Relación: UC-03 «extend» UC-02 (requiere sesión activa en la app de origen).
 10. El panel envía `exchangeHandoffCode` con `{ code, codeVerifier }`.
 11. El sistema busca el `HandoffCode` por hash y lo **consume atómicamente**: `UPDATE handoff_codes SET used_at = now() WHERE code_hash = ? AND used_at IS NULL AND expires_at > now() RETURNING …`.
 12. El sistema verifica `BASE64URL(SHA-256(codeVerifier)) == codeChallenge` y que `targetApp` corresponda a la app que canjea (`ADMIN`).
-13. El sistema vuelve a verificar que el `User` siga `ACTIVE` con rol `MODERATOR`/`ADMIN` y emite un **par de tokens nuevo** con `aud=admin` y una **familia de refresh nueva** (`clientApp = ADMIN`), independiente de la sesión de la app.
+13. El sistema vuelve a verificar que el `User` siga `ACTIVE` con rol `MODERATOR`/`ADMIN` y emite un **par de tokens nuevo** con `aud=bandada-admin` y una **familia de refresh nueva** (`clientApp = ADMIN`), independiente de la sesión de la app.
 14. El panel guarda la sesión (access en memoria, refresh según su `SessionManager`), aplica `locale`/`theme` del usuario y navega a `/` (dashboard). Los MFEs reciben el `access-token` como propiedad (D5).
 15. El administrador ve el panel sin haber escrito credenciales.
 
@@ -57,14 +57,14 @@ Los pasos de esta sección se citan como I1…I11 en los alternos y en la trazab
 
 1. El administrador pulsa "Abrir en la app" en el panel.
 2. El panel genera `codeVerifier`/`codeChallenge` con `crypto.getRandomValues` y `crypto.subtle.digest('SHA-256', …)`.
-3. El panel envía `createHandoffCode` con `{ targetApp: APP, codeChallenge, codeChallengeMethod: S256 }` y su access token (`aud=admin`).
+3. El panel envía `createHandoffCode` con `{ targetApp: APP, codeChallenge, codeChallengeMethod: S256 }` y su access token (`aud=bandada-admin`).
 4. El sistema verifica que el `User` esté `ACTIVE` (cualquier rol puede ir a la app) y crea el `HandoffCode` con `targetApp = APP`.
 5. El sistema responde `redirectUrl = "https://app.<dominio>/sso/callback?code=<code>"`.
 6. El panel navega a `<redirectUrl>#cv=<codeVerifier>`.
 7. En un **teléfono con la app instalada**, el SO abre la app nativa por *universal link* (iOS, `associatedDomains: ["applinks:app.<dominio>"]` + `apple-app-site-association`) o *App Link* (Android, `intentFilters` con `autoVerify` + `/.well-known/assetlinks.json`), ambos servidos por el host web de la app. expo-router enruta a `app/sso/callback.tsx`.
 8. En un **escritorio o teléfono sin la app**, se carga la PWA en la misma ruta `/sso/callback`.
 9. La pantalla `sso/callback` obtiene la URL completa (`Linking.getInitialURL()` / evento `url` en nativo; `window.location` en web), extrae `code` y `cv`, y llama `exchangeHandoffCode`.
-10. El sistema canjea como en los pasos 11–13 con `targetApp = APP`, `aud=app`, familia nueva `clientApp = APP`.
+10. El sistema canjea como en los pasos 11–13 con `targetApp = APP`, `aud=bandada-app`, familia nueva `clientApp = APP`.
 11. La app guarda la sesión (UC-02 paso 9) y navega al feed.
 
 ### Cursos alternos
@@ -72,10 +72,10 @@ Los pasos de esta sección se citan como I1…I11 en los alternos y en la trazab
 - **1a. Usuario sin rol de panel:** el botón "Abrir panel" no se muestra. Si se llama la API igualmente, el sistema responde `403 HANDOFF_TARGET_FORBIDDEN`.
 - **3a. Access token vencido:** el `apiClient` renueva (UC-02 curso B) y reintenta.
 - **3b. Sin conexión:** la app muestra "Necesitas conexión para abrir el panel" (texto i18n) y no genera código.
-- **10a. Código vencido (> 60 s, p. ej. el navegador tardó en abrir):** `400 HANDOFF_CODE_EXPIRED`. El panel muestra "El enlace expiró" y el **formulario de login normal** del panel (UC-02); el administrador puede volver a la app y reintentar.
-- **10b. Código ya usado** (recarga de la página callback, doble pestaña o intento de *replay*): el `UPDATE` atómico no afecta filas → `400 HANDOFF_CODE_INVALID`. Si el panel ya tenía sesión por el primer canje, simplemente navega a `/`.
-- **10c. Verificador incorrecto o ausente** (alguien obtuvo solo el `code` de un log o historial): `400 HANDOFF_CODE_INVALID`; el código queda consumido (no se puede reintentar con otro verificador) y se registra log de seguridad `handoff_pkce_mismatch`.
-- **10d. `targetApp` no coincide** (un código `APP` se intenta canjear en el panel): `400 HANDOFF_CODE_INVALID`.
+- **10a. Código vencido (> 60 s, p. ej. el navegador tardó en abrir):** `401 HANDOFF_CODE_INVALID`. El panel muestra "El enlace expiró" y el **formulario de login normal** del panel (UC-02); el administrador puede volver a la app y reintentar.
+- **10b. Código ya usado** (recarga de la página callback, doble pestaña o intento de *replay*): el `UPDATE` atómico no afecta filas → `401 HANDOFF_CODE_INVALID`. Si el panel ya tenía sesión por el primer canje, simplemente navega a `/`.
+- **10c. Verificador incorrecto o ausente** (alguien obtuvo solo el `code` de un log o historial): `401 HANDOFF_CODE_INVALID`; el código queda consumido (no se puede reintentar con otro verificador) y se registra log de seguridad `handoff_pkce_mismatch`.
+- **10d. `targetApp` no coincide** (un código `APP` se intenta canjear en el panel): `401 HANDOFF_CODE_INVALID`.
 - **13a. El usuario perdió el rol o fue suspendido entre el paso 4 y el canje:** `403 HANDOFF_TARGET_FORBIDDEN` / `403 ACCOUNT_SUSPENDED`; el panel muestra login normal.
 - **7a. (nativo) El usuario cierra el navegador in-app antes de cargar:** el código vence sin uso a los 60 s; no hay efecto. Una tarea de limpieza borra códigos vencidos cada hora.
 - **I7a. (inverso) El universal link no abre la app** (dominio no verificado, navegador in-app de otra aplicación): se carga la PWA (paso I8); el flujo funciona igual en web.
@@ -224,10 +224,10 @@ sequenceDiagram
         CB->>SH: store(session) y aplicar locale y theme
         CB-->>A: Dashboard del panel sin login
     else Código vencido
-        HC-->>CB: 400 HANDOFF_CODE_EXPIRED
+        HC-->>CB: 401 HANDOFF_CODE_INVALID
         CB-->>A: Mensaje i18n y formulario de login normal
     else Código usado o verificador incorrecto
-        HC-->>CB: 400 HANDOFF_CODE_INVALID
+        HC-->>CB: 401 HANDOFF_CODE_INVALID
         CB-->>A: Formulario de login normal
     end
 ```
@@ -293,7 +293,7 @@ sequenceDiagram
 | Tipo | operationId | Detalle |
 |---|---|---|
 | OpenAPI | `createHandoffCode` 🔑 | `POST /api/v1/auth/handoff` body `{ targetApp: "ADMIN" \| "APP", codeChallenge, codeChallengeMethod: "S256" }` → `201 { code, redirectUrl, expiresIn: 60 }`; `403 HANDOFF_TARGET_FORBIDDEN`, `429` |
-| OpenAPI | `exchangeHandoffCode` | `POST /api/v1/auth/handoff/exchange` body `{ code, codeVerifier }` → `200 { accessToken, refreshToken, expiresIn, user }`; `400 HANDOFF_CODE_EXPIRED`, `400 HANDOFF_CODE_INVALID`, `403 HANDOFF_TARGET_FORBIDDEN`, `403 ACCOUNT_SUSPENDED` |
+| OpenAPI | `exchangeHandoffCode` | `POST /api/v1/auth/handoff/exchange` body `{ code, codeVerifier }` → `200 { accessToken, refreshToken, expiresIn, user }`; `401 HANDOFF_CODE_INVALID`, `403 HANDOFF_TARGET_FORBIDDEN`, `403 ACCOUNT_SUSPENDED` |
 | Estático | `/.well-known/apple-app-site-association`, `/.well-known/assetlinks.json` | Servidos por el host de la app web (`app.<dominio>`) |
 
 No se publican eventos de dominio (se audita en logs de seguridad y trazas OTel con `handoff.target_app` y `handoff.result`).
@@ -306,12 +306,12 @@ No se publican eventos de dominio (se audita en logs de seguridad y trazas OTel 
 |---|---|
 | AT-03-01 | **Given** un `ADMIN` con sesión en la app nativa **When** pulsa "Abrir panel" **Then** el navegador in-app abre el dashboard del panel sin pedir credenciales en < 3 s. |
 | AT-03-02 | **Given** un `STUDENT` sin otros roles **When** llama `createHandoffCode` con `targetApp=ADMIN` **Then** `403 HANDOFF_TARGET_FORBIDDEN` y el botón no aparece en Ajustes. |
-| AT-03-03 | **Given** un código emitido **When** se canjea a los 61 s **Then** `400 HANDOFF_CODE_EXPIRED` y el panel muestra el login normal. |
-| AT-03-04 | **Given** un código ya canjeado **When** se recarga `/sso/callback` **Then** el segundo canje da `400 HANDOFF_CODE_INVALID` y no se emiten tokens nuevos. |
+| AT-03-03 | **Given** un código emitido **When** se canjea a los 61 s **Then** `401 HANDOFF_CODE_INVALID` y el panel muestra el login normal. |
+| AT-03-04 | **Given** un código ya canjeado **When** se recarga `/sso/callback` **Then** el segundo canje da `401 HANDOFF_CODE_INVALID` y no se emiten tokens nuevos. |
 | AT-03-05 | **Given** dos canjes concurrentes del mismo código **When** llegan a la vez **Then** exactamente uno recibe `200` (consumo atómico). |
-| AT-03-06 | **Given** un código válido **When** se canjea con un `codeVerifier` distinto **Then** `400 HANDOFF_CODE_INVALID` y el código queda inutilizable. |
+| AT-03-06 | **Given** un código válido **When** se canjea con un `codeVerifier` distinto **Then** `401 HANDOFF_CODE_INVALID` y el código queda inutilizable. |
 | AT-03-07 | **Given** el flujo completo **When** se revisan los logs de Traefik y del panel **Then** aparece `code` pero nunca `cv`, y la barra del navegador queda en `/sso/callback` sin parámetros. |
-| AT-03-08 | **Given** un código `targetApp=APP` **When** se canjea desde el panel esperando `ADMIN` **Then** `400 HANDOFF_CODE_INVALID`. |
+| AT-03-08 | **Given** un código `targetApp=APP` **When** se canjea desde el panel esperando `ADMIN` **Then** `401 HANDOFF_CODE_INVALID`. |
 | AT-03-09 | **Given** un `MODERATOR` en el panel en un teléfono con la app instalada **When** pulsa "Abrir en la app" **Then** se abre la app nativa en el feed con sesión. |
 | AT-03-10 | **Given** el mismo flujo en un escritorio **When** pulsa "Abrir en la app" **Then** se abre la PWA con sesión. |
 | AT-03-11 | **Given** el canje exitoso **When** el administrador cierra sesión en el panel **Then** la sesión de la app sigue activa (familias independientes). |
@@ -333,4 +333,4 @@ No se publican eventos de dominio (se audita en logs de seguridad y trazas OTel 
 **PROPUESTAS derivadas** (no aplicadas en normativos):
 
 1. *D1 identity:* la fila de `createHandoffCode` lista solo `{ targetApp }`; D4 agrega `codeChallenge`. Unificar el body como `{ targetApp, codeChallenge, codeChallengeMethod: "S256" }` y la respuesta como `201`.
-2. *Códigos de error* `HANDOFF_CODE_EXPIRED`, `HANDOFF_CODE_INVALID`, `HANDOFF_TARGET_FORBIDDEN`: agregar al catálogo de errores de `api-rest-guidelines.md` y a los mensajes de `@bandada/i18n`.
+2. *Códigos de error* (resuelto en la consolidación de la fase 1): se usa un solo `401 HANDOFF_CODE_INVALID` para código inexistente, vencido, usado, de otra app o PKCE incorrecto (no filtra información); `403 HANDOFF_TARGET_FORBIDDEN` solo al crear el código sin rol suficiente. `HANDOFF_CODE_EXPIRED` ya no existe.

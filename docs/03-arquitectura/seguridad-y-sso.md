@@ -50,12 +50,12 @@ flowchart LR
 |---|---|---|
 | `iss` | `${PUBLIC_API_URL}` (`http://api.bandada.localhost` en dev) | Validado por todos |
 | `aud` | `bandada-app` (app), `bandada-admin` (panel), `bandada-internal` (servicio) | Cada servicio acepta solo las audiencias que le corresponden (§6) |
-| `sub` | UUIDv7 del usuario, o `service:<nombre>` | Identidad |
+| `sub` | UUIDv7 del usuario; en tokens de servicio, el `clientId` (p. ej. `admin-gateway`, también en el claim `client_id`) | Identidad |
 | `typ` | `user` \| `service` | Distingue tokens; `/internal/**` exige `service` |
 | `roles` | `STUDENT`, `ORGANIZER`, `MODERATOR`, `ADMIN` | Autorización gruesa |
 | `uni` | UUID de la universidad | Filtrado multi-universidad (posts, eventos) |
 | `locale` | `es` \| `en` (D14) | Idioma por defecto de respuestas/plantillas cuando falta `Accept-Language`. **No** es autorización; puede quedar desactualizado hasta 15 min tras `updateMyPreferences` |
-| `scope` | Tokens de servicio: `internal:read`, `internal:write`, `mcp:tools` | Autorización fina servicio a servicio |
+| `scope` | Tokens de servicio: `internal:read internal:write` (fase 2: `mcp:tools`). En usuario va vacío | Autorización fina servicio a servicio. **Fase 1: `/internal/**` valida `typ=service` + `aud=bandada-internal` y no exige scopes concretos** (ver `deuda-tecnica.md`) |
 | `jti` | UUIDv7 | Trazabilidad; no hay lista negra de access tokens (vida corta) |
 
 Tokens `aud = bandada-admin` solo se emiten a usuarios con `MODERATOR` o `ADMIN`.
@@ -132,7 +132,7 @@ CREATE INDEX idx_refresh_family ON refresh_tokens (family_id);
 Algoritmo de `POST /auth/refresh`:
 
 1. `SELECT … WHERE token_hash = sha256(t) FOR UPDATE`.
-2. No existe / vencido → `401 REFRESH_TOKEN_INVALID`.
+2. No existe / vencido / ausente → `401 INVALID_REFRESH_TOKEN`.
 3. `used_at IS NOT NULL` o `revoked_at IS NOT NULL` → **reutilización**: revocar toda
    la familia (`UPDATE … SET revoked_at = now() WHERE family_id = ?`), log
    `event=auth.refresh.reuse_detected` (nivel WARN), `401 REFRESH_TOKEN_REUSED`.
@@ -251,7 +251,7 @@ sequenceDiagram
   `window.open(url, '_blank', 'noopener')`.
 - El `UPDATE … RETURNING` consume el código **antes** de verificar el `verifier`:
   un verifier incorrecto quema el código (impide fuerza bruta).
-- Respuestas de error uniformes: `400 HANDOFF_CODE_INVALID` (no revela si expiró, se usó o no coincide).
+- Respuestas de error uniformes: `401 HANDOFF_CODE_INVALID` (no revela si expiró, se usó o no coincide).
 
 ### 7.3 Flujo panel → app
 

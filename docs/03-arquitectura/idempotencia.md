@@ -34,7 +34,7 @@ flowchart LR
 
 | Situación | Respuesta |
 |---|---|
-| Endpoint ♻️ sin cabecera | `400` Problem Details `code: IDEMPOTENCY_KEY_MISSING` |
+| Endpoint ♻️ sin cabecera | `400` Problem Details `code: IDEMPOTENCY_KEY_REQUIRED` |
 | Cabecera que no es UUID (v4 o v7) | `400 IDEMPOTENCY_KEY_INVALID` |
 | Clave nueva | Se ejecuta el handler; se guarda la respuesta |
 | Misma clave, mismo hash, `COMPLETED` | Respuesta guardada (status, cuerpo, cabeceras permitidas) + `Idempotent-Replayed: true` |

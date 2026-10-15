@@ -36,7 +36,7 @@ El visitante pulsa **"Crear cuenta"** en la app (nativa o PWA) o llega desde el 
 7. El sistema valida que el dominio del correo pertenezca a `University.allowedDomains` y que no exista un `User` `ACTIVE` con ese correo.
 8. El sistema crea el `User` en estado `PENDING_VERIFICATION` con rol `STUDENT`, `locale` (el enviado o, si falta, el de `Accept-Language`; por defecto `es`) y `theme = SYSTEM`, su `Credential` (hash Argon2id) y una `EmailVerification` (código de 6 dígitos guardado hasheado, vence en 15 min, 0 intentos).
 9. El sistema envía al correo institucional el código de verificación, con la plantilla del `locale` del usuario (solo tema claro en correos, D13).
-10. El sistema responde `202 Accepted` y la app muestra la **pantalla Verificar correo**.
+10. El sistema responde `201 Created` (alineado con el OpenAPI; ver nota de consolidación) y la app muestra la **pantalla Verificar correo**.
 11. El visitante ingresa el código de 6 dígitos recibido.
 12. La app envía `verifyEmail` con `{ email, code }`.
 13. El sistema valida el código (no vencido, intentos < 5, hash coincide), activa el `User` (`ACTIVE`, `emailVerifiedAt = now`) y registra en el **outbox** el evento `bandada.identity.user.registered.v1`, todo en una sola transacción.
@@ -53,9 +53,9 @@ El visitante pulsa **"Crear cuenta"** en la app (nativa o PWA) o llega desde el 
 - **6a. Reintento con la misma `Idempotency-Key` (doble toque o red intermitente):** el sistema devuelve la respuesta guardada con `Idempotent-Replayed: true`; no se crea un segundo `User` ni se envía otro correo.
 - **6b. Misma clave con cuerpo distinto:** el sistema responde `422 IDEMPOTENCY_KEY_REUSED`.
 - **7a. Dominio no permitido (servidor):** el sistema responde `422` Problem Details `EMAIL_DOMAIN_NOT_ALLOWED`; la app muestra el mensaje del paso 4a.
-- **7b. Ya existe un `User` `ACTIVE` con ese correo:** para no permitir enumeración de cuentas, el sistema responde el mismo `202` y envía al correo un aviso "Ya tienes una cuenta en Bandada U, inicia sesión o recupera tu contraseña". No se crea nada.
+- **7b. Ya existe un `User` `ACTIVE` con ese correo:** para no permitir enumeración de cuentas, el sistema responde igual que en el alta (`201`, solo con `REGISTER_HIDE_EXISTING_ACCOUNTS=true`; por defecto, `409 EMAIL_ALREADY_REGISTERED`) y envía al correo un aviso "Ya tienes una cuenta en Bandada U, inicia sesión o recupera tu contraseña". No se crea nada.
 - **7c. Existe un `User` `PENDING_VERIFICATION` con ese correo:** el sistema reemplaza el nombre visible y la `Credential` pendientes, invalida la `EmailVerification` anterior y genera una nueva (vuelve al paso 9). Quien controle el buzón es quien termina la verificación.
-- **9a. Falla el servidor de correo:** el `User` queda creado; el sistema reintenta el envío 3 veces con backoff y responde `202` igualmente. El visitante puede usar "Reenviar código" (12b).
+- **9a. Falla el servidor de correo:** el `User` queda creado; el sistema reintenta el envío 3 veces con backoff y responde `201` igualmente. El visitante puede usar "Reenviar código" (12b).
 - **12a. Código incorrecto:** el sistema incrementa `attempts` y responde `400 VERIFICATION_CODE_INVALID` con `remainingAttempts`. Al llegar a 5 intentos responde `429 VERIFICATION_ATTEMPTS_EXCEEDED` y exige reenviar código.
 - **12b. Código vencido o agotado:** el visitante pulsa **"Reenviar código"** → `resendVerificationCode` (rate-limit: 1 por 60 s y 5 por hora por correo) → se invalida el anterior y se envía uno nuevo.
 - **12c. El visitante cierra la app antes de verificar:** al volver e intentar iniciar sesión (UC-02), el sistema responde `403 EMAIL_NOT_VERIFIED` y la app lo lleva a la pantalla Verificar correo.
@@ -234,9 +234,9 @@ sequenceDiagram
     UC->>MAIL: sendVerificationCode(email, code)
     MAIL-->>UC: enviado (o reintento asíncrono)
     UC-->>CTL: RegistrationAccepted
-    CTL->>IDF: complete(202, body)
+    CTL->>IDF: complete(201, body)
     IDF->>DDB: UpdateItem COMPLETED + responseBody
-    CTL-->>UI: 202 status PENDING_VERIFICATION, codeExpiresIn 900
+    CTL-->>UI: 201 status PENDING_VERIFICATION, verificationExpiresIn 900
     UI-->>V: Muestra pantalla Verificar correo
 
     alt Reintento con la misma Idempotency-Key
@@ -244,7 +244,7 @@ sequenceDiagram
         GW->>CTL: registerUser
         CTL->>IDF: preHandle
         IDF->>DDB: GetItem COMPLETED, hash igual
-        IDF-->>UI: 202 guardado + Idempotent-Replayed true
+        IDF-->>UI: 201 guardado + Idempotent-Replayed true
     end
 ```
 
@@ -336,7 +336,7 @@ Prueba de arquitectura (ArchUnit): `domain..` no depende de `org.springframework
 | Tipo | Identificador | Detalle |
 |---|---|---|
 | OpenAPI | `listUniversities` | `GET /api/v1/universities` → `{ items: [{ id, name, allowedDomains[] }], nextCursor }` |
-| OpenAPI | `registerUser` ♻️ | `POST /api/v1/auth/register` body `{ universityId, displayName, email, password, locale? }` → `202 { email, status: "PENDING_VERIFICATION", codeExpiresIn: 900 }`; errores `422 EMAIL_DOMAIN_NOT_ALLOWED`, `422 IDEMPOTENCY_KEY_REUSED`, `409 IDEMPOTENCY_IN_PROGRESS`, `429` |
+| OpenAPI | `registerUser` ♻️ | `POST /api/v1/auth/register` body `{ universityId, email, password, locale? }` → `201 { userId, email, status: "PENDING_VERIFICATION", verificationExpiresIn: 900 }` (el contrato no recibe `displayName`: se deriva de la parte local del correo); errores `422 EMAIL_DOMAIN_NOT_ALLOWED`, `422 IDEMPOTENCY_KEY_REUSED`, `400 IDEMPOTENCY_KEY_REQUIRED`, `409 EMAIL_ALREADY_REGISTERED`, `409 IDEMPOTENCY_IN_PROGRESS`, `429` |
 | OpenAPI | `verifyEmail` | `POST /api/v1/auth/verify-email` body `{ email, code }` → `200 { accessToken, refreshToken, expiresIn, user }`; errores `400 VERIFICATION_CODE_INVALID`, `410 VERIFICATION_CODE_EXPIRED`, `429 VERIFICATION_ATTEMPTS_EXCEEDED` |
 | OpenAPI | `resendVerificationCode` | `POST /api/v1/auth/resend-code` body `{ email }` → `202` siempre (anti-enumeración); `429` por rate-limit |
 | AsyncAPI | `bandada.identity.user.registered.v1` | `data: { userId, email, displayName, universityId, roles: ["STUDENT"], locale, registeredAt }`; `subject = userId` |
@@ -371,14 +371,14 @@ Ejemplo de sobre:
 
 | ID | Escenario |
 |---|---|
-| AT-01-01 | **Given** la universidad UMSA con `allowedDomains = ["umsa.bo"]` **When** el visitante se registra con `lucia@est.umsa.bo` y una contraseña válida **Then** recibe `202`, existe un `User` `PENDING_VERIFICATION` y Mailpit contiene un correo con un código de 6 dígitos. |
+| AT-01-01 | **Given** la universidad UMSA con `allowedDomains = ["umsa.bo"]` **When** el visitante se registra con `lucia@est.umsa.bo` y una contraseña válida **Then** recibe `201`, existe un `User` `PENDING_VERIFICATION` y Mailpit contiene un correo con un código de 6 dígitos. |
 | AT-01-02 | **Given** un registro pendiente **When** envía el código correcto a `verifyEmail` **Then** recibe `200` con tokens, el `User` queda `ACTIVE` con rol `STUDENT` y en `outbox_events` hay un `bandada.identity.user.registered.v1`. |
 | AT-01-03 | **Given** el evento publicado **When** social y notification lo consumen **Then** en ≤ 5 s existe `Profile` con el `displayName` y existe el ítem `PREF` del usuario. |
 | AT-01-04 | **Given** el mismo evento entregado dos veces (mismo `id`) **When** social lo procesa **Then** existe un solo `Profile` y un solo registro en `processedMessages`. |
 | AT-01-05 | **Given** un correo `lucia@gmail.com` **When** se registra **Then** recibe `422 EMAIL_DOMAIN_NOT_ALLOWED` y no se crea `User`. |
 | AT-01-06 | **Given** una `Idempotency-Key` ya completada **When** se reenvía el mismo cuerpo **Then** recibe la misma respuesta con `Idempotent-Replayed: true` y Mailpit tiene un solo correo. |
 | AT-01-07 | **Given** una `Idempotency-Key` ya usada **When** se envía con otro cuerpo **Then** recibe `422 IDEMPOTENCY_KEY_REUSED`. |
-| AT-01-08 | **Given** un `User` `ACTIVE` con ese correo **When** alguien se registra con él **Then** recibe `202` (indistinguible) y el correo recibido es el aviso "ya tienes cuenta". |
+| AT-01-08 | **Given** un `User` `ACTIVE` con ese correo **When** alguien se registra con él **Then** recibe `201` (indistinguible; solo con `REGISTER_HIDE_EXISTING_ACCOUNTS=true`, por defecto `409`) y el correo recibido es el aviso "ya tienes cuenta". |
 | AT-01-09 | **Given** un código emitido **When** se envían 5 códigos incorrectos **Then** el 5.º devuelve `429 VERIFICATION_ATTEMPTS_EXCEEDED` y ni el código correcto activa la cuenta hasta reenviar. |
 | AT-01-10 | **Given** un código emitido hace 16 min **When** se envía **Then** `410 VERIFICATION_CODE_EXPIRED`. |
 | AT-01-11 | **Given** `social-service` detenido **When** se completa la verificación **Then** el login funciona; al levantar social el `Profile` aparece (degradación elegante, RNF-03). |

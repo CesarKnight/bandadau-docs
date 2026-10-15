@@ -401,7 +401,7 @@ El cambio de tema/idioma en el header actualiza `data-theme`/`lang` del document
 │  ⟳ Iniciando sesión…         │  ← exchangeHandoffCode { code, codeVerifier (#cv) }
 │                              │     limpia la URL (history.replaceState)
 │  ✓ → redirige a /dashboard   │
-│  ⚠ El enlace expiró o ya se  │  ← 400/410 code=HANDOFF_CODE_INVALID
+│  ⚠ El enlace expiró o ya se  │  ← 401 code=HANDOFF_CODE_INVALID
 │    usó. [Iniciar sesión]     │
 └──────────────────────────────┘
 ```

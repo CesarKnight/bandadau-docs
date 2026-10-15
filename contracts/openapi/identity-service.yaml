@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — identity-service
-  version: 1.1.0
+  version: 1.2.0
   summary: Identidad y acceso (registro, verificación, sesión, SSO handoff, usuarios y universidades).
   description: |
     API del bounded context **Identidad** (`identity-service`, Java 25 + Spring Boot 4,
@@ -20,7 +20,32 @@ info:
     - Rutas `/internal/v1/**` (tag `internal`): solo red interna, token de servicio (`serviceAuth`);
       el gateway las bloquea (403).
 
+    ## Modos de cliente y refresh token
+    La cabecera `X-Bandada-Client` (`native` por defecto, `web`, `admin`) declara el tipo de cliente en
+    `verify-email`, `login`, `refresh`, `logout` y `handoff/exchange`:
+
+    | Valor | Audiencia (`aud`) | Refresh token |
+    |---|---|---|
+    | `native` | `bandada-app` | En el cuerpo (`AuthTokens.refreshToken`); el cliente lo guarda en Keychain/Keystore |
+    | `web` | `bandada-app` | **No** va en el cuerpo: cookie `HttpOnly` `bandada_rt` |
+    | `admin` | `bandada-admin` | **No** va en el cuerpo: cookie `HttpOnly` `bandada_admin_rt` |
+
+    La cookie se fija con `Set-Cookie` (`HttpOnly; SameSite=Strict; Path=/api/v1/auth; Max-Age=<refreshExpiresIn>`, `Secure`
+    salvo `COOKIE_SECURE=false` en dev). En `refresh` y `logout` con cliente `web`/`admin` el cuerpo se omite y el servidor lee la
+    cookie (el `Origin`, si viene, debe estar en `CORS_ORIGINS`, si no `403 FORBIDDEN`); si no hay cookie, `401 INVALID_REFRESH_TOKEN`.
+    Un valor de `X-Bandada-Client` desconocido responde `400 VALIDATION_FAILED`.
+
+    ## Claims de los tokens
+    Access token de usuario: `iss`, `aud` (`bandada-app` | `bandada-admin`), `sub` (userId), `typ=user`, `roles[]`, `uni`, `locale`, `scope` (vacío), `jti`, `iat`, `exp`.
+    Token de servicio: `aud=bandada-internal`, `typ=service`, `sub` = `client_id` = clientId, `scope` (lista separada por espacios). Los servicios validan
+    `typ=service` y `aud=bandada-internal` en `/internal/v1/**`; **en la fase 1 no se exigen scopes concretos** (se emiten `internal:read internal:write`).
+
     ## Changelog
+    - 1.2.0 (2026-10-15): consolidación fase 1 — cabecera `X-Bandada-Client` y cookie de refresh (`bandada_rt` / `bandada_admin_rt`);
+      `AuthTokens.refreshToken` opcional (ausente en web/admin) y cuerpo opcional en `refresh`/`logout`; claims reales (`typ=user|service`,
+      `aud=bandada-app|bandada-admin|bandada-internal`, `uni`); filtro `ids` en `searchUsers`; `INVALID_REFRESH_TOKEN`, `HANDOFF_CODE_INVALID` 401,
+      `INVALID_VERIFICATION_CODE` 422; `REGISTER_HIDE_EXISTING_ACCOUNTS`; `displayName` derivado del correo; 429 `RATE_LIMITED`
+      con `Retry-After`; `LAST_ADMIN`, `INVALID_STATUS_TRANSITION`, `UNIVERSITY_DOMAIN_TAKEN`, `CONCURRENT_MODIFICATION`, `FEATURE_DISABLED` (501 en `mcp-tokens`).
     - 1.1.0 (2026-10-14): `createMcpToken` / `revokeMcpToken` (token MCP de 8 h, `aud=mcp`, scope `mcp:tools`; D15, ADR-0016); `University.enabled` deja de ser propuesta.
     - 1.0.0 (2026-10-14): versión inicial contract-first (D1, D3, D4, D13, D14).
   contact:
@@ -58,6 +83,11 @@ paths:
         universidad indicada y estar habilitado (UC-01, RF-01, RF-02). Publica
         `bandada.identity.user.registered.v1` al verificarse el correo.
         Si no se envía `locale`, se toma el de `Accept-Language` (por defecto `es`).
+        El contrato no recibe nombre: el `displayName` del usuario (evento `user.registered` → `Profile` inicial)
+        se **deriva de la parte local del correo** (`ana.quispe` → `Ana Quispe`, máx. 80 caracteres) y el usuario lo edita luego en su perfil (UC-04).
+        Con `REGISTER_HIDE_EXISTING_ACCOUNTS=true` (anti-enumeración, desactivado por defecto) un correo ya activo
+        también responde `201` y se avisa al titular por correo, en vez de `409 EMAIL_ALREADY_REGISTERED`.
+        Falta de `Idempotency-Key` → `400 IDEMPOTENCY_KEY_REQUIRED`.
       security: []
       parameters:
         - $ref: './shared/components.yaml#/components/parameters/IdempotencyKey'
@@ -162,6 +192,8 @@ paths:
         Si es correcto activa la cuenta (`ACTIVE`) y devuelve los tokens de sesión (UC-01, RF-02).
         Por seguridad, código inexistente, incorrecto o expirado devuelven el mismo `code`
         (`INVALID_VERIFICATION_CODE`), salvo que se agoten los intentos.
+      parameters:
+        - $ref: '#/components/parameters/ClientMode'
       security: []
       requestBody:
         required: true
@@ -275,6 +307,8 @@ paths:
       description: |
         Autentica con correo y contraseña y devuelve access token (15 min), refresh token
         (30 días) y el usuario (UC-02, RF-03). Rate-limit 10/min/IP (RNF-06).
+      parameters:
+        - $ref: '#/components/parameters/ClientMode'
       security: []
       requestBody:
         required: true
@@ -351,10 +385,14 @@ paths:
       description: |
         Intercambia un refresh token válido por un par nuevo (rotación). El refresh usado queda
         revocado. Si se presenta un refresh ya revocado, se revoca toda la familia de tokens
-        (posible robo) y se responde `401 REFRESH_TOKEN_REUSED` (RF-03).
+        (posible robo) y se responde `401 REFRESH_TOKEN_REUSED` (RF-03). Cada rotación emite un
+        refresh nuevo (cuerpo en `native`, cookie en `web`/`admin`; ver «Modos de cliente»).
+      parameters:
+        - $ref: '#/components/parameters/ClientMode'
       security: []
       requestBody:
-        required: true
+        required: false
+        description: Obligatorio con `native`; con `web`/`admin` se omite y el refresh se toma de la cookie `bandada_rt` / `bandada_admin_rt`.
         content:
           application/json:
             schema:
@@ -370,7 +408,7 @@ paths:
         '400':
           $ref: './shared/components.yaml#/components/responses/BadRequest'
         '401':
-          description: Refresh inválido o expirado (`INVALID_REFRESH_TOKEN`) o reutilizado (`REFRESH_TOKEN_REUSED`).
+          description: Refresh inválido, ausente o expirado (`INVALID_REFRESH_TOKEN`), reutilizado (`REFRESH_TOKEN_REUSED`) o cuenta suspendida (`ACCOUNT_SUSPENDED`).
           content:
             application/problem+json:
               schema:
@@ -397,9 +435,12 @@ paths:
       tags: [auth]
       operationId: logout
       summary: Cerrar sesión
-      description: Revoca el refresh token indicado (RF-03). Idempotente por naturaleza; revocar un token ya revocado también responde `204`.
+      description: Revoca el refresh token indicado (cuerpo en `native`, cookie en `web`/`admin`; RF-03). Idempotente por naturaleza; revocar un token ya revocado también responde `204`.
+      parameters:
+        - $ref: '#/components/parameters/ClientMode'
       requestBody:
-        required: true
+        required: false
+        description: Obligatorio con `native`; con `web`/`admin` se omite y se usa la cookie (que la respuesta borra con `Set-Cookie ... Max-Age=0`).
         content:
           application/json:
             schema:
@@ -484,6 +525,8 @@ paths:
         emitidos para ella (`aud` de la app destino). El código se marca usado (`usedAt`) aunque
         el canje falle por PKCE. Código inexistente, expirado, ya usado, de otra app o PKCE
         incorrecto → `401 HANDOFF_CODE_INVALID` (mismo código para no filtrar información).
+      parameters:
+        - $ref: '#/components/parameters/ClientMode'
       security: []
       requestBody:
         required: true
@@ -532,7 +575,7 @@ paths:
       summary: Emitir token de servicio
       description: |
         Flujo *client credentials* para servicios internos (`admin-gateway`,
-        `insights-service`, n8n). Devuelve un JWT `typ=service` usado en `serviceAuth`.
+        `insights-service`, n8n). Devuelve un JWT `typ=service`, `aud=bandada-internal`, `sub`=`client_id`=clientId, usado en `serviceAuth`. Vida 5 min (`SERVICE_TOKEN_TTL`). `scopes` pedidos se intersectan con los permitidos al cliente (`SERVICE_CLIENTS`); si se omiten, se conceden todos los del cliente. En la fase 1 los servicios **no exigen scopes** en `/internal/v1/**`: validan `typ=service` y `aud=bandada-internal`.
         **Solo red interna**: debe invocarse contra `identity-service:7001`; no se publica en
         el gateway. *Propuesta*: que Traefik bloquee `/api/v1/auth/service-token` igual que `/internal/**`.
       servers:
@@ -551,7 +594,7 @@ paths:
                 value:
                   clientId: admin-gateway
                   clientSecret: '<secreto-desde-variables-de-entorno>'
-                  scopes: [users:read, users:write, universities:write]
+                  scopes: [internal:read, internal:write]
       responses:
         '200':
           description: Token de servicio emitido.
@@ -569,7 +612,7 @@ paths:
                     accessToken: eyJhbGciOiJSUzI1NiIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhZG1pbi1nYXRld2F5In0.c2lnbmF0dXJh
                     tokenType: Bearer
                     expiresIn: 300
-                    scopes: [users:read, users:write, universities:write]
+                    scopes: [internal:read, internal:write]
         '400':
           $ref: './shared/components.yaml#/components/responses/BadRequest'
         '401':
@@ -886,6 +929,15 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: ids
+          in: query
+          required: false
+          description: |
+            Lista de ids de usuario separados por comas (resolución por lote, la usa el DataLoader de `admin-gateway`; `user(id)` = `ids=<id>`).
+            Combinable con los demás filtros. Un valor que no sea UUID → `400`.
+          schema:
+            type: string
+          example: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6,0192f1a2-3b4c-7d5e-8f60-718293a4b5c7
         - $ref: './shared/components.yaml#/components/parameters/Cursor'
         - $ref: './shared/components.yaml#/components/parameters/Limit'
       responses:
@@ -1197,6 +1249,17 @@ paths:
 
 components:
   parameters:
+    ClientMode:
+      name: X-Bandada-Client
+      in: header
+      required: false
+      description: |
+        Tipo de cliente. `native` (por defecto): `aud=bandada-app`, refresh en el cuerpo. `web`: `aud=bandada-app`, refresh en cookie `bandada_rt`.
+        `admin`: `aud=bandada-admin`, refresh en cookie `bandada_admin_rt`. Valor desconocido → `400`.
+      schema:
+        type: string
+        enum: [native, web, admin]
+        default: native
     UserId:
       name: userId
       in: path
@@ -1210,6 +1273,13 @@ components:
     AuthTokens:
       description: Sesión iniciada; tokens emitidos.
       headers:
+        Set-Cookie:
+          description: |
+            Solo con `X-Bandada-Client: web|admin`: cookie `bandada_rt` (web) o `bandada_admin_rt` (admin) con el refresh token,
+            `HttpOnly; SameSite=Strict; Path=/api/v1/auth` (+ `Secure` salvo `COOKIE_SECURE=false`).
+          schema:
+            type: string
+          example: bandada_rt=rt_9mQ2xY7kL1pZ4vB8nC3sD6fG0hJ5wE2r; Path=/api/v1/auth; Max-Age=2592000; HttpOnly; SameSite=Strict
         Cache-Control:
           description: Las respuestas con tokens no se cachean.
           schema:
@@ -1419,14 +1489,14 @@ components:
 
     AuthTokens:
       type: object
-      required: [accessToken, refreshToken, tokenType, expiresIn, refreshExpiresIn, user]
+      required: [accessToken, tokenType, expiresIn, refreshExpiresIn, user]
       properties:
         accessToken:
           type: string
-          description: JWT RS256 de acceso.
+          description: JWT RS256 de acceso (`typ=user`, `aud` = `bandada-app` o `bandada-admin`).
         refreshToken:
           type: string
-          description: Refresh token opaco y rotativo.
+          description: 'Refresh token opaco y rotativo. **Ausente** con `X-Bandada-Client: web|admin` (viaja en la cookie `HttpOnly`).'
         tokenType:
           type: string
           const: Bearer

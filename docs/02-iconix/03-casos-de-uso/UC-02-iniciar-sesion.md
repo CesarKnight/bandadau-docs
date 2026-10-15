@@ -35,7 +35,7 @@ Este UC agrupa tres flujos de la misma sesión: **login**, **renovación rotativ
 3. La app envía `login` con `{ email, password }` y `clientApp = APP` (el panel envía `ADMIN`).
 4. El sistema busca el `User` por correo normalizado y verifica la `Credential` con Argon2id.
 5. El sistema verifica que el `User` esté `ACTIVE`.
-6. El sistema emite un **access token** JWT RS256 (15 min) con claims `sub`, `roles`, `uni`, `locale`, `aud` (`app` o `admin`), `typ=access`, `kid`.
+6. El sistema emite un **access token** JWT RS256 (15 min) con claims `sub`, `roles`, `uni`, `locale`, `aud` (`bandada-app` o `bandada-admin`), `typ=user`, `kid`.
 7. El sistema crea una **familia** de refresh (`familyId` nuevo) y un `RefreshToken` opaco (32 bytes aleatorios, base64url) guardado solo como hash SHA-256, con vencimiento a 30 días.
 8. El sistema responde `{ accessToken, refreshToken, expiresIn: 900, user }`.
 9. La app guarda el refresh token en almacenamiento seguro (nativo: `expo-secure-store`; web: IndexedDB), mantiene el access token solo en memoria y aplica las preferencias `locale`/`theme` del `user` (D13, D14).
@@ -67,7 +67,7 @@ Este UC agrupa tres flujos de la misma sesión: **login**, **renovación rotativ
 - **A5b. Cuenta suspendida** (`SUSPENDED`): `403 ACCOUNT_SUSPENDED`; la app muestra el aviso y no guarda nada.
 - **A9a. Sin conexión al iniciar sesión:** la app muestra "Necesitas conexión para iniciar sesión". Si ya existía una sesión en el dispositivo, la app abre en **modo offline** con los datos cacheados (UC-06) sin validar tokens hasta recuperar la red.
 - **B4a. Reutilización detectada** (el refresh presentado ya estaba revocado): indica robo o una copia antigua. El sistema **revoca toda la familia** (`familyId`), registra un log de seguridad `refresh_token_reuse_detected` (sin el token) y responde `401 REFRESH_TOKEN_REUSED`. La app (la legítima o la atacante) pierde la sesión y vuelve a Iniciar sesión.
-- **B4b. Refresh desconocido o vencido:** `401 REFRESH_TOKEN_INVALID`; la app cierra sesión localmente.
+- **B4b. Refresh desconocido o vencido:** `401 INVALID_REFRESH_TOKEN`; la app cierra sesión localmente.
 - **B5a. Usuario suspendido entre renovaciones** (UC-21): `401 ACCOUNT_SUSPENDED` y se revoca la familia. El access token vigente sigue siendo válido hasta su vencimiento (≤ 15 min), riesgo aceptado y documentado.
 - **B2a. Dos pestañas de la PWA renuevan a la vez:** el candado single-flight se comparte entre pestañas con `navigator.locks.request('bandada-refresh')` (Web Locks API); la segunda pestaña lee el refresh nuevo desde IndexedDB al soltarse el candado. Sin esta coordinación la segunda renovación dispararía B4a.
 - **B7a. Se pierde la respuesta de la renovación** (red cae justo después de que el servidor rotó): el siguiente intento usa el refresh viejo → B4a → el usuario debe volver a iniciar sesión. Se acepta este costo a cambio de detección estricta de reutilización (no hay ventana de gracia).
@@ -86,9 +86,9 @@ Este UC agrupa tres flujos de la misma sesión: **login**, **renovación rotativ
 | RN-02.1 | Access token: JWT RS256, 15 min, firmado con la llave activa del JWKS; las llaves rotan cada 90 días manteniendo la anterior publicada hasta que expiren sus tokens. |
 | RN-02.2 | Refresh token: opaco, 30 días, guardado hasheado (SHA-256), uso único, rotación obligatoria en cada renovación. |
 | RN-02.3 | Presentar un refresh ya revocado revoca la familia completa (detección de reutilización, D1 `refreshToken`). |
-| RN-02.4 | La familia guarda `clientApp` (`APP` / `ADMIN`); el `aud` del access token lo refleja y admin-gateway solo acepta `aud=admin`. |
+| RN-02.4 | La familia guarda `clientApp` (`APP` / `ADMIN`); el `aud` del access token lo refleja y admin-gateway solo acepta `aud=bandada-admin`. |
 | RN-02.5 | Nunca se loguean contraseñas ni tokens (convenciones §7). |
-| RN-02.6 | Los servicios validan el access token localmente con JWKS (firma, `exp`, `aud`, `typ=access`); ninguno consulta `identity_db`. |
+| RN-02.6 | Los servicios validan el access token localmente con JWKS (firma, `exp`, `aud`, `typ=user`); ninguno consulta `identity_db`. |
 
 ---
 
@@ -247,7 +247,7 @@ sequenceDiagram
         CTL-->>RC: 401 REFRESH_TOKEN_REUSED
         RC-->>API: Sesión terminada, ir a login
     else Token desconocido o vencido
-        CTL-->>RC: 401 REFRESH_TOKEN_INVALID
+        CTL-->>RC: 401 INVALID_REFRESH_TOKEN
     end
 ```
 
@@ -303,7 +303,7 @@ sequenceDiagram
 | Tipo | operationId | Detalle |
 |---|---|---|
 | OpenAPI | `login` | `POST /api/v1/auth/login` `{ email, password, clientApp? }` → `200 { accessToken, refreshToken, expiresIn, user }`; `401 INVALID_CREDENTIALS`, `403 EMAIL_NOT_VERIFIED`, `403 ACCOUNT_SUSPENDED`, `429 LOGIN_TEMPORARILY_LOCKED` |
-| OpenAPI | `refreshToken` | `POST /api/v1/auth/refresh` `{ refreshToken }` → `200` mismo esquema; `401 REFRESH_TOKEN_REUSED`, `401 REFRESH_TOKEN_INVALID`, `401 ACCOUNT_SUSPENDED` |
+| OpenAPI | `refreshToken` | `POST /api/v1/auth/refresh` `{ refreshToken }` → `200` mismo esquema; `401 REFRESH_TOKEN_REUSED`, `401 INVALID_REFRESH_TOKEN`, `401 ACCOUNT_SUSPENDED` |
 | OpenAPI | `logout` 🔑 | `POST /api/v1/auth/logout` `{ refreshToken }` → `204` (idempotente: revocar algo ya revocado devuelve `204`) |
 | OpenAPI | `getMe` 🔑 | `GET /api/v1/users/me` → `{ id, email, displayName, roles, universityId, locale, theme }` |
 | OpenAPI | `getJwks` | `GET /.well-known/jwks.json` |

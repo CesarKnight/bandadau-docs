@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — componentes compartidos
-  version: 1.1.0
+  version: 1.2.0
   summary: Esquemas, parámetros, cabeceras, respuestas y esquemas de seguridad comunes a todos los servicios.
   description: |
     Este archivo **no describe ningún endpoint**: solo agrupa los componentes que todos los
@@ -24,7 +24,16 @@ info:
     - `code`: identificador estable en `UPPER_SNAKE_CASE`; **los clientes traducen por `code`**.
     - `title` / `detail`: texto localizado según `Accept-Language` (`es` por defecto, D14).
 
+    ## Códigos de error transversales
+    Además de los códigos propios de cada operación, todos los servicios pueden devolver: `VALIDATION_FAILED` (400/422 según el servicio, con `errors[]`),
+    `MALFORMED_REQUEST` (400), `INVALID_CURSOR` (400), `IDEMPOTENCY_KEY_REQUIRED` (400), `IDEMPOTENCY_KEY_INVALID` (400),
+    `IDEMPOTENCY_KEY_REUSED` (422), `IDEMPOTENCY_IN_PROGRESS` (409), `CONCURRENT_MODIFICATION` (409), `NOT_ACCEPTABLE` (406),
+    `RATE_LIMITED` (429), `DEPENDENCY_UNAVAILABLE` (503). Códigos de campo (`errors[].code`): `REQUIRED`, `INVALID_FORMAT`, `INVALID_VALUE`, `TOO_SHORT`, `TOO_LONG`, `TOO_SMALL`, `TOO_LARGE`, `OUT_OF_RANGE`.
+
     ## Changelog
+    - 1.2.0 (2026-10-15): consolidación fase 1 — claims reales de los JWT (`typ=user|service`, `aud=bandada-app|bandada-admin|bandada-internal`, `uni`);
+      `IDEMPOTENCY_KEY_REQUIRED` (antes `IDEMPOTENCY_KEY_MISSING`) e `IDEMPOTENCY_KEY_INVALID`; códigos transversales documentados
+      (`MALFORMED_REQUEST`, `INVALID_CURSOR`, `CONCURRENT_MODIFICATION`, `NOT_ACCEPTABLE`, `DEPENDENCY_UNAVAILABLE`).
     - 1.1.0 (2026-10-14): `AcceptLanguage`, `ContentLanguage`, `Locale`, `ThemePreference` (D13/D14).
     - 1.0.0 (2026-10-14): versión inicial.
   contact:
@@ -193,6 +202,7 @@ components:
         - Misma clave + misma petición → se devuelve la respuesta guardada con `Idempotent-Replayed: true`.
         - Misma clave + petición distinta → `422 IDEMPOTENCY_KEY_REUSED`.
         - Misma clave con la primera petición aún en curso → `409 IDEMPOTENCY_IN_PROGRESS`.
+        - Sin la cabecera en un endpoint ♻️ → `400 IDEMPOTENCY_KEY_REQUIRED`; valor que no es un UUID → `400 IDEMPOTENCY_KEY_INVALID`.
       schema:
         type: string
         format: uuid
@@ -270,7 +280,10 @@ components:
 
   responses:
     BadRequest:
-      description: La petición es inválida (JSON mal formado o fallo de validación de esquema).
+      description: |
+        La petición es inválida: `VALIDATION_FAILED` (fallo de validación de esquema, con `errors[]`), `MALFORMED_REQUEST` (JSON mal formado),
+        `INVALID_CURSOR` (cursor de paginación inválido), `IDEMPOTENCY_KEY_REQUIRED` (falta `Idempotency-Key` en un endpoint ♻️) o
+        `IDEMPOTENCY_KEY_INVALID` (la clave no es un UUID).
       headers:
         Content-Language:
           $ref: '#/components/headers/ContentLanguage'
@@ -366,7 +379,8 @@ components:
     Conflict:
       description: |
         Conflicto con el estado actual del recurso. Incluye `IDEMPOTENCY_IN_PROGRESS` (otra
-        petición con la misma `Idempotency-Key` aún se está procesando; reintentar tras `Retry-After`).
+        petición con la misma `Idempotency-Key` aún se está procesando; reintentar tras `Retry-After`) y
+        `CONCURRENT_MODIFICATION` (bloqueo optimista perdido: releer y reintentar).
       headers:
         Retry-After:
           $ref: '#/components/headers/RetryAfter'
@@ -455,7 +469,7 @@ components:
                 traceId: 4bf92f3577b34da6a3ce929d0e0e4736
 
     ServiceUnavailable:
-      description: El servicio o una dependencia no está disponible temporalmente.
+      description: El servicio o una dependencia no está disponible temporalmente (`SERVICE_UNAVAILABLE`, `DEPENDENCY_UNAVAILABLE`).
       headers:
         Retry-After:
           $ref: '#/components/headers/RetryAfter'
@@ -483,8 +497,9 @@ components:
       bearerFormat: JWT
       description: |
         Access token JWT firmado con **RS256** por `identity-service` (llaves publicadas en
-        `/.well-known/jwks.json`). Vida: 15 min. Claims: `sub` (userId), `roles[]`,
-        `universityId`, `typ=access`, `aud` (`app` o `admin`), `iss`, `exp`, `iat`, `jti`.
+        `/.well-known/jwks.json`). Vida: 15 min. Claims: `sub` (userId), `typ=user`, `roles[]`,
+        `uni` (universityId), `locale`, `scope` (vacío), `aud` (`bandada-app` o `bandada-admin`), `iss`, `exp`, `iat`, `jti`.
+        Cabecera `kid`. Cada servicio valida firma, `iss`, `aud`, `exp` y `typ=user`.
 
     serviceAuth:
       type: http
@@ -493,4 +508,6 @@ components:
       description: |
         Token de servicio JWT (RS256, `typ=service`) emitido por
         `POST /api/v1/auth/service-token` (client credentials). Obligatorio en `/internal/v1/**`.
-        Claims: `sub` (nombre del servicio, p. ej. `admin-gateway`), `scope`, `aud`, `exp`.
+        Claims: `sub` = `client_id` (nombre del servicio, p. ej. `admin-gateway`), `typ=service`, `aud=bandada-internal`,
+        `scope` (`internal:read internal:write`), `iss`, `exp`, `iat`, `jti`. Los servicios validan `typ=service` y
+        `aud=bandada-internal`; en la fase 1 **no exigen scopes concretos**.
