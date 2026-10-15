@@ -29,3 +29,4 @@ Reglas:
 | [ADR-0016](ADR-0016-consolidacion-diseno-detallado.md) | Consolidación del diseño detallado | Aceptada | 2026-10-14 | D15, catálogo §3/§5/§6 |
 | [ADR-0017](ADR-0017-multi-repo-por-capa.md) | Repositorios por capa (estilo Homy) | Aceptada | 2026-10-14 | Arquitectura §6, convenciones §3 |
 | [ADR-0018](ADR-0018-decisiones-implementacion-fase-1.md) | Decisiones de implementación de la fase 1 | Aceptada | 2026-10-15 | ADR-0016, ADR-0017; catálogo §3 |
+| [ADR-0019](ADR-0019-rate-limit-distribuido-en-postgres.md) | Rate limit distribuido de identity en PostgreSQL (Redis diferido) | Aceptada | 2026-10-15 | D-16, ADR-0012 |
