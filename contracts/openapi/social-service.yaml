@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — social-service
-  version: 1.3.0
+  version: 1.4.0
   summary: Red social (perfiles, posts, feed, comentarios, reacciones, seguidores, grupos y denuncias).
   description: |
     API del bounded context **Social** (`social-service`, TypeScript + NestJS 11, Clean
@@ -21,16 +21,21 @@ info:
       `admin-gateway` e `insights-service` (MCP `get_content_stats`, `list_flagged_content`).
 
     ## Decisiones de implementación (fase 1)
-    - Los 404 usan siempre `NOT_FOUND` (no existe `POST_NOT_FOUND`); el recurso se indica en la extensión `resource`.
+    - **404 de dominio**: `POST_NOT_FOUND`, `COMMENT_NOT_FOUND`, `PROFILE_NOT_FOUND` y `GROUP_NOT_FOUND` (recurso indicado en la ruta o, para denuncias, en el cuerpo);
+      `NOT_FOUND` queda para recursos sin código propio (denuncia, solicitud de membresía). En `createPost` un `groupId` inexistente sigue siendo `422 GROUP_NOT_FOUND`.
+    - **Scopes en `/internal/v1/**`**: el token de servicio debe llevar `internal:read` (GET) o `internal:write` (PATCH/POST/DELETE); sin el scope → `403 FORBIDDEN`.
     - **Avatar con revisión**: `updateMyProfile` con `avatarMediaId` de un medio aún `PENDING_UPLOAD`/`PROCESSING` responde `200` y conserva el avatar anterior;
       el medio queda como avatar *pendiente* (campo interno `pendingAvatarMediaId`, **no se expone** en `Profile`) y se promueve a `avatarMediaId`
       al llegar `bandada.media.asset.approved.v1` del mismo dueño (si ya estaba `APPROVED`, se promueve al instante). `FLAGGED`/`REJECTED` → `422` `MEDIA_NOT_APPROVED`.
-      Un campo público `avatarStatus` (`PENDING|APPROVED|REJECTED`) queda como mejora futura (ver `deuda-tecnica.md`).
+      `Profile.avatarStatus` (`PENDING|APPROVED|REJECTED`, `null` sin avatar) expone ese estado: `PENDING` mientras el medio se revisa, `APPROVED` con el avatar vigente,
+      `REJECTED` si el último medio enviado fue `FLAGGED`/`REJECTED` (se conserva el avatar anterior, si lo había).
     - **Suspensión del autor**: al suspenderse un usuario (`bandada.identity.user.suspended.v1`) sus posts y comentarios pasan a `HIDDEN` con
-      `hiddenReason = AUTHOR_SUSPENDED`; al reactivarse se restauran. En `/internal/v1` este motivo se presenta como `MODERATOR`.
+      `hiddenReason = AUTHOR_SUSPENDED`; al reactivarse se restauran. En `/internal/v1` el motivo se presenta tal cual (`AUTHOR_SUSPENDED`), sin disfrazarlo de `MODERATOR`.
     - Un `post.removed` (moderador) conserva el contenido; `post.deleted` solo ocurre por borrado del autor.
 
     ## Changelog
+    - 1.4.0 (2026-10-15): `Profile.avatarStatus` (D-9); códigos 404 de dominio `POST_NOT_FOUND`/`COMMENT_NOT_FOUND`/`PROFILE_NOT_FOUND`/`GROUP_NOT_FOUND` (D-17);
+      `ModerationPost.hiddenReason` conserva `AUTHOR_SUSPENDED`; nuevo `GET /internal/v1/posts/{postId}` (`getPostInternal`, D-6); scopes `internal:read|write` exigidos (D-7).
     - 1.3.0 (2026-10-15): consolidación fase 1 — `HiddenReason` agrega `AUTHOR_SUSPENDED` (deja de ser propuesta); documentado el flujo de avatar pendiente
       (`pendingAvatarMediaId` interno), el uso de `NOT_FOUND` genérico y la suspensión de autor.
     - 1.2.0 (2026-10-14): respuestas a comentarios (UC-07): `Comment.parentId` y `Comment.replyCount`
@@ -185,6 +190,7 @@ paths:
                     bio: Fan del fútbol y de las bases de datos.
                     interests: [postgres, futbol]
                     avatarMediaId: null
+                    avatarStatus: null
                     avatarUrl: null
                     followersCount: 87
                     followingCount: 120
@@ -1276,6 +1282,40 @@ paths:
         '403':
           $ref: './shared/components.yaml#/components/responses/Forbidden'
 
+  /internal/v1/posts/{postId}:
+    parameters:
+      - $ref: '#/components/parameters/PostId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: getPostInternal
+      summary: Obtener un post en cualquier estado (interno)
+      description: |
+        Devuelve el post sin filtrar por visibilidad ni estado (`PUBLISHED`, `HIDDEN`, `REMOVED`, `PENDING_MEDIA`), con autor, medios,
+        `reportsCount` y `hiddenReason`. Usado por `admin-gateway` (detalle de denuncias y moderación). Requiere scope `internal:read`. Inexistente → `404 POST_NOT_FOUND`.
+      servers:
+        - url: http://social-service:7002
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      responses:
+        '200':
+          description: Post.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModerationPost'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
   /internal/v1/posts/{postId}/status:
     parameters:
       - $ref: '#/components/parameters/PostId'
@@ -1520,6 +1560,7 @@ paths:
                     bio: null
                     interests: []
                     avatarMediaId: null
+                    avatarStatus: null
                     avatarUrl: null
                     followersCount: 0
                     followingCount: 0
@@ -1742,6 +1783,7 @@ components:
         bio: Me gusta el desarrollo móvil y los hackatones. 🐦
         interests: [react-native, ia, hackatones]
         avatarMediaId: 0192f29f-0e1f-7a2b-bc3d-4e5f6a7b8c9d
+        avatarStatus: APPROVED
         avatarUrl: http://minio.bandada.localhost/bandada-media/avatars/0192f29f.webp?X-Amz-Signature=abc123
         followersCount: 154
         followingCount: 98
@@ -1913,7 +1955,7 @@ components:
 
     Profile:
       type: object
-      required: [userId, displayName, universityId, career, semester, bio, interests, avatarMediaId, avatarUrl, followersCount, followingCount, postsCount, followedByMe, createdAt, updatedAt]
+      required: [userId, displayName, universityId, career, semester, bio, interests, avatarMediaId, avatarStatus, avatarUrl, followersCount, followingCount, postsCount, followedByMe, createdAt, updatedAt]
       properties:
         userId:
           type: string
@@ -1947,6 +1989,14 @@ components:
         avatarMediaId:
           type: [string, 'null']
           format: uuid
+        avatarStatus:
+          description: |
+            Estado de revisión del avatar: `PENDING` (en revisión; `avatarMediaId` conserva el anterior), `APPROVED` (vigente),
+            `REJECTED` (el último medio enviado fue rechazado). `null` si no hay avatar ni envío.
+          oneOf:
+            - type: string
+              enum: [PENDING, APPROVED, REJECTED]
+            - type: 'null'
         avatarUrl:
           type: [string, 'null']
           format: uri
