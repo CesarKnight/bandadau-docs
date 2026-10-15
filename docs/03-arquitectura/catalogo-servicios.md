@@ -53,9 +53,9 @@ Spring usa Actuator mapeado a esas rutas.
 | API Gateway (edge) | Traefik v3 | 80 (dashboard 8080) | Enrutamiento por prefijo, CORS, rate-limit, TLS en prod |
 | Broker | RabbitMQ 4 (management) | 5672 / 15672 | Eventos de dominio, comandos y respuestas de la SAGA |
 | PostgreSQL | postgres:18 | 5432 | `identity_db`, `events_db`, `wallet_db` (una instancia, 3 bases, 3 usuarios) |
-| MongoDB | mongo:8 (replica set de 1 nodo `rs0`) | 27017 | `social`, `media` (replica set necesario para transacciones/outbox) |
+| MongoDB | mongo:8.0.19 fijado (replica set de 1 nodo `rs0`; ADR-0018) | 27017 | `social`, `media` (replica set necesario para transacciones/outbox) |
 | DynamoDB | DynamoDB Local (dev) / AWS DynamoDB (prod) | 8000 | `bandada-ticketing`, `bandada-notifications`, `bandada-insights`, `bandada-idempotency` |
-| Object storage | MinIO (dev) / S3 (prod) | 9000 / 9001 | Media de usuarios, audios de reportes, modelos ONNX |
+| Object storage | MinIO `pgsty/minio` (dev; ADR-0018) / S3 (prod) | 9000 / 9001 | Media de usuarios, audios de reportes, modelos ONNX |
 | Automatización | n8n | 5678 | Workflows (ver `automatizacion-n8n.md`) |
 | Observabilidad | grafana/otel-lgtm | 3300 (Grafana), 4317/4318 (OTLP) | Trazas, métricas y logs (OpenTelemetry) |
 | Correo dev | Mailpit | 8025 (UI) / 1025 (SMTP) | Correos de verificación y reportes |
