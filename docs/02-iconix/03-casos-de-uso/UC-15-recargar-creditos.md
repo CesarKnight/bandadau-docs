@@ -72,11 +72,11 @@ El estudiante pulsa **"Recargar"** en la pantalla *Mi billetera* (o "Recargar y 
 - **3b. Reintento con la misma clave pero otro paquete**: `422 IDEMPOTENCY_KEY_REUSED`; la app genera
   una clave nueva al cambiar de paquete (paso 2).
 - **3c. Paquete inválido**: `400` (validación del enum `TopUpPackage`).
-- **5a. La pasarela no responde** al crear la sesión (timeout 5 s, circuit breaker): el `TopUp` queda
-  `FAILED`, la entrada de idempotencia se elimina (para permitir reintento con la misma clave) y se
+- **5a. La pasarela no responde** al crear la sesión (timeout 5 s, circuit breaker): no se persiste el `TopUp`
+  (o queda `FAILED` en una pasarela real), la entrada de idempotencia se libera (para permitir reintento con la misma clave) y se
   responde `503` (`code: PAYMENT_GATEWAY_UNAVAILABLE`). En la pasarela simulada el caso se reproduce con
   `PAYMENT_GATEWAY_MODE=unavailable` (todo `createTopUp`/`simulateTopUpPayment` responde 503) o con
-  `simulate-payment` `outcome: UNAVAILABLE` (503 puntual, recarga `FAILED`); implementado (D-14, OpenAPI wallet 1.2.0).
+  `simulate-payment` `outcome: UNAVAILABLE` (503 puntual, la recarga sigue `PENDING`); implementado (D-14, OpenAPI wallet 1.2.0).
 - **8a. Pago rechazado**: el webhook llega con `status: FAILED`; el `TopUp` pasa a `FAILED`, no se crea
   `LedgerEntry` y se responde 200. La app muestra "Pago rechazado".
 - **9a. Firma HMAC inválida o marca de tiempo vieja**: `401` sin efectos; se registra en logs

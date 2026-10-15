@@ -21,9 +21,9 @@ info:
     ## Decisiones de implementación (fase 1)
     - El simulador de pasarela se habilita con `PAYMENT_SIMULATOR_ENABLED=true` (reemplaza `PAYMENT_GATEWAY=simulated`); con `false` `simulateTopUpPayment` responde `404`.
     - `PAYMENT_GATEWAY_MODE` (D-14, UC-15 5a): `simulate` (por defecto) o `unavailable`. En `unavailable` la pasarela simulada no responde: `createTopUp`
-      y `simulateTopUpPayment` devuelven `503` `PAYMENT_GATEWAY_UNAVAILABLE` (con `Retry-After`); el `TopUp` creado queda `FAILED` y la entrada de idempotencia
-      se elimina para permitir reintentar con la misma clave. `simulateTopUpPayment` con `outcome: UNAVAILABLE` produce el mismo `503` aun en modo `simulate`
-      (permite demostrar el caso sin reiniciar), dejando la recarga `FAILED`.
+      y `simulateTopUpPayment` devuelven `503` `PAYMENT_GATEWAY_UNAVAILABLE` (con `Retry-After: 30`); `createTopUp` no persiste ninguna recarga y la entrada de idempotencia
+      se libera (5xx), de modo que se puede reintentar con la misma clave. `simulateTopUpPayment` con `outcome: UNAVAILABLE` produce el mismo `503` aun en modo `simulate`
+      (permite demostrar el caso sin reiniciar), y la recarga sigue `PENDING`.
     - Anti-replay del webhook: el cuerpo incluye `occurredAt` y se rechaza con `401` `WEBHOOK_EXPIRED` si difiere del reloj más de la variable PAYMENT_WEBHOOK_TOLERANCE_SECONDS (300 s).
     - Un `topUpId` desconocido en el webhook responde `404` `TOPUP_NOT_FOUND` (no `200`).
     - Las respuestas de la SAGA a `debit-credits`/`refund-credits` incluyen `idempotencyKey` (eco del comando).
@@ -293,7 +293,7 @@ paths:
                 value:
                   outcome: FAILED
               pasarelaCaida:
-                summary: Responde 503 PAYMENT_GATEWAY_UNAVAILABLE y deja la recarga FAILED
+                summary: Responde 503 PAYMENT_GATEWAY_UNAVAILABLE y deja la recarga PENDING
                 value:
                   outcome: UNAVAILABLE
       responses:
