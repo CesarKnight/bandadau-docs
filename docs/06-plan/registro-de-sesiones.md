@@ -838,3 +838,28 @@ toast del shell mostraba la clave en vez del mensaje del MFE.
 - [ ] 2 mensajes de prueba en `events-service.saga-replies` (inocuos).
 - [ ] Probar `app.bandada.localhost` (Expo) cuando el equipo termine la app; verificar SSO app → panel real (UC-03).
 - [ ] Fase 2: ML/DL, IA local, agentes, MCP, n8n, `insights-service`, `mfe-insights`.
+
+---
+
+### 2026-10-15 — App móvil: inscripción a evento de pago, recarga de billetera y entradas estilo Eventbrite
+
+**Agente:** OpenCode · **Repos:** `bandadau-frontend`, `bandadau-shared`, `bandadau-docs`.
+
+**Hecho**
+- **UC-12 (inscripción a evento, SAGA simulada):** modal de pago reutilizable con loader por pasos
+  (reservar → debitar → emitir) y resultado (éxito con «Ver mi entrada» / fallo con el motivo del
+  `failureReason`); polling de `getRegistration`.
+- **UC-15/16 (billetera):** recarga con el mismo modal de pago (crear orden → confirmar pago →
+  acreditar) y refresco de saldo/movimientos.
+- **UC-12/UC-14 (entradas):** detalle estilo Eventbrite (portada, info con iconos, stub perforado con
+  muescas, QR real con `react-native-qrcode-svg` sobre `color.qr.*`) y modal QR a pantalla completa con
+  animación (Reanimated) e interacción «toca para ampliar»; lista de entradas con miniatura del evento.
+- **Design system:** nuevo par semántico `color.qr.bg`/`color.qr.fg` en `@bandada/ui-tokens`
+  (light+dark, par de contraste AA) para el QR siempre oscuro sobre claro (D13).
+- Dependencia nueva en la app: `react-native-qrcode-svg@6.3.26` (sobre `react-native-svg` ya presente).
+
+**Commits:** `bandadau-shared@196d706`; `bandadau-frontend` (`757043c`, `651b6c5`, `5f15518`).
+
+**Pendientes**
+- [ ] `pnpm i18n:check` en la app falla por falta de `locales/{es,en}/errors.json` (preexistente): generarlo desde `@bandada/i18n`.
+- [ ] El `qrPayload` de los mocks es fijo; cuando ticketing-service esté, usar el JWS firmado real.

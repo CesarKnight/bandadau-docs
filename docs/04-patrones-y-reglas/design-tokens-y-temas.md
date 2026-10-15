@@ -94,6 +94,7 @@ Toda UI puede depender de estos nombres; agregar uno nuevo exige definirlo en **
 | Marca | `color.brand.primary`, `color.brand.accent`, `color.brand.highlight` |
 | Datos / gráficos | `color.chart.series.1…8`, `color.chart.grid`, `color.chart.axis` |
 | Dominio | `color.status.registration.{pending,confirmed,failed,cancelled}`, `color.status.moderation.{allow,review,block}`, `color.severity.{info,warning,critical}` |
+| Códigos | `color.qr.bg`, `color.qr.fg` (siempre oscuro sobre claro, independiente del tema — D13, entradas UC-12/UC-14) |
 | Tipografía | `font.family.display`, `font.family.body`, `font.family.mono`, `font.size.{xs…3xl}`, `font.weight.{regular,medium,semibold,bold}`, `line-height.{tight,normal,relaxed}` |
 | Espacio / forma | `space.{0…16}`, `radius.{sm,md,lg,xl,full}`, `shadow.{sm,md,lg}` (las sombras también tienen variante dark) |
 | Movimiento | `motion.duration.{fast,normal,slow}`, `motion.easing.{standard,emphasized}` (respetar `prefers-reduced-motion`) |
