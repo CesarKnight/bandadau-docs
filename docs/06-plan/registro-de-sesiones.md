@@ -867,8 +867,15 @@ toast del shell mostraba la clave en vez del mensaje del MFE.
 - **`@bandada/i18n`:** nuevo helper `formatTime` (hora sola, `h23`/`h12`).
 - **Tickets en modal (UC-12):** al tocar una entrada se abre el `TicketPass` en un **modal sobrepuesto** con **tilt
   por movimiento del celular** (`expo-sensors` `DeviceMotion`; arrastre en web) y la lista muestra **2 columnas en web**.
+- **Branding y QR (UC-12):** el pase y el QR a pantalla completa usan el **logo de la app** (`BandadaMark`/`BandadaWordmark`);
+  la lista muestra el **QR real** (obtiene el `qrPayload` de `GET /tickets/{id}` por ítem, caché compartida con el modal);
+  el QR a pantalla completa es más grande y el tilt cae a **arrastre** si el sensor no está disponible.
+- **Detalle de evento por plataforma (UC-11/12):** `EventDetailView.{web,native}.tsx` (Metro elige) — **web** con 2 columnas
+  (hero + panel de info/CTA) y **native** con columna única y **CTA fijo abajo** (safe-area); piezas compartidas en
+  `event-detail-parts.tsx`. Corregido el bug de parámetro de ruta (`[eventId]`/`[ticketId]` leían `id` → detalle vacío).
+- **Tokens del pase:** `color.pass.*` ajustado para que el ticket se distinga del canvas (claro y oscuro) + contorno.
 
-**Commits:** `bandadau-shared` (`196d706`, `0b35e5f`, `36ce3b6`); `bandadau-frontend` (`757043c`, `651b6c5`, `5f15518`, `48aaa37`, `87e47fd`, `3e7bcec`, `39ab056`, `5143077`).
+**Commits:** `bandadau-shared` (`196d706`, `0b35e5f`, `36ce3b6`, `cbad8d0`); `bandadau-frontend` (`757043c`, `651b6c5`, `5f15518`, `48aaa37`, `87e47fd`, `3e7bcec`, `39ab056`, `5143077`, `2aa19cf`, `7783e2d`, `e85d3e6`, `2710cb5`).
 
 **Pendientes**
 - [ ] `pnpm i18n:check` en la app falla por falta de `locales/{es,en}/errors.json` (preexistente): generarlo desde `@bandada/i18n`.
