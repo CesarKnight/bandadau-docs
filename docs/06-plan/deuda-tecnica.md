@@ -74,3 +74,20 @@ Pendientes menores de configuración en `bandadau-infra` y servicios (sin impact
 | C-7 | Plantillas de CI: texto "cuando los 8 servicios existan" ya no aplica | Actualizar |
 | C-8 | `bandadau-infra/{README,AGENTS}.md`: faltan los targets `mock*` y el relay de notification figura como "suposición" | Corregir (tras terminar el agente de n8n) |
 | C-9 | `eventos-y-mensajeria.md` §5.3 e `idempotencia.md` no verificados contra identity/events/wallet/social/media | Revisión cruzada |
+
+## Moderación con deep learning (fase 2, 2026-10-15)
+
+Implementada: `bandadau-ml` (pipeline en Docker, modelo `Falconsai/nsfw_image_detection` → ONNX, publicado en MinIO
+`bandada-models/models/nsfw-classifier/1.0.0/`) y `OnnxModerationAdapter` en `media-service` (`MODERATION_MODE=onnx`, imágenes y
+video con ffmpeg). p95 282 ms por imagen. Pendiente / diferencias con `ml-dl.md`:
+
+| ID | Tema | Detalle |
+|---|---|---|
+| M-1 | Recall ≥ 0.90 (RNF-12) **no medido** | `recall@0.5: null`; falta un set de evaluación curado fuera del repo y evaluación por subgrupos |
+| M-2 | Preprocesado | El checkpoint usa resize directo 224×224 y mean=std=0.5, no crop central + ImageNet como dice `ml-dl.md` §2/§4; corregir el doc |
+| M-3 | Contrato `metadata.json` | Añade `resizeMode`, `colorOrder`, `scale`, `artifacts{fp32,int8}`, `source`; documentar |
+| M-4 | API | `frameScores` y `frameIndex` se persisten pero el OpenAPI/GraphQL no los expone |
+| M-5 | Alcance | Solo `scores:{nsfw}`; `violence-classifier`, CLIP, OCR y `nsfw-mobile` sin implementar (opcionales) |
+| M-6 | Procedencia | El modelo base fue afinado por su autor con un dataset propietario de licencia desconocida; no hay fine-tune propio |
+| M-7 | Formato | HEIC no se decodifica (va a revisión humana); int8 solo MatMul (Δprob ≤ 0.023) |
+| M-8 | Salud | `/health/ready` añade `moderation.state` (READY/DEGRADED) |
