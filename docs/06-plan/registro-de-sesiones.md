@@ -857,8 +857,12 @@ toast del shell mostraba la clave en vez del mensaje del MFE.
 - **Design system:** nuevo par semántico `color.qr.bg`/`color.qr.fg` en `@bandada/ui-tokens`
   (light+dark, par de contraste AA) para el QR siempre oscuro sobre claro (D13).
 - Dependencia nueva en la app: `react-native-qrcode-svg@6.3.26` (sobre `react-native-svg` ya presente).
+- **Flujo de compra (UC-12):** botón «Participar» en el detalle del evento → pago simulado → **revelación del
+  ticket** (cae con spring) y **deslizar hacia abajo para guardarlo** en Mis entradas (Reanimated + gesture-handler).
+- **Mis entradas (UC-12):** tabs **Disponible/Usado** con el mismo componente `TicketView` (portada, info,
+  stub perforado, QR); el detalle usa `TicketView` + modal QR a pantalla completa; acceso desde el menú del perfil.
 
-**Commits:** `bandadau-shared@196d706`; `bandadau-frontend` (`757043c`, `651b6c5`, `5f15518`).
+**Commits:** `bandadau-shared@196d706`; `bandadau-frontend` (`757043c`, `651b6c5`, `5f15518`, `48aaa37`, `87e47fd`).
 
 **Pendientes**
 - [ ] `pnpm i18n:check` en la app falla por falta de `locales/{es,en}/errors.json` (preexistente): generarlo desde `@bandada/i18n`.
