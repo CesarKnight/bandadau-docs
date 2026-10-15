@@ -58,3 +58,19 @@ en `bandadau-docs`. Prioridad: **A** = antes de la entrega (10-nov), **B** = si 
 `insights-service` (MCP, agentes, reportes, anomalías), `mfe-insights`, `bandadau-ml` (NSFW, violencia, CLIP, ranker de feed, Isolation Forest),
 IA local (ExecuTorch/WebLLM, UC-17), workflows n8n (UC-23), campos GraphQL de fase 2 (responden `FEATURE_DISABLED`), `createMcpToken`/`revokeMcpToken` (identity
 responde 501 `FEATURE_DISABLED`).
+
+## Hallazgos de la revisión de infraestructura (2026-10-15)
+
+Pendientes menores de configuración en `bandadau-infra` y servicios (sin impacto en `make smoke`):
+
+| ID | Hallazgo | Acción |
+|---|---|---|
+| C-1 | `UPLOAD_URL_TTL_SECONDS=300` en compose frente a 900 en servicio y contrato | Unificar (el contrato manda: 900) |
+| C-2 | `COVER_CHECK` no está en el compose de events (default `off`): la portada no se valida contra media en local | Definirlo `on` cuando el cliente de servicio `events-service` exista en `SERVICE_CLIENTS` |
+| C-3 | admin-gateway no recibe `RABBITMQ_MANAGEMENT_*` ni `NOTIFICATION_SERVICE_URL` explícitos en el compose | Pasarlos |
+| C-4 | `identity-service/.env.example`: `SERVICE_CLIENTS`, `MAIL_FROM` y `JWT_KEY_ID` difieren de los del compose; `bandadau-infra/.env.example` no define `JWT_KEK` | Alinear ejemplos |
+| C-5 | Alias muertos `SIMULATE_PAYMENT_ENABLED` y `QR_KEY_ID` en compose y `.env.example` | Retirar |
+| C-6 | `SAGA_COMMAND_MAX_RETRIES` está en el compose pero no en el `.env.example` de events | Añadir |
+| C-7 | Plantillas de CI: texto "cuando los 8 servicios existan" ya no aplica | Actualizar |
+| C-8 | `bandadau-infra/{README,AGENTS}.md`: faltan los targets `mock*` y el relay de notification figura como "suposición" | Corregir (tras terminar el agente de n8n) |
+| C-9 | `eventos-y-mensajeria.md` §5.3 e `idempotencia.md` no verificados contra identity/events/wallet/social/media | Revisión cruzada |
