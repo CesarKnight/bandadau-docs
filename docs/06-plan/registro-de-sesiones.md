@@ -944,3 +944,26 @@ arquitectura, contract-first/idempotencia, cobertura de UC-01…17 y UC-24, DoD 
 persister, PWA ni pruebas; UC-05/08/10/13/14/17 ausentes o simulados; `/profiles/{id}/posts` fuera de contrato.
 
 **Pendientes:** ejecutar B-1, B-2, B-3, B-6 primero; luego ver sección 5.4 del documento. No se modificó `bandadau-frontend`.
+
+---
+
+### 2026-10-15 — Integración de la app Expo con el backend real (P1 de la auditoría)
+
+**Agente:** OpenCode · **Repos:** `bandadau-frontend`, `bandadau-shared`, `bandadau-docs`.
+
+**Hecho (commits de `bandadau-frontend`):**
+- **B-1** `Authorization` en peticiones autenticadas (`http.ts`: `options.auth !== false`) — `68fe972`.
+- **B-2** `Accept-Language` siempre · **B-3** mocks opt-in (`env.useMocks` solo con `EXPO_PUBLIC_USE_MOCKS=true`) ·
+  **B-6** `locales/{es,en}/errors.json` (copiados de `@bandada/i18n`) → `pnpm i18n:check` **verde** — `15eb50f`.
+- **A-8** `restoreSession()` al arrancar + guardas de ruta (`app/index.tsx`, `(auth)`, `(tabs)`); invitado solo en `__DEV__` — `ad53ec8`.
+- **A-2 (UC-07)** reacciones: `useSetReaction`/`useRemoveReaction` con **optimista + rollback**; like funcional — `6ae0156`.
+- **A-7/A-6 (UC-12/13)** `useRegistration` honra `Retry-After` (1–5 s, tope 120 s) vía `apiRequestMeta`; `useCancelRegistration`,
+  `useMyRegistrations`; pantallas `app/registrations/{index,[registrationId]}.tsx`; acceso desde el menú del perfil — `0f87bd6`.
+- **B-4** idempotencia estable (clave no se regenera en reintentos) · **A-14** `ErrorBoundary` + `AppError` traducido y «Reintentar»
+  en el detalle de evento — `55b39ab`.
+- `docs/` excluido de ESLint/tsc (referencias en `docs/tickets/`).
+
+**Verificación:** `typecheck` ✅ · `lint` ✅ (global) · `i18n:check` ✅ (0 errores) · `export web`/`ios` ✅.
+
+**Pendientes (P1 restante):** A-1 (UC-05 publicar real), A-3 (UC-08/10 seguir/denunciar), A-4 (cola offline T7/T8),
+A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 (PWA/Workbox); C-3 (`/profiles/{id}/posts` en el contrato).
