@@ -275,3 +275,20 @@ importar en producción con `make n8n-import` en el despliegue.
 | SQLite corrupta/volumen perdido | Recrear con `bootstrap.sh` + `make n8n-import` (todo está versionado) |
 | Textos a estudiantes escritos en n8n | Prohibido (N4): idioma y preferencias los maneja notification-service |
 | Usar `/api/v1/...` públicos con token de servicio | Los servicios aceptan `typ=service` solo en `/internal/v1/**` (`seguridad-y-sso.md` §6) |
+
+## Implementación (fase 2, 2026-10-15)
+
+Implementado en `bandadau-infra/n8n/` y verificado contra los servicios reales (ver `n8n/README.md`). Diferencias con el diseño:
+
+- Un solo contenedor n8n 2.43.5 con SQLite; el servicio arranca con `n8n/scripts/entrypoint.sh`: importa credenciales (plantillas
+  `credentials/*.json.tpl` renderizadas con variables), `import:workflow --separate` y `publish:workflow --id=<id>`. Las opciones
+  `--activeState=fromJson` / `update:workflow --active` solo funcionan en modo cola, por eso se usa `publish:workflow`.
+- Propietario por variables `N8N_OWNER_EMAIL` y `N8N_OWNER_PASSWORD_HASH`. `N8N_WELCOME_DELAY` reemplaza a `N8N_WELCOME_DELAY_SECONDS`.
+- Los servicios exigen `Idempotency-Key` con forma de UUID: se usan **UUID deterministas** derivados del evento o del cron.
+- wf-02 usa ventana de **23 a 25 h** (cada evento cae en dos corridas; no duplica gracias a `dedupeKey`), no "alineado a la hora".
+- wf-06 notifica a los **dueños de los grupos públicos** de la carrera del organizador: no existe endpoint para listar miembros.
+  Para una difusión real hay que añadirlo al contrato.
+- wf-04 envía enlace al panel (sin adjuntar audio). Un CloudEvent inválido hace fallar el router y lo descarta wf-99 (aviso por
+  correo); no pasa a `n8n.automation.dlq`.
+- Telegram es opcional (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_STAFF_CHAT_ID`) y no se probó.
+
