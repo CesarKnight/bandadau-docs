@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — identity-service
-  version: 1.2.0
+  version: 1.3.0
   summary: Identidad y acceso (registro, verificación, sesión, SSO handoff, usuarios y universidades).
   description: |
     API del bounded context **Identidad** (`identity-service`, Java 25 + Spring Boot 4,
@@ -38,14 +38,23 @@ info:
     ## Claims de los tokens
     Access token de usuario: `iss`, `aud` (`bandada-app` | `bandada-admin`), `sub` (userId), `typ=user`, `roles[]`, `uni`, `locale`, `scope` (vacío), `jti`, `iat`, `exp`.
     Token de servicio: `aud=bandada-internal`, `typ=service`, `sub` = `client_id` = clientId, `scope` (lista separada por espacios). Los servicios validan
-    `typ=service` y `aud=bandada-internal` en `/internal/v1/**`; **en la fase 1 no se exigen scopes concretos** (se emiten `internal:read internal:write`).
+    `typ=service` y `aud=bandada-internal` en `/internal/v1/**` y **exigen scope** (D-7): `GET`/`HEAD` → `internal:read`; `POST`/`PUT`/`PATCH`/`DELETE` → `internal:write`
+    (`403 FORBIDDEN` si falta). Claim `scope` = cadena separada por espacios (`internal:read internal:write`); cada cliente de `SERVICE_CLIENTS` recibe los suyos
+    (por defecto ambos). Ver `seguridad-y-sso.md` §2.1.
+
+    Token MCP (`createMcpToken`): `aud=mcp`, `typ=user`, `sub` = userId del administrador, `roles=[ADMIN]`, `scope=mcp:tools`, `jti` = `id` del token, 8 h, sin refresh.
+    Identity **no** acepta `aud=mcp` en sus propias rutas.
 
     ## Changelog
+    - 1.3.0 (2026-10-15): `registerUser` acepta `displayName` opcional (si falta se deriva del correo); `REGISTER_HIDE_EXISTING_ACCOUNTS` pasa a `true` por defecto
+      (anti-enumeración de UC-01); scopes `internal:read`/`internal:write` **exigidos** en `/internal/v1/**` (D-7); `createMcpToken`/`revokeMcpToken` implementados
+      (el token MCP lleva `typ=user` + `roles=[ADMIN]` para ser verificable con `@bandada/auth-ts`; corrige `typ=mcp` de 1.1.0) y nuevo `getMcpTokenStatus`
+      (`GET /internal/v1/mcp-tokens/{tokenId}`) para que `insights-service` rechace tokens revocados; se retira `FEATURE_DISABLED` de `mcp-tokens`.
     - 1.2.0 (2026-10-15): consolidación fase 1 — cabecera `X-Bandada-Client` y cookie de refresh (`bandada_rt` / `bandada_admin_rt`);
       `AuthTokens.refreshToken` opcional (ausente en web/admin) y cuerpo opcional en `refresh`/`logout`; claims reales (`typ=user|service`,
       `aud=bandada-app|bandada-admin|bandada-internal`, `uni`); filtro `ids` en `searchUsers`; `INVALID_REFRESH_TOKEN`, `HANDOFF_CODE_INVALID` 401,
       `INVALID_VERIFICATION_CODE` 422; `REGISTER_HIDE_EXISTING_ACCOUNTS`; `displayName` derivado del correo; 429 `RATE_LIMITED`
-      con `Retry-After`; `LAST_ADMIN`, `INVALID_STATUS_TRANSITION`, `UNIVERSITY_DOMAIN_TAKEN`, `CONCURRENT_MODIFICATION`, `FEATURE_DISABLED` (501 en `mcp-tokens`).
+      con `Retry-After`; `LAST_ADMIN`, `INVALID_STATUS_TRANSITION`, `UNIVERSITY_DOMAIN_TAKEN`, `CONCURRENT_MODIFICATION`, `FEATURE_DISABLED` (501 en `mcp-tokens`; retirado en 1.3.0).
     - 1.1.0 (2026-10-14): `createMcpToken` / `revokeMcpToken` (token MCP de 8 h, `aud=mcp`, scope `mcp:tools`; D15, ADR-0016); `University.enabled` deja de ser propuesta.
     - 1.0.0 (2026-10-14): versión inicial contract-first (D1, D3, D4, D13, D14).
   contact:
@@ -83,10 +92,10 @@ paths:
         universidad indicada y estar habilitado (UC-01, RF-01, RF-02). Publica
         `bandada.identity.user.registered.v1` al verificarse el correo.
         Si no se envía `locale`, se toma el de `Accept-Language` (por defecto `es`).
-        El contrato no recibe nombre: el `displayName` del usuario (evento `user.registered` → `Profile` inicial)
-        se **deriva de la parte local del correo** (`ana.quispe` → `Ana Quispe`, máx. 80 caracteres) y el usuario lo edita luego en su perfil (UC-04).
-        Con `REGISTER_HIDE_EXISTING_ACCOUNTS=true` (anti-enumeración, desactivado por defecto) un correo ya activo
-        también responde `201` y se avisa al titular por correo, en vez de `409` `EMAIL_ALREADY_REGISTERED`.
+        `displayName` (opcional, 2–80 caracteres) viaja en el evento `user.registered` → `Profile` inicial; si falta se
+        **deriva de la parte local del correo** (`ana.quispe` → `Ana Quispe`, máx. 80 caracteres) y el usuario lo edita luego en su perfil (UC-04).
+        Con `REGISTER_HIDE_EXISTING_ACCOUNTS=true` (anti-enumeración, **activado por defecto desde 1.3.0**) un correo ya activo
+        también responde `201` y se avisa al titular por correo; con `false` responde `409` `EMAIL_ALREADY_REGISTERED`.
         Falta de `Idempotency-Key` → `400` `IDEMPOTENCY_KEY_REQUIRED`.
       security: []
       parameters:
@@ -576,7 +585,7 @@ paths:
       summary: Emitir token de servicio
       description: |
         Flujo *client credentials* para servicios internos (`admin-gateway`,
-        `insights-service`, n8n). Devuelve un JWT `typ=service`, `aud=bandada-internal`, `sub`=`client_id`=clientId, usado en `serviceAuth`. Vida 5 min (`SERVICE_TOKEN_TTL`). `scopes` pedidos se intersectan con los permitidos al cliente (`SERVICE_CLIENTS`); si se omiten, se conceden todos los del cliente. En la fase 1 los servicios **no exigen scopes** en `/internal/v1/**`: validan `typ=service` y `aud=bandada-internal`.
+        `insights-service`, n8n). Devuelve un JWT `typ=service`, `aud=bandada-internal`, `sub`=`client_id`=clientId, usado en `serviceAuth`. Vida 5 min (`SERVICE_TOKEN_TTL`). `scopes` pedidos se intersectan con los permitidos al cliente (`SERVICE_CLIENTS`); si se omiten, se conceden todos los del cliente. El claim `scope` del JWT es esa lista separada por espacios (p. ej. `internal:read internal:write`). Los servicios **exigen** `internal:read` (GET/HEAD) o `internal:write` (resto) en `/internal/v1/**` además de `typ=service` y `aud=bandada-internal`.
         **Solo red interna**: debe invocarse contra `identity-service:7001`; no se publica en
         el gateway. *Propuesta*: que Traefik bloquee `/api/v1/auth/service-token` igual que `/internal/**`.
       servers:
@@ -647,9 +656,10 @@ paths:
         servidor MCP de `insights-service` (UC-22, D9, D15, ADR-0016). Solo rol `ADMIN`; se emite
         desde el panel (`createMcpToken` en GraphQL).
 
-        - JWT RS256 con `aud = mcp`, `scope = mcp:tools`, `typ = mcp` y vigencia de **8 h**
-          (28 800 s); no tiene refresh token.
-        - Su `jti` (= `id`) queda registrado en `identity_db` para poder revocarlo con `revokeMcpToken`.
+        - JWT RS256 con `aud = mcp`, `scope = mcp:tools`, `typ = user`, `roles = [ADMIN]`, `sub` = administrador que lo emite
+          y vigencia de **8 h** (28 800 s); no tiene refresh token. (`typ=user` permite verificarlo con `@bandada/auth-ts`.)
+        - Su `jti` (= `id`) queda registrado en `identity_db` para poder revocarlo con `revokeMcpToken`;
+          `insights-service` consulta `getMcpTokenStatus` para rechazar los revocados.
         - El token se devuelve **una sola vez** en esta respuesta; no se puede volver a consultar.
       x-idempotency-exempt: Cada llamada debe emitir un token nuevo (con su propio `jti`) que se muestra una sola vez; repetirla no tiene efectos acumulativos sobre otros recursos.
       requestBody:
@@ -723,6 +733,43 @@ paths:
       responses:
         '204':
           description: Token revocado.
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /internal/v1/mcp-tokens/{tokenId}:
+    parameters:
+      - name: tokenId
+        in: path
+        required: true
+        description: Identificador del token MCP (su `jti`).
+        schema:
+          type: string
+          format: uuid
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: getMcpTokenStatus
+      summary: Estado de un token MCP (interno)
+      description: |
+        Lo consulta `insights-service` al validar un token MCP (`aud=mcp`) para rechazar los revocados (UC-22).
+        Requiere scope `internal:read`. `404` si el `jti` no fue emitido por identity.
+      servers:
+        - url: http://identity-service:7001
+          description: Red interna (Docker/VPC); el gateway bloquea /internal/**
+      security:
+        - serviceAuth: []
+      responses:
+        '200':
+          description: Estado del token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpTokenStatus'
         '401':
           $ref: './shared/components.yaml#/components/responses/Unauthorized'
         '403':
@@ -1425,6 +1472,11 @@ components:
         universityId:
           type: string
           format: uuid
+        displayName:
+          type: string
+          minLength: 2
+          maxLength: 80
+          description: Nombre visible inicial (opcional). Si se omite se deriva de la parte local del correo.
         locale:
           $ref: './shared/components.yaml#/components/schemas/Locale'
 
@@ -1603,7 +1655,7 @@ components:
           description: Identificador del token (`jti`); se usa para revocarlo.
         accessToken:
           type: string
-          description: JWT RS256 (`typ=mcp`). Se devuelve una sola vez.
+          description: JWT RS256 (`aud=mcp`, `typ=user`, `roles=[ADMIN]`). Se devuelve una sola vez.
         tokenType:
           type: string
           const: Bearer
@@ -1625,6 +1677,19 @@ components:
           type: string
           format: date-time
         createdAt:
+          type: string
+          format: date-time
+
+    McpTokenStatus:
+      type: object
+      required: [id, revoked, expiresAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        revoked:
+          type: boolean
+        expiresAt:
           type: string
           format: date-time
 

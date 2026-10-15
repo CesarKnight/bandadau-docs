@@ -53,7 +53,7 @@ El visitante pulsa **"Crear cuenta"** en la app (nativa o PWA) o llega desde el 
 - **6a. Reintento con la misma `Idempotency-Key` (doble toque o red intermitente):** el sistema devuelve la respuesta guardada con `Idempotent-Replayed: true`; no se crea un segundo `User` ni se envía otro correo.
 - **6b. Misma clave con cuerpo distinto:** el sistema responde `422 IDEMPOTENCY_KEY_REUSED`.
 - **7a. Dominio no permitido (servidor):** el sistema responde `422` Problem Details `EMAIL_DOMAIN_NOT_ALLOWED`; la app muestra el mensaje del paso 4a.
-- **7b. Ya existe un `User` `ACTIVE` con ese correo:** para no permitir enumeración de cuentas, el sistema responde igual que en el alta (`201`, solo con `REGISTER_HIDE_EXISTING_ACCOUNTS=true`; por defecto, `409 EMAIL_ALREADY_REGISTERED`) y envía al correo un aviso "Ya tienes una cuenta en Bandada U, inicia sesión o recupera tu contraseña". No se crea nada.
+- **7b. Ya existe un `User` `ACTIVE` con ese correo:** para no permitir enumeración de cuentas, el sistema responde igual que en el alta (`201`; con `REGISTER_HIDE_EXISTING_ACCOUNTS=false`, `409 EMAIL_ALREADY_REGISTERED`; por defecto `true`) y envía al correo un aviso "Ya tienes una cuenta en Bandada U, inicia sesión o recupera tu contraseña". No se crea nada.
 - **7c. Existe un `User` `PENDING_VERIFICATION` con ese correo:** el sistema reemplaza el nombre visible y la `Credential` pendientes, invalida la `EmailVerification` anterior y genera una nueva (vuelve al paso 9). Quien controle el buzón es quien termina la verificación.
 - **9a. Falla el servidor de correo:** el `User` queda creado; el sistema reintenta el envío 3 veces con backoff y responde `201` igualmente. El visitante puede usar "Reenviar código" (12b).
 - **12a. Código incorrecto:** el sistema incrementa `attempts` y responde `400 VERIFICATION_CODE_INVALID` con `remainingAttempts`. Al llegar a 5 intentos responde `429 VERIFICATION_ATTEMPTS_EXCEEDED` y exige reenviar código.
@@ -378,7 +378,7 @@ Ejemplo de sobre:
 | AT-01-05 | **Given** un correo `lucia@gmail.com` **When** se registra **Then** recibe `422 EMAIL_DOMAIN_NOT_ALLOWED` y no se crea `User`. |
 | AT-01-06 | **Given** una `Idempotency-Key` ya completada **When** se reenvía el mismo cuerpo **Then** recibe la misma respuesta con `Idempotent-Replayed: true` y Mailpit tiene un solo correo. |
 | AT-01-07 | **Given** una `Idempotency-Key` ya usada **When** se envía con otro cuerpo **Then** recibe `422 IDEMPOTENCY_KEY_REUSED`. |
-| AT-01-08 | **Given** un `User` `ACTIVE` con ese correo **When** alguien se registra con él **Then** recibe `201` (indistinguible; solo con `REGISTER_HIDE_EXISTING_ACCOUNTS=true`, por defecto `409`) y el correo recibido es el aviso "ya tienes cuenta". |
+| AT-01-08 | **Given** un `User` `ACTIVE` con ese correo **When** alguien se registra con él **Then** recibe `201` (indistinguible; por defecto `REGISTER_HIDE_EXISTING_ACCOUNTS=true`, con `false` responde `409`) y el correo recibido es el aviso "ya tienes cuenta". |
 | AT-01-09 | **Given** un código emitido **When** se envían 5 códigos incorrectos **Then** el 5.º devuelve `429 VERIFICATION_ATTEMPTS_EXCEEDED` y ni el código correcto activa la cuenta hasta reenviar. |
 | AT-01-10 | **Given** un código emitido hace 16 min **When** se envía **Then** `410 VERIFICATION_CODE_EXPIRED`. |
 | AT-01-11 | **Given** `social-service` detenido **When** se completa la verificación **Then** el login funciona; al levantar social el `Profile` aparece (degradación elegante, RNF-03). |

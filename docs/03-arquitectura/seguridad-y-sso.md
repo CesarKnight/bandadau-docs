@@ -55,8 +55,17 @@ flowchart LR
 | `roles` | `STUDENT`, `ORGANIZER`, `MODERATOR`, `ADMIN` | Autorización gruesa |
 | `uni` | UUID de la universidad | Filtrado multi-universidad (posts, eventos) |
 | `locale` | `es` \| `en` (D14) | Idioma por defecto de respuestas/plantillas cuando falta `Accept-Language`. **No** es autorización; puede quedar desactualizado hasta 15 min tras `updateMyPreferences` |
-| `scope` | Tokens de servicio: `internal:read internal:write` (fase 2: `mcp:tools`). En usuario va vacío | Autorización fina servicio a servicio. **Fase 1: `/internal/**` valida `typ=service` + `aud=bandada-internal` y no exige scopes concretos** (ver `deuda-tecnica.md`) |
+| `scope` | Cadena **separada por espacios**. Tokens de servicio: los scopes del cliente en `SERVICE_CLIENTS` (por defecto `internal:read internal:write`), intersectados con los pedidos en `service-token`. Token MCP: `mcp:tools`. En usuario va vacío | Autorización fina servicio a servicio (ver «Scopes en `/internal/**`» abajo) |
 | `jti` | UUIDv7 | Trazabilidad; no hay lista negra de access tokens (vida corta) |
+
+**Scopes en `/internal/**` (D-7).** Además de `typ=service` y `aud=bandada-internal`, todo servicio exige el scope según el método HTTP:
+`GET`/`HEAD` → `internal:read`; `POST`/`PUT`/`PATCH`/`DELETE` → `internal:write`. Sin el scope: `403 FORBIDDEN` (Problem Details). El claim se lee como lista
+dividiendo `scope` por espacios (`AuthPrincipal.scopes` de `@bandada/auth-ts`). Identity configura los scopes por cliente en
+`SERVICE_CLIENTS=id:secret[:scope|scope]` (separador `|` dentro de la entrada; sin tercer campo = ambos scopes).
+
+**Token MCP (`createMcpToken`, UC-22).** `aud=mcp`, `typ=user`, `sub` = administrador, `roles=["ADMIN"]`, `scope=mcp:tools`, `jti` registrado en
+`identity_db.mcp_tokens`, 8 h, sin refresh. Solo `insights-service` lo acepta (identity y los demás servicios rechazan `aud=mcp`). Para respetar la
+revocación, `insights-service` consulta `GET /internal/v1/mcp-tokens/{jti}` (scope `internal:read`) y rechaza si `revoked=true`.
 
 Tokens `aud = bandada-admin` solo se emiten a usuarios con `MODERATOR` o `ADMIN`.
 El JWT **no** lleva email, nombre ni datos personales adicionales.

@@ -110,7 +110,7 @@ Catálogo mínimo de códigos transversales: `VALIDATION_FAILED`, `MALFORMED_REQ
 - Claims usados: `sub`, `roles[]`, `uni` (universityId), `locale`, `typ` (`user|service`), `aud` (`bandada-app|bandada-admin|bandada-internal`); ver `seguridad-y-sso.md` §2.
 - Roles por operación declarados en OpenAPI (`x-roles: [ORGANIZER]`) y aplicados en el borde
   (guard / filtro), y las reglas de propiedad (dueño del post, organizador del evento) en el caso de uso.
-- `/internal/v1/**` exige `typ=service` y `aud=bandada-internal` (en la fase 1 no se exigen scopes) y el gateway Traefik lo bloquea (403).
+- `/internal/v1/**` exige `typ=service` y `aud=bandada-internal` y el scope `internal:read` (GET/HEAD) o `internal:write` (resto) (D-7) y el gateway Traefik lo bloquea (403).
 
 ## 6. Paginación por cursor
 

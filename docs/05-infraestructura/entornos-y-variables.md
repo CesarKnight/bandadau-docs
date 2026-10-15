@@ -182,7 +182,7 @@ Laravel → `APP_DEBUG=false`, `LOG_CHANNEL=stderr`.
 | `SMTP_HOST` / `SMTP_PORT` / `MAIL_FROM` / `MAIL_LOG_CODE` | Código de verificación (Mailpit; `MAIL_LOG_CODE` lo escribe también en el log, solo dev) | `localhost`→`mailpit` / `1025` / `no-reply@bandada.localhost` / `true` |
 | `SERVICE_CLIENTS` 🔒 | Clientes registrados `id:secret[:scope\|scope]` (en el Compose, `SERVICE_CLIENTS` del `.env`: incluye `bandada-seed` y `n8n`) | ver `.env.example` |
 | `COOKIE_SECURE` / `CORS_ORIGINS` | Endurecimiento web (refresh token en cookie `SameSite=Strict`) | `false` (dev) |
-| `RATE_LIMIT_ENABLED` / `AUTH_RATE_LIMIT_PER_MINUTE` / `HANDOFF_RATE_LIMIT_PER_MINUTE` / `RESEND_MIN_INTERVAL` / `RESEND_PER_HOUR` / `REGISTER_HIDE_EXISTING_ACCOUNTS` | Límites y anti-enumeración | `true` / `60` / `10` / `PT60S` / `5` / `false` |
+| `RATE_LIMIT_ENABLED` / `AUTH_RATE_LIMIT_PER_MINUTE` / `HANDOFF_RATE_LIMIT_PER_MINUTE` / `RESEND_MIN_INTERVAL` / `RESEND_PER_HOUR` / `REGISTER_HIDE_EXISTING_ACCOUNTS` | Límites y anti-enumeración | `true` / `60` / `10` / `PT60S` / `5` / `true` |
 
 ### 4.3 social-service (S2 · NestJS)
 

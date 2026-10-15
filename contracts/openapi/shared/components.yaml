@@ -509,5 +509,5 @@ components:
         Token de servicio JWT (RS256, `typ=service`) emitido por
         `POST /api/v1/auth/service-token` (client credentials). Obligatorio en `/internal/v1/**`.
         Claims: `sub` = `client_id` (nombre del servicio, p. ej. `admin-gateway`), `typ=service`, `aud=bandada-internal`,
-        `scope` (`internal:read internal:write`), `iss`, `exp`, `iat`, `jti`. Los servicios validan `typ=service` y
-        `aud=bandada-internal`; en la fase 1 **no exigen scopes concretos**.
+        `scope` (cadena separada por espacios: `internal:read internal:write`), `iss`, `exp`, `iat`, `jti`. Los servicios validan `typ=service`,
+        `aud=bandada-internal` y **exigen scope**: `GET`/`HEAD` → `internal:read`; `POST`/`PUT`/`PATCH`/`DELETE` → `internal:write` (`403 FORBIDDEN` si falta; D-7).
