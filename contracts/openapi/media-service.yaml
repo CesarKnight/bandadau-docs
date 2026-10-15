@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — media-service
-  version: 1.2.0
+  version: 1.3.0
   summary: Multimedia (subida directa a S3, pipeline de moderación ML/DL, etiquetado y OCR).
   description: |
     API del bounded context **Media** (`media-service`, TypeScript + NestJS 11 con
@@ -24,13 +24,15 @@ info:
     devuelven `X-Correlation-Id`. Rutas `/internal/v1/**` (tag `internal`): solo red interna con `serviceAuth`.
 
     ## Decisiones de implementación (fase 1)
-    - `expiresIn` de `createUpload` es el valor de `UPLOAD_URL_TTL_SECONDS` (30–3600): **900 por defecto** en el servicio y **300 en el Compose local**.
+    - `expiresIn` de `createUpload` es el valor de `UPLOAD_URL_TTL_SECONDS` (30–3600): **900** (valor único del contrato, D-13/C-1; el Compose local debe usar el mismo).
       Los ejemplos de este contrato usan 900; los clientes deben leer `expiresIn` de la respuesta, no asumirlo.
     - Modo de moderación `MODERATION_MODE`: `allow-all` (por defecto en local; todo medio completado pasa a `APPROVED`), `manual` (todo pasa a `FLAGGED`
-      para revisión humana) y, en la fase 2, el modelo ONNX. Los *magic bytes* del objeto no se verifican aún (solo `Content-Type` y tamaño).
+      para revisión humana) y, en la fase 2, el modelo ONNX. Al completar la subida se verifican además los *magic bytes* del objeto (D-12): si no corresponden al
+      `contentType` declarado (PNG/JPEG/WebP/HEIC/MP4/QuickTime) → `422` `MEDIA_CONTENT_MISMATCH` y el medio queda `REJECTED` sin evento de moderación.
     - `decideMedia` solo actúa sobre medios `FLAGGED` (`409` `MEDIA_NOT_FLAGGED` en otro caso); repetir la misma decisión responde `200` sin cambios ni evento.
 
     ## Changelog
+    - 1.3.0 (2026-10-15): D-12 — `completeUpload` verifica *magic bytes* (`422` `MEDIA_CONTENT_MISMATCH`); D-13 — `UPLOAD_URL_TTL_SECONDS` único de 900.
     - 1.2.0 (2026-10-15): consolidación fase 1 — `expiresIn` configurable (`UPLOAD_URL_TTL_SECONDS`), modos de moderación y `MEDIA_NOT_FLAGGED` documentados.
     - 1.1.0 (2026-10-14): ADR-0016/D15 — `purpose` (`MediaPurpose`: `POST`, `AVATAR`, `EVENT_COVER`) en
       `createUpload` y `MediaAsset`; `completeUpload` responde 202; `getMediaInternal` y `getMediaUrls`;
@@ -216,7 +218,7 @@ paths:
         '404':
           $ref: './shared/components.yaml#/components/responses/NotFound'
         '422':
-          description: El objeto no está en S3 o no coincide con lo declarado (`UPLOAD_MISSING`, `UPLOAD_MISMATCH`), o la URL de subida expiró (`UPLOAD_EXPIRED`).
+          description: El objeto no está en S3 o no coincide con lo declarado (`UPLOAD_MISSING`, `UPLOAD_MISMATCH`), o la URL de subida expiró (`UPLOAD_EXPIRED`), o el contenido real del objeto no corresponde al `contentType` declarado (`MEDIA_CONTENT_MISMATCH`, *magic bytes*).
           content:
             application/problem+json:
               schema:
@@ -705,7 +707,7 @@ components:
             type: string
         expiresIn:
           type: integer
-          description: Segundos de validez de `uploadUrl` (`UPLOAD_URL_TTL_SECONDS`; 900 por defecto, 300 en el Compose local).
+          description: Segundos de validez de `uploadUrl` (`UPLOAD_URL_TTL_SECONDS`; 900).
 
     MediaAsset:
       type: object

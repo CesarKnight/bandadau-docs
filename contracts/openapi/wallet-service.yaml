@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — wallet-service
-  version: 1.1.0
+  version: 1.2.0
   summary: Billetera de créditos (saldo, movimientos, recargas y pasarela simulada).
   description: |
     API del bounded context **Billetera** (`wallet-service`, PHP 8.4 + Laravel 12,
@@ -20,11 +20,16 @@ info:
 
     ## Decisiones de implementación (fase 1)
     - El simulador de pasarela se habilita con `PAYMENT_SIMULATOR_ENABLED=true` (reemplaza `PAYMENT_GATEWAY=simulated`); con `false` `simulateTopUpPayment` responde `404`.
+    - `PAYMENT_GATEWAY_MODE` (D-14, UC-15 5a): `simulate` (por defecto) o `unavailable`. En `unavailable` la pasarela simulada no responde: `createTopUp`
+      y `simulateTopUpPayment` devuelven `503` `PAYMENT_GATEWAY_UNAVAILABLE` (con `Retry-After`); el `TopUp` creado queda `FAILED` y la entrada de idempotencia
+      se elimina para permitir reintentar con la misma clave. `simulateTopUpPayment` con `outcome: UNAVAILABLE` produce el mismo `503` aun en modo `simulate`
+      (permite demostrar el caso sin reiniciar), dejando la recarga `FAILED`.
     - Anti-replay del webhook: el cuerpo incluye `occurredAt` y se rechaza con `401` `WEBHOOK_EXPIRED` si difiere del reloj más de la variable PAYMENT_WEBHOOK_TOLERANCE_SECONDS (300 s).
     - Un `topUpId` desconocido en el webhook responde `404` `TOPUP_NOT_FOUND` (no `200`).
     - Las respuestas de la SAGA a `debit-credits`/`refund-credits` incluyen `idempotencyKey` (eco del comando).
 
     ## Changelog
+    - 1.2.0 (2026-10-15): D-14 — `PAYMENT_GATEWAY_MODE`, `503` `PAYMENT_GATEWAY_UNAVAILABLE` en `createTopUp`/`simulateTopUpPayment`, `outcome: UNAVAILABLE`.
     - 1.1.0 (2026-10-15): consolidación fase 1 — `PAYMENT_SIMULATOR_ENABLED`, cabecera `X-Signature` + `occurredAt` en el cuerpo (`WEBHOOK_EXPIRED` 401), `TOPUP_NOT_FOUND` 404,
       `INVALID_SIGNATURE`, `AMOUNT_MISMATCH` 422, `GATEWAY_REF_CONFLICT`/`TOPUP_NOT_PENDING`/`TOPUP_EXPIRED` 409, `INVALID_TOPUP_PACKAGE` y `INVALID_RANGE` 400.
     - 1.0.1 (2026-10-14): `getTopUp` deja de ser propuesta (D15, ADR-0016); paquetes `CREDITS_20/50/100` y
@@ -205,6 +210,15 @@ paths:
           $ref: './shared/components.yaml#/components/responses/UnprocessableEntity'
         '429':
           $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+        '503':
+          description: La pasarela de pago no está disponible (`PAYMENT_GATEWAY_UNAVAILABLE`, UC-15 5a); reintentar con la misma `Idempotency-Key`.
+          headers:
+            Retry-After:
+              $ref: './shared/components.yaml#/components/headers/RetryAfter'
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
 
   /wallet/topups/{topUpId}:
     get:
@@ -278,6 +292,10 @@ paths:
               rechazo:
                 value:
                   outcome: FAILED
+              pasarelaCaida:
+                summary: Responde 503 PAYMENT_GATEWAY_UNAVAILABLE y deja la recarga FAILED
+                value:
+                  outcome: UNAVAILABLE
       responses:
         '200':
           description: Pago simulado procesado; devuelve la recarga actualizada.
@@ -296,6 +314,15 @@ paths:
           $ref: './shared/components.yaml#/components/responses/NotFound'
         '409':
           $ref: './shared/components.yaml#/components/responses/Conflict'
+        '503':
+          description: La pasarela no está disponible (`PAYMENT_GATEWAY_UNAVAILABLE`; `PAYMENT_GATEWAY_MODE=unavailable` o `outcome: UNAVAILABLE`).
+          headers:
+            Retry-After:
+              $ref: './shared/components.yaml#/components/headers/RetryAfter'
+          content:
+            application/problem+json:
+              schema:
+                $ref: './shared/components.yaml#/components/schemas/Problem'
 
   /wallet/webhooks/payment:
     post:
@@ -626,7 +653,7 @@ components:
       properties:
         outcome:
           type: string
-          enum: [PAID, FAILED]
+          enum: [PAID, FAILED, UNAVAILABLE]
           default: PAID
     PaymentWebhookPayload:
       type: object

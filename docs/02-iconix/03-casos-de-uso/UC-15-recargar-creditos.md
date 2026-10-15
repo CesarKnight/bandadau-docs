@@ -74,7 +74,9 @@ El estudiante pulsa **"Recargar"** en la pantalla *Mi billetera* (o "Recargar y 
 - **3c. Paquete inválido**: `400` (validación del enum `TopUpPackage`).
 - **5a. La pasarela no responde** al crear la sesión (timeout 5 s, circuit breaker): el `TopUp` queda
   `FAILED`, la entrada de idempotencia se elimina (para permitir reintento con la misma clave) y se
-  responde `503` (`code: PAYMENT_GATEWAY_UNAVAILABLE`).
+  responde `503` (`code: PAYMENT_GATEWAY_UNAVAILABLE`). En la pasarela simulada el caso se reproduce con
+  `PAYMENT_GATEWAY_MODE=unavailable` (todo `createTopUp`/`simulateTopUpPayment` responde 503) o con
+  `simulate-payment` `outcome: UNAVAILABLE` (503 puntual, recarga `FAILED`); implementado (D-14, OpenAPI wallet 1.2.0).
 - **8a. Pago rechazado**: el webhook llega con `status: FAILED`; el `TopUp` pasa a `FAILED`, no se crea
   `LedgerEntry` y se responde 200. La app muestra "Pago rechazado".
 - **9a. Firma HMAC inválida o marca de tiempo vieja**: `401` sin efectos; se registra en logs
@@ -346,5 +348,5 @@ Deptrac verifica que `Domain` no depende de `Illuminate\*` (RNF-14).
 2. Nombre de cabeceras del webhook: `X-Signature` (`t=<epoch>,v1=<hex hmac>`) y tolerancia de 5 min.
 3. Enum `TopUpPackage` (`CREDITS_20`, `CREDITS_50`, `CREDITS_100`) y campos `TopUp.amountCredits`, `TopUp.expiresAt` en el
    modelo de dominio; expiración a 30 min.
-4. Códigos `PAYMENT_GATEWAY_UNAVAILABLE` (no implementado: la pasarela es simulada) e `INVALID_SIGNATURE` (resuelto: el código real es `INVALID_SIGNATURE`, ver OpenAPI wallet 1.1.0).
+4. Códigos `PAYMENT_GATEWAY_UNAVAILABLE` (implementado en la pasarela simulada con `PAYMENT_GATEWAY_MODE=unavailable`, D-14) e `INVALID_SIGNATURE` (resuelto: el código real es `INVALID_SIGNATURE`, ver OpenAPI wallet 1.1.0).
 5. Creación perezosa de `Wallet` (saldo 0) en la primera operación, documentada en `wallet-service/AGENTS.md`.
