@@ -28,7 +28,7 @@ info:
       Los ejemplos de este contrato usan 900; los clientes deben leer `expiresIn` de la respuesta, no asumirlo.
     - Modo de moderación `MODERATION_MODE`: `allow-all` (por defecto en local; todo medio completado pasa a `APPROVED`), `manual` (todo pasa a `FLAGGED`
       para revisión humana) y, en la fase 2, el modelo ONNX. Al completar la subida se verifican además los *magic bytes* del objeto (D-12): si no corresponden al
-      `contentType` declarado (PNG/JPEG/WebP/HEIC/MP4/QuickTime) → `422` `MEDIA_CONTENT_MISMATCH` y el medio queda `REJECTED` sin evento de moderación.
+      `contentType` declarado (PNG/JPEG/WebP/HEIC/MP4/QuickTime) → `422` `MEDIA_CONTENT_MISMATCH` y el medio permanece `PENDING_UPLOAD` (sin evento).
     - `decideMedia` solo actúa sobre medios `FLAGGED` (`409` `MEDIA_NOT_FLAGGED` en otro caso); repetir la misma decisión responde `200` sin cambios ni evento.
 
     ## Changelog
