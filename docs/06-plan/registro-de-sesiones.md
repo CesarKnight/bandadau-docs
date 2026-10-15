@@ -50,6 +50,30 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-15 — App: feed del usuario, menú de perfil, header con atrás y eventos
+
+| Campo | Valor |
+|---|---|
+| Agente / persona | opencode (Deepseek v4.1 flash) |
+| Rama | `main` (`bandadau-frontend`) |
+| Objetivo | Mejorar perfil/feed del usuario, menú de opciones, headers y eventos (web) |
+| UCs / HU | UC-04, UC-06, UC-11 |
+| Componentes | `bandadau-frontend` |
+
+**Cambios**
+- `app/profile/[userId].tsx`: layout **responsive igual al feed** (header full-width con atrás, columna centrada `maxWidth 480`, right rail) y **scroll al post tocado** (`postId` → `scrollToIndex`, `viewPosition 0.3`; `onScrollToIndexFailed` → `scrollToOffset`).
+- `app/(tabs)/profile.tsx`: la **grilla usa los posts reales** del usuario (`useUserPosts`); al tocar uno navega al feed con `postId`. Botón **⋯** que abre el menú.
+- `src/features/profile/components/profile-menu*.tsx`: menú de opciones (**Editar perfil, Configuración, Abrir panel** si MODERATOR/ADMIN, **Cerrar sesión**) — bottom sheet nativo/web-móvil, modal en web desktop.
+- `src/components/screens/app-header.tsx` (nuevo) y `Screen` con **`showBack`**: norma de que las pantallas secundarias (perfil/editar, ajustes, tickets, grupos, notificaciones, evento, escáner) tengan botón atrás.
+- `src/components/ui/feed-list.tsx`: `numColumns`/`columnWrapperStyle`, `listRef` y `onScrollToIndexFailed`.
+- `app/(tabs)/events.tsx`: header + columna centrada y **grilla de 2 columnas en web** (aprovecha el ancho).
+- i18n `app.back`, `profile.menu.*`.
+
+**Verificación**
+- `pnpm typecheck` ✅ · `pnpm lint` ✅ · `expo export -p web` ✅ · `expo export -p ios` ✅.
+
+---
+
 ### 2026-10-14 — Publicación de los repos en GitHub (ThonkasM)
 
 | Campo | Valor |
