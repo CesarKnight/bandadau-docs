@@ -9,7 +9,7 @@
 | Requisitos | RF-15, RF-16, RNF-02, RNF-03, RNF-04, RNF-05, RNF-13 |
 | Tecnologías de la cátedra que demuestra | **C1** (3 microservicios en una acción + SAGA con rollback), **T8** (idempotencia: `Idempotency-Key`, índice parcial único, inbox, `operationRef`), C2 (3 lenguajes), C4 (2 motores: PostgreSQL ×2 + DynamoDB) |
 | Servicios involucrados | `events-service` (Java 25 · Spring Boot 4 · **DDD** · PostgreSQL `events_db`, **orquestador**) → `wallet-service` (PHP 8.4 · Laravel 12 · **Hexagonal** · PostgreSQL `wallet_db`) → `ticketing-service` (TypeScript · NestJS 11 · **Clean** · DynamoDB `bandada-ticketing`); `notification-service`; `bandadau-frontend` |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) — evidencia en `../07-trazabilidad.md` |
 
 Relaciones: «include» consulta de saldo (UC-16, parcial: `getMyWallet`) · «extend» **UC-15 Recargar créditos** en el punto de extensión *Recargar y continuar* (saldo insuficiente) · UC-13 reutiliza las compensaciones de esta SAGA.
 Documento de diseño asociado: `bandadau-docs/docs/03-arquitectura/saga-inscripcion-evento.md` (detalle de D2).

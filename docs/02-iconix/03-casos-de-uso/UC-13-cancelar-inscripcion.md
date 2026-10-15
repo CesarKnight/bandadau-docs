@@ -9,7 +9,7 @@
 | Requisitos | RF-17, RNF-04, RNF-05, RNF-13 |
 | Tecnologías de la cátedra que demuestra | **C1** (SAGA inversa con 3 servicios / 3 lenguajes / 2 motores), T8 (idempotencia), T4 |
 | Servicios involucrados | `events-service` (orquestador), `ticketing-service`, `wallet-service`, `notification-service`, `bandadau-frontend` |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) — evidencia en `../07-trazabilidad.md` |
 
 > Relación: reutiliza los comandos de compensación de la SAGA de UC-12
 > (`bandada.ticketing.cmd.void-ticket.v1`, `bandada.wallet.cmd.refund-credits.v1`), pero

@@ -92,7 +92,8 @@ algo lo contradice, se corrige el otro documento o se escribe un ADR.
 
 [roadmap-y-sprints.md](06-plan/roadmap-y-sprints.md) · [backlog.md](06-plan/backlog.md) ·
 [guia-para-agentes.md](06-plan/guia-para-agentes.md) (prompts plantilla) ·
-[registro-de-sesiones.md](06-plan/registro-de-sesiones.md) (handoff entre sesiones).
+[registro-de-sesiones.md](06-plan/registro-de-sesiones.md) (handoff entre sesiones) ·
+[deuda-tecnica.md](06-plan/deuda-tecnica.md) (pendiente de código tras la fase 1).
 
 ## Fuera de `bandadau-docs/docs/` (workspace de 8 repos, ADR-0017 + kit de marca)
 

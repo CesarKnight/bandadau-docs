@@ -9,7 +9,7 @@
 | Requisitos | RF-28, RF-10, RNF-03, RNF-05, RNF-09, RNF-13 |
 | Tecnologías de la cátedra que demuestra | T4, **T8**, C2 (PHP), C4 (DynamoDB), C5 (Clean) |
 | Servicios involucrados | `notification-service` (Laravel 12, Clean, DynamoDB `bandada-notifications`), RabbitMQ (cola `notification-service.events`), `bandadau-frontend` (Expo SDK 57), Expo Push API |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) (in-app y correo; Web Push diferido) — evidencia en `../07-trazabilidad.md` |
 
 ## 1. Narrativa
 
@@ -351,6 +351,8 @@ Escenario: notification-service caído no bloquea la inscripción
 | C2 / C4 / C5 | todo el UC | — | capas Clean en Laravel + DynamoDB | prueba de arquitectura Deptrac |
 
 **Pendientes para la CDR (propuestas):**
+
+> **Resolución en la fase 1 (2026-10-15):** `X-Unread-Count` y `mutedTypes` (con `TYPE_NOT_MUTABLE`) quedaron en el contrato (OpenAPI notification 1.2.0); el inbox usa `INBOX#<messageId>`/`META` (ADR-0016); los enlaces profundos son URLs web basadas en `APP_DEEP_LINK_BASE`. `postAuthorId` ya está en el AsyncAPI; sigue pendiente `recipientUserIds` en `alert.raised` (fase 2) y el nombre del actor en comentarios/reacciones: ver `deuda-tecnica.md`.
 
 - PROPUESTA: agregar a catalogo-servicios.md §6 (vía ADR) el patrón `pk = INBOX#<messageId>` / `sk = INBOX` (TTL 7 días) en `bandada-notifications`, que materializa el inbox con `ConditionExpression` de D3.2; también se usa con `dedupeKey` para envíos directos (UC-23).
 - PROPUESTA: agregar a decisiones-clave.md los `operationId` faltantes de notification-service: `markNotificationRead`, `markAllNotificationsRead`, `unregisterDevice`, `getNotificationPreferences`, `updateNotificationPreferences`, y `POST /internal/v1/notifications` (`sendNotification`, ver UC-23).

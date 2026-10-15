@@ -14,6 +14,13 @@ Supuestos que hacen viable el plazo:
 - Alcance **Must** únicamente. Lo **Should** (UC-08 sugerencias ML, UC-10 denuncias, OCR) entra solo si
   sobra tiempo en S4; lo **Could** queda fuera.
 
+> **Avance al 2026-10-15 (fase 1)**: el núcleo «clásico» (identity, social, media, events, wallet, ticketing,
+> notification, admin-gateway, panel con `mfe-moderation` y landing) está implementado y verificado con
+> `make up` (20 contenedores healthy), `make seed` (18/18) y `make smoke` (26/26); equivale a **R0–R2 en backend y
+> panel** (UC-01…16, 18 manual, 21, 24). Pendiente: la app Expo (`bandadau-frontend`, a cargo del equipo), el despliegue AWS
+> y toda la **fase 2** (ML/DL, IA local, `insights-service`, agentes, MCP, n8n, `mfe-insights`: UC-17, 19, 20, 22, 23).
+> El detalle de lo que falta en código está en `deuda-tecnica.md`; la evidencia por UC, en `bandadau-docs/docs/02-iconix/07-trazabilidad.md` §1.1.
+
 ## 1. Cómo se combinan ICONIX y los sprints
 
 ICONIX se aplica **por lotes de casos de uso**: cada UC pasa por Requisitos → Robustez →

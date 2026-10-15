@@ -9,7 +9,7 @@
 | Requisitos | RF-20, RNF-01, RNF-09, RNF-17 |
 | Tecnologías de la cátedra que demuestra | T4 (REST con paginación por cursor), T7 (lectura offline desde caché persistida), C2 (PHP) |
 | Servicios involucrados | `wallet-service` (PHP 8.4 + Laravel 12, Hexagonal, `wallet_db`), `bandadau-frontend` |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) — evidencia en `../07-trazabilidad.md` |
 
 > Relación: UC-12 lo «include» parcialmente (mostrar saldo antes de inscribirse); UC-13 y UC-15
 > terminan refrescando esta vista.

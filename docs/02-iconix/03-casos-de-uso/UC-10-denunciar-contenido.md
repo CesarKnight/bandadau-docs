@@ -9,7 +9,7 @@
 | Requisitos | RF-13, RF-22 (alimenta la cola), RNF-05 |
 | Tecnologías de la cátedra que demuestra | T4 (REST), T8 (`Idempotency-Key` + restricción única de negocio) |
 | Servicios involucrados | `social-service` (NestJS · Clean · MongoDB `social`), `media-service` (lectura de medios en UC-18), `notification-service`, `admin-gateway` (consulta en UC-18) |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) — evidencia en `../07-trazabilidad.md` |
 
 ## 1. Narrativa
 

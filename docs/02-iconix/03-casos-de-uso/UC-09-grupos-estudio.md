@@ -9,7 +9,7 @@
 | Requisitos | RF-12, RF-06 (publicar con `visibility = GROUP`), RNF-05 |
 | Tecnologías de la cátedra que demuestra | T4 (REST), T8 (`Idempotency-Key` en `POST /groups`) |
 | Servicios involucrados | `social-service` (NestJS · Clean · MongoDB `social`), `notification-service`, `bandadau-frontend` |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) — evidencia en `../07-trazabilidad.md` |
 
 ## 1. Narrativa
 

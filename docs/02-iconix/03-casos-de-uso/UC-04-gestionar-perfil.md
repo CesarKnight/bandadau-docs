@@ -9,7 +9,7 @@
 | Requisitos | RF-05, RF-29 (tema), RF-30 (idioma), RF-07 (moderación del avatar), RNF-08, RNF-09 |
 | Tecnologías de la cátedra que demuestra | T4 (REST), T8 (Idempotency-Key en upload), T9 (moderación DL del avatar), T7 (cambios offline encolados) |
 | Servicios involucrados | social-service (Clean, NestJS 11, Mongo `social`), media-service (Clean, Mongo `media` + S3), identity-service (Hexagonal), notification-service, bandadau-frontend |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) — evidencia en `../07-trazabilidad.md` |
 
 Este UC tiene tres sub-flujos que comparten la **pantalla Editar perfil / Ajustes**: (A) editar datos académicos, (B) cambiar avatar y (C) cambiar tema e idioma. Los textos de todas las pantallas provienen de i18n (namespaces `profile` y `settings`, D14); los colores, de tokens semánticos (D13).
 

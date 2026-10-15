@@ -9,7 +9,7 @@
 | Requisitos | RF-26, RNF-06, RNF-07, RNF-08, RNF-13, RNF-19 |
 | Tecnologías de la cátedra que demuestra | **T12**, T5 (mismas herramientas que los agentes), T13 (misma identidad) |
 | Servicios involucrados | Traefik (`/mcp`, rate-limit), `insights-service` (servidor MCP), `identity-service` (JWKS), `events-service`, `wallet-service`, `social-service`, `media-service` (vía `/internal`) |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Pendiente fase 2 (secuencia diseñada; sin implementar) |
 
 ## 1. Narrativa
 

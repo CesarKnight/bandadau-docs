@@ -9,7 +9,7 @@
 | Requisitos | RF-06, RF-07, RF-08, RNF-05, RNF-08, RNF-09, RNF-12 |
 | Tecnologías de la cátedra que demuestra | **T6** (IA local), **T7** (PWA / offline), **T8** (idempotencia), **T9** (DL imágenes y video), T4 |
 | Servicios involucrados | bandadau-frontend (Expo SDK 57, nativo + web PWA), social-service (Clean, Mongo `social`), media-service (Clean, Mongo `media` + S3, onnxruntime-node, ffmpeg), notification-service, n8n |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) (sin moderación ML: `MODERATION_MODE` allow-all/manual) — evidencia en `../07-trazabilidad.md` |
 
 Relación: UC-05 «include» la moderación automática de media-service, que alimenta UC-18 (Moderar contenido). Es el caso central de la demo (guion, paso 2 y 3 de `cumplimiento-catedra.md`).
 

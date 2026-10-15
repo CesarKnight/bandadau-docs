@@ -9,7 +9,7 @@
 | Requisitos | RF-23, RNF-03, RNF-08, RNF-13, RNF-19 |
 | Tecnologías de la cátedra que demuestra | **T5, T11, T12**, T2, T3 |
 | Servicios involucrados | `bandadau-admin/shell`, `bandadau-admin/mfe-insights` (`<bandada-mfe-insights>`), `admin-gateway`, `insights-service` (ReportAgent + servidor MCP), `events-service`, `wallet-service`, `social-service` (vía herramientas MCP → `/internal`) |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Pendiente fase 2 (secuencia diseñada; sin implementar) |
 
 ## 1. Narrativa
 

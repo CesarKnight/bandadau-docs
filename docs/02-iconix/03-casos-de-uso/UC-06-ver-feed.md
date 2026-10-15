@@ -9,7 +9,7 @@
 | Requisitos | RF-09, RNF-01, RNF-03, RNF-08, RNF-09, RNF-10 |
 | Tecnologías de la cátedra que demuestra | **T7** (PWA / offline), **T9** (ML clásico: `feed-ranker`), T4 |
 | Servicios involucrados | social-service (Clean, NestJS 11, Mongo `social`), media-service, bandadau-frontend (Expo SDK 57 nativo + web PWA) |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) (sin ranking ML: orden cronológico) — evidencia en `../07-trazabilidad.md` |
 
 Detalle del modelo en `bandadau-docs/docs/03-arquitectura/ml-dl.md` §3.6 y de la caché offline en `bandadau-docs/docs/03-arquitectura/ia-local-y-offline.md` §3 y §8.3; este UC los respeta.
 

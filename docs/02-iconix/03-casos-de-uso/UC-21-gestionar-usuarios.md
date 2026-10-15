@@ -9,7 +9,7 @@
 | Requisitos | RF-25, RNF-06, RNF-07, RNF-13 |
 | Tecnologías de la cátedra que demuestra | **T3**, T4 (REST interno), T13 (SSO: el panel usa la misma identidad) |
 | Servicios involucrados | `bandadau-admin/shell` (página propia del shell, **no** es un MFE), `admin-gateway`, `identity-service`, RabbitMQ, `social-service` |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) — evidencia en `../07-trazabilidad.md` |
 
 ## 1. Narrativa
 

@@ -9,7 +9,7 @@
 | Requisitos | RF-27, RF-28, RNF-03, RNF-05, RNF-13 |
 | Tecnologías de la cátedra que demuestra | **T10, T11**, T8 |
 | Servicios involucrados | n8n (`wf-02-recordatorio-evento`, `wf-04-resumen-semanal`), `identity-service` (token de servicio, lista de administradores), `events-service`, `notification-service`, `insights-service` |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Pendiente fase 2 (secuencia diseñada; sin implementar) |
 
 Este UC agrupa dos workflows de n8n con un mismo actor (Reloj). Se describen como dos cursos básicos: **A** (recordatorio 24 h) y **B** (resumen semanal generativo).
 

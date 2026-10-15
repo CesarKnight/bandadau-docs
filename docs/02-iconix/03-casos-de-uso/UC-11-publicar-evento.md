@@ -9,7 +9,7 @@
 | Requisitos | RF-14, RF-07 (moderación de la portada), RNF-05, RNF-08 |
 | Tecnologías de la cátedra que demuestra | T4 (REST), T10 (n8n consume `event.published`), T9 (portada moderada), C5 (DDD táctico) |
 | Servicios involucrados | `events-service` (Spring Boot 4 · **DDD** · PostgreSQL `events_db`), `media-service` (NestJS · Clean · MongoDB `media` + S3), n8n, `bandadau-frontend`, `bandadau-landing` |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) — evidencia en `../07-trazabilidad.md` |
 
 ## 1. Narrativa
 

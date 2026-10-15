@@ -9,7 +9,7 @@
 | Requisitos | RF-22, RF-07, RF-13, RNF-08, RNF-17, RNF-12 |
 | Tecnologías de la cátedra que demuestra | **T2** (microfrontend Angular como Web Component en shell Next.js), **T3** (GraphQL query/mutation/subscription), **T9** (puntajes DL), **T10** (n8n) |
 | Servicios involucrados | `bandadau-admin/shell` (Next.js 16), `bandadau-admin/mfe-moderation` (Angular 21 + Angular Elements), `admin-gateway` (NestJS 11 + Apollo), `media-service`, `social-service`, `identity-service`, n8n |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) (moderación manual desde el panel; sin ML) — evidencia en `../07-trazabilidad.md` |
 
 > Relaciones: UC-05 «include» la moderación automática que **alimenta** esta cola (`MediaAsset`
 > `FLAGGED`, `Post` `HIDDEN`); UC-10 aporta las denuncias (`ContentReport` `OPEN`); UC-03 da

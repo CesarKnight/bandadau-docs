@@ -9,7 +9,7 @@
 | Requisitos | RF-01, RF-02, RF-30 (idioma inicial), RNF-05, RNF-06, RNF-13 |
 | Tecnologías de la cátedra que demuestra | T4 (REST), T8 (Idempotency-Key + inbox), T10 (n8n) |
 | Servicios involucrados | identity-service (Hexagonal, Spring Boot 4), social-service, notification-service, n8n, mobile (app web PWA / nativa) |
-| Estado ICONIX | Secuencia (CDR aprobada 2026-10-14 — acta retroactiva; implementación en curso) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) — evidencia en `../07-trazabilidad.md` |
 
 ---
 

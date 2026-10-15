@@ -9,7 +9,7 @@
 | Requisitos | RF-18, RNF-05, RNF-09, RNF-01 |
 | Tecnologías de la cátedra que demuestra | T4 (REST), **T8** (idempotencia + escritura condicional DynamoDB), T7 (modo offline del portero) |
 | Servicios involucrados | `ticketing-service` (NestJS 11, Clean, DynamoDB `bandada-ticketing`), `bandadau-frontend` |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) (backend; validación en puerta desde la app Expo a cargo del equipo) — evidencia en `../07-trazabilidad.md` |
 
 ## 1. Narrativa (fase de requisitos)
 
@@ -332,6 +332,8 @@ hook `useValidateTicket`, pantalla `scan.tsx`.
 | RNF-01 | UC-14 | — | — | AT-14-10 |
 
 ### PROPUESTAS (pendientes de aprobar; agregar a `decisiones-clave.md` / contratos)
+
+> **Resolución en la fase 1 (2026-10-15):** las propuestas 1, 2, 3 y 5 quedaron incorporadas a los contratos (`getTicketSigningKeys`, `eventId` opcional, `organizerId`/`staffUserIds`/`eventEndsAt` en `issue-ticket` — AsyncAPI 1.2.0 —, y `VALIDATION_WINDOW_CLOSED` 422 / `TICKET_NOT_FOUND` 404 — OpenAPI ticketing 1.2.0).
 
 1. Endpoint público `GET /api/v1/tickets/signing-keys` (`getTicketSigningKeys`, formato JWKS) para la
    verificación offline; y fijar en D1 que `qrPayload` es **JWS ES256** (no HMAC).

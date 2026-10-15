@@ -50,6 +50,27 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-15 — Consolidación de contratos y documentación tras la fase 1 (ADR-0018)
+
+**Agente:** Claude Code (consolidador de `bandadau-docs`) · **Objetivo:** que contratos y documentos describan lo implementado en la fase 1 (`make smoke` 26/26); el código que funciona es la referencia de hecho.
+
+**Archivos tocados (solo `bandadau-docs`)**
+- Contratos (versión y changelog subidos): AsyncAPI 1.2.0 (`issue-ticket` con `organizerId`/`staffUserIds`/`eventEndsAt`, `idempotencyKey` en respuestas SAGA, `x-delivery-limit` 10, reintentos 5 s/30 s/5 min, `AUTHOR_SUSPENDED` confirmado); OpenAPI identity 1.2.0, events 1.2.0, social 1.3.0, media 1.2.0, wallet 1.1.0, ticketing 1.2.0, notification 1.2.0 y `shared/components.yaml` 1.2.0; GraphQL 1.2.0 (`updateUniversity`, códigos de negocio, filtros reales de la cola, auth del WebSocket).
+- Documentos: `seguridad-y-sso.md`, `idempotencia.md`, `api-rest-guidelines.md`, `graphql-admin.md`, catálogo (mongo 8.0.19, pgsty/minio), UC-01/02/03/14/15/21/24, modelo de dominio, `entornos-y-variables.md` e `infraestructura.md` (reflejan `bandadau-infra` real), ADR-0018 (+ índice), `07-trazabilidad.md` (§1.1 con evidencia del smoke), roadmap, backlog y estados de los 24 UC (UC-01…16, 18, 21, 24 «Implementado (fase 1)»; UC-17, 19, 20, 22, 23 «Pendiente fase 2»).
+- Nuevo: `docs/06-plan/deuda-tecnica.md` (todo lo que queda pendiente de código).
+
+**Decisiones**
+- Contrato = código donde el código es correcto: claims JWT (`typ=user|service`, `aud=bandada-*`, `uni`), cookies de refresh `bandada_rt`/`bandada_admin_rt` con `X-Bandada-Client`, `IDEMPOTENCY_KEY_REQUIRED`, `registerUser` 201, `HANDOFF_CODE_INVALID` 401, `INVALID_REFRESH_TOKEN`, `UNIVERSITY_DOMAIN_TAKEN` (no `DOMAIN_ALREADY_ASSIGNED`), webhook de wallet con `occurredAt` y `WEBHOOK_EXPIRED`, `TOPUP_NOT_FOUND` 404, `PAYMENT_SIMULATOR_ENABLED`, `deepLink` con base http.
+- Contrato por delante del código (pendiente de código, ver `deuda-tecnica.md`): `endsAt` en `createEvent`, `updateUniversity` en el gateway, scopes en `/internal`.
+- El WebSocket del gateway solo usa `connectionParams.Authorization`; `{accessToken, locale}` se tolera pero no se usa.
+
+**Verificación**
+- Spectral 6 sobre `contracts/openapi/*.yaml`: 0 errores; `@asyncapi/cli validate`: válido; SDL GraphQL válido (`graphql` 16 `buildSchema`); `tools.schema.json` JSON válido; enlaces relativos: ver resultado en el commit final.
+
+**Pendientes:** ver `deuda-tecnica.md` (sincronizaciones S-1…S-4 en gateway/shared/admin, D-1…D-17, I-1…I-5, E-1…E-3).
+
+---
+
 ### 2026-10-15 — App: feed del usuario, menú de perfil, header con atrás y eventos
 
 | Campo | Valor |

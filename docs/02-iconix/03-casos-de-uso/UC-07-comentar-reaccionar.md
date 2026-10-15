@@ -9,7 +9,7 @@
 | Requisitos | RF-10, RNF-01, RNF-05, RNF-09 |
 | Tecnologías de la cátedra que demuestra | T4 (REST), T8 (idempotencia: `Idempotency-Key` + `PUT` idempotente por naturaleza) |
 | Servicios involucrados | `social-service` (NestJS · Clean · MongoDB `social`), `notification-service` (Laravel · Clean · DynamoDB), `bandadau-frontend` |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) — evidencia en `../07-trazabilidad.md` |
 
 ## 1. Narrativa
 

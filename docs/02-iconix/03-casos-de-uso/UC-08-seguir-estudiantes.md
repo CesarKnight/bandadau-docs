@@ -9,7 +9,7 @@
 | Requisitos | RF-11, RNF-01, RNF-05, RNF-12 (versionado del modelo) |
 | Tecnologías de la cátedra que demuestra | T9 (ML clásico: filtrado colaborativo / Jaccard + carrera), T4 |
 | Servicios involucrados | `social-service` (NestJS · Clean · MongoDB `social`), `notification-service`, `bandadau-frontend`, `bandadau-ml/` (entrenamiento) |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) — evidencia en `../07-trazabilidad.md` |
 
 ## 1. Narrativa
 

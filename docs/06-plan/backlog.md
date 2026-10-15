@@ -44,6 +44,20 @@ con trabajo en paralelo por repositorio y aplicando el orden de recorte de `road
 
 ---
 
+## Avance al 2026-10-15 (fase 1)
+
+| Épica | Estado | Nota |
+|---|---|---|
+| E0 Plataforma | Parcial | Hecho: HT de infra local (Compose, Traefik, RabbitMQ, init, seed, smoke), paquetes `@bandada/*`, scaffolding de repos. Pendiente: AWS/Terraform, observabilidad LGTM completa, CI de todos los repos |
+| E1 Identidad, E2 Perfil, E3 Publicaciones, E4 Feed, E5 Grupos | Backend hecho | Sin ranker ML ni moderación ML; app Expo a cargo del equipo |
+| E6 Moderación IA | Solo manual | La moderación DL/ML y OCR son fase 2 |
+| E7 Eventos, E8 Billetera, E9 Entradas, E10 Notificaciones | Backend hecho | SAGA verificada con compensación (`CHAOS_TICKETING_FAIL`); Web Push diferido |
+| E11 IA local, E12 PWA/offline | Pendiente | App y fase 2 |
+| E13 Panel admin | Hecho (moderación y usuarios) | `mfe-insights` es fase 2; falta `updateUniversity` en el gateway |
+| E14 Agentes, E15 MCP, E16 Automatización | Pendiente fase 2 | |
+| E17 Landing | Hecho | |
+| E18 Temas e i18n | Hecho en panel y landing; app pendiente | |
+
 ## E0 — Plataforma (historias técnicas)
 
 | ID | Historia | Criterios de aceptación | UC | Componente | Pts | Rel. |

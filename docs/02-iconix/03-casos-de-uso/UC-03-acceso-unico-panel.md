@@ -9,7 +9,7 @@
 | Requisitos | RF-04, RNF-06, RNF-08 |
 | Tecnologías de la cátedra que demuestra | **T13** (acceso por una sola entrada), T4 |
 | Servicios involucrados | identity-service (Hexagonal), bandadau-frontend (Expo SDK 57: iOS, Android, web), bandadau-admin/shell (Next.js 16 static export) |
-| Estado ICONIX | Secuencia (CDR aprobada 2026-10-14 — acta retroactiva; implementación en curso) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) (SSO app → panel: probado en el panel; handoff desde la app Expo pendiente de verificar) — evidencia en `../07-trazabilidad.md` |
 
 Relación: UC-03 «extend» UC-02 (requiere sesión activa en la app de origen). Implementa D4 de `decisiones-clave.md`.
 

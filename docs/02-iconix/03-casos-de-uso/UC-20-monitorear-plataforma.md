@@ -9,7 +9,7 @@
 | Requisitos | RF-24, RNF-03, RNF-04, RNF-13, RNF-19 |
 | Tecnologías de la cátedra que demuestra | **T5, T3, T9**, T10, T2, T12 |
 | Servicios involucrados | `insights-service` (MonitoringAgent + servidor MCP), `events-service`, `media-service`, `social-service` (vía `/internal`), todos los servicios (`/health/ready`), RabbitMQ, `admin-gateway`, `bandadau-admin/mfe-insights`, n8n, `notification-service` |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Pendiente fase 2 (secuencia diseñada; sin implementar) |
 
 ## 1. Narrativa
 

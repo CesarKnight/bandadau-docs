@@ -9,7 +9,7 @@
 | Requisitos | RF-19, RNF-05, RNF-06, RNF-01 |
 | Tecnologías de la cátedra que demuestra | **T8** (Idempotency-Key + webhook idempotente + `operationRef` único), T4, C2 (PHP) |
 | Servicios involucrados | `wallet-service` (PHP 8.4 + Laravel 12, Hexagonal, `wallet_db`), `notification-service`, `bandadau-frontend` |
-| Estado ICONIX | Secuencia (pendiente CDR) |
+| Estado ICONIX | Implementado (fase 1, 2026-10-15) — evidencia en `../07-trazabilidad.md` |
 
 > Relación: «extend» de UC-12 ("Recargar y continuar" cuando el débito falla por
 > `INSUFFICIENT_FUNDS`). Paso 4 del guion de la defensa: doble clic en "Pagar" → un solo cargo.
@@ -85,7 +85,7 @@ El estudiante pulsa **"Recargar"** en la pantalla *Mi billetera* (o "Recargar y 
   el índice único de `operationRef` hace fallar cualquier segundo `TOPUP` → se trata como repetido.
 - **10b. Webhook para un `TopUp` `EXPIRED` o `FAILED`** con `status: PAID`: se acredita igual (el dinero
   entró) registrando `TopUp.status = PAID` y un log de reconciliación `topup.late_payment`.
-- **10c. `topUpId` desconocido**: 200 sin efectos + log de reconciliación (no se reintenta en bucle).
+- **10c. `topUpId` desconocido**: `404 TOPUP_NOT_FOUND` (alineado con el OpenAPI; la pasarela simulada no reintenta en bucle). Callback fuera de la ventana anti-replay (`occurredAt`, 300 s): `401 WEBHOOK_EXPIRED`.
 - **13a. El estudiante cierra el navegador sin pagar**: el `TopUp` sigue `PENDING`; un job
   (`schedule:run` cada minuto) lo marca `EXPIRED` al pasar `expiresAt`.
 - **13b. `notification-service` caído**: el saldo ya fue acreditado; la notificación llega al recuperarse (RNF-03).
@@ -312,7 +312,7 @@ Deptrac verifica que `Domain` no depende de `Illuminate\*` (RNF-14).
 | REST | `paymentWebhook` — `POST /api/v1/wallet/webhooks/payment` (HMAC, idempotente por `gatewayRef`) | ídem |
 | REST | `getMyWallet` | ídem (UC-16) |
 | Evento | `bandada.wallet.topup.paid.v1` | `bandadau-docs/contracts/asyncapi/bandada-events.yaml` |
-| Errores | `IDEMPOTENCY_IN_PROGRESS` (409), `IDEMPOTENCY_KEY_REUSED` (422), `PAYMENT_GATEWAY_UNAVAILABLE` (503), `INVALID_WEBHOOK_SIGNATURE` (401) | Problem Details |
+| Errores | `IDEMPOTENCY_IN_PROGRESS` (409), `IDEMPOTENCY_KEY_REUSED` (422), `PAYMENT_GATEWAY_UNAVAILABLE` (503), `INVALID_SIGNATURE` (401), `WEBHOOK_EXPIRED` (401), `TOPUP_NOT_FOUND` (404) | Problem Details |
 
 ## 5. Pruebas de aceptación
 
@@ -346,5 +346,5 @@ Deptrac verifica que `Domain` no depende de `Illuminate\*` (RNF-14).
 2. Nombre de cabeceras del webhook: `X-Signature` (`t=<epoch>,v1=<hex hmac>`) y tolerancia de 5 min.
 3. Enum `TopUpPackage` (`CREDITS_20`, `CREDITS_50`, `CREDITS_100`) y campos `TopUp.amountCredits`, `TopUp.expiresAt` en el
    modelo de dominio; expiración a 30 min.
-4. Códigos `PAYMENT_GATEWAY_UNAVAILABLE` e `INVALID_WEBHOOK_SIGNATURE`.
+4. Códigos `PAYMENT_GATEWAY_UNAVAILABLE` (no implementado: la pasarela es simulada) e `INVALID_SIGNATURE` (resuelto: el código real es `INVALID_SIGNATURE`, ver OpenAPI wallet 1.1.0).
 5. Creación perezosa de `Wallet` (saldo 0) en la primera operación, documentada en `wallet-service/AGENTS.md`.
