@@ -865,8 +865,10 @@ toast del shell mostraba la clave en vez del mensaje del MFE.
   entrada escalonada FadeInDown/ZoomIn, inclinación 3D interactiva y QR), tokenizado (`color.pass.*`, claro+oscuro)
   e i18n; usado en lista, detalle y revelación. Sustituye al `TicketView` anterior.
 - **`@bandada/i18n`:** nuevo helper `formatTime` (hora sola, `h23`/`h12`).
+- **Tickets en modal (UC-12):** al tocar una entrada se abre el `TicketPass` en un **modal sobrepuesto** con **tilt
+  por movimiento del celular** (`expo-sensors` `DeviceMotion`; arrastre en web) y la lista muestra **2 columnas en web**.
 
-**Commits:** `bandadau-shared` (`196d706`, `0b35e5f`, `36ce3b6`); `bandadau-frontend` (`757043c`, `651b6c5`, `5f15518`, `48aaa37`, `87e47fd`, `3e7bcec`, `39ab056`).
+**Commits:** `bandadau-shared` (`196d706`, `0b35e5f`, `36ce3b6`); `bandadau-frontend` (`757043c`, `651b6c5`, `5f15518`, `48aaa37`, `87e47fd`, `3e7bcec`, `39ab056`, `5143077`).
 
 **Pendientes**
 - [ ] `pnpm i18n:check` en la app falla por falta de `locales/{es,en}/errors.json` (preexistente): generarlo desde `@bandada/i18n`.
