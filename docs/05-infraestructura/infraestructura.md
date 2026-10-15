@@ -1,5 +1,19 @@
 # Infraestructura — Bandada U
 
+> **Estado (2026-10-15).** El entorno **local** (§2: Docker Compose + Traefik) está **implementado y verificado** en
+> `bandadau-infra` (`make up && make seed && make smoke`). Diferencias reales respecto a este diseño:
+> - Un solo `docker-compose.yaml` en la raíz de `bandadau-infra` (no `compose/`), con perfiles `infra`, `services`,
+>   `observability` y `llm`.
+> - MongoDB fijado en `mongo:8.0.19` (las 8.0.2x+ no arrancan en el kernel de Docker Desktop, SERVER-121912) y MinIO como
+>   `pgsty/minio` (la imagen oficial ya no se publica). n8n usa SQLite en un volumen.
+> - Wallet y notification corren con la misma imagen en roles web / worker / relay
+>   (`wallet:consume-commands`, `wallet:relay-outbox`, `notifications:consume`, `notifications:relay-outbox`).
+> - Los frontends **no** van en Docker en local: se ejecutan con sus comandos (`pnpm dev`) y Traefik los reenvía desde
+>   `host.docker.internal`.
+> - Comandos reales: `make setup | up | seed | smoke | mock | down | reset | urls`.
+> - **AWS (§3 en adelante, CloudFormation, CI/CD de despliegue) sigue siendo diseño**: `bandadau-infra/aws/` aún no existe.
+> Variables por componente: `entornos-y-variables.md`. Decisiones de implementación: ADR-0018.
+
 Cómo se levanta Bandada U en **local** (Docker Compose + Traefik), cómo se despliega la
 **demo en AWS** (un host EC2 + servicios gestionados baratos) y cómo funciona el **CI/CD**
 por repositorio (ADR-0017). Los nombres de servicios, puertos, imágenes, colas y tablas salen de
