@@ -905,3 +905,27 @@ toast del shell mostraba la clave en vez del mensaje del MFE.
 **Pendientes**
 - [ ] `pnpm i18n:check` en la app falla por falta de `locales/{es,en}/errors.json` (preexistente): generarlo desde `@bandada/i18n`.
 - [ ] El `qrPayload` de los mocks es fijo; cuando ticketing-service esté, usar el JWS firmado real.
+
+---
+
+### 2026-10-15 — Fase 2 (parcial) e integración final
+
+**Hecho:** `insights-service` (agentes de reportes y monitoreo, servidor MCP con 11 herramientas, LlmPort stub/Anthropic/Ollama, TtsPort
+null/Piper/Polly), `mfe-insights` (React, montado en el shell), 6 workflows n8n + router, moderación con deep learning
+(`nsfw-classifier` ONNX en `media-service`, `MODERATION_MODE=onnx`), `updateUniversity`, `endsAt/organizerId` hacia ticketing,
+ADR-0018, consolidación de contratos y 20 mensajes de error nuevos en `@bandada/i18n`.
+
+**Verificación:** `make seed && make smoke` → **41 ✓ / 0 ✗** (27 base + 14 de insights/MCP); panel en `admin.bandada.localhost` con
+dashboard, moderación en vivo e Insights (reportes, alertas) con datos reales.
+
+**Cambios de esta pasada:** ticketing responde 400 en validación (contrato); `UPLOAD_URL_TTL_SECONDS=900` unificado;
+`IDEMPOTENCY_KEY_REQUIRED` unificado entre Java, PHP y Node; `listGroupsInternal` sin `career` devuelve los grupos más grandes;
+el smoke ya no imprime JWTs.
+
+**Pendientes (ver `deuda-tecnica.md`):**
+- [ ] UC-17 (asistente offline / IA local) y la app Expo: a cargo del equipo (E-1…E-3).
+- [ ] Recall ≥ 0.90 del modelo de moderación **no medido** (M-1); modelo base de terceros, sin fine-tune propio.
+- [ ] `createMcpToken/revokeMcpToken` en identity (hoy FEATURE_DISABLED) para clientes MCP externos con token de 8 h.
+- [ ] Claude/Ollama/Piper/Polly sin probar contra servicios reales (solo dobles); audio en local desactivado (`TTS_PROVIDER=none`).
+- [ ] D-3 (CANNOT_DEMOTE_SELF… en identity), D-9 (`avatarStatus`), D-10, D-1 (`endsAt` en events).
+- [ ] I-2: despliegue AWS (EC2 + RDS + DynamoDB + S3/CloudFront) y CI/CD: solo diseño; requiere credenciales y decisiones del equipo.
