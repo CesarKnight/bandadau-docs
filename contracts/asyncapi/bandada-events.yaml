@@ -4,7 +4,7 @@ asyncapi: 3.0.0
 id: urn:com:bandadau:events
 info:
   title: Bandada U — Catálogo de eventos y comandos (RabbitMQ)
-  version: 1.1.0
+  version: 1.2.0
   description: |
     Contrato asíncrono de **Bandada U** (fuente: `bandadau-docs/docs/03-arquitectura/catalogo-servicios.md` §5, `decisiones-clave.md` D2/D3/D12/D14).
 
@@ -24,7 +24,7 @@ info:
     - Publicación con **outbox** transaccional y *publisher confirms*; entrega *at-least-once*.
     - Consumo con **inbox** (`processed_messages` / `ConditionExpression`) deduplicando por `id`; ack manual.
     - Comandos con `idempotencyKey = <sagaId>:<step>`; los receptores responden lo mismo ante repeticiones.
-    - Reintentos: 3 con backoff exponencial (1 s, 5 s, 25 s) vía *retry* en el consumidor; luego `nack(requeue=false)` → DLX.
+    - Reintentos: 3 con backoff escalonado de **5 s / 30 s / 5 min** mediante colas de espera `<cola>.retry.5s|30s|5m` (TTL + dead-letter de vuelta a `bandada.events`/`bandada.commands`) gestionadas por `@bandada/messaging-ts`; agotados los reintentos (o ante mensaje inválido/desconocido) el mensaje va a `<cola>.dlq`. Las colas quorum además declaran `x-delivery-limit: 10` como red de seguridad ante reencolados.
     - Consumidores toleran campos nuevos; cambios incompatibles → nueva versión `.v2` publicada en paralelo.
 
     ## Dead letters (`bandada.dlx`)
@@ -34,6 +34,9 @@ info:
     - Valor `AUTHOR_SUSPENDED` en `PostHiddenData.reason` (no figura en `HiddenReason` del modelo de dominio).
 
     ## Changelog
+    - 1.2.0 (2026-10-15): consolidación fase 1 — `issue-ticket` agrega `organizerId` (requerido), `staffUserIds` y
+      `eventEndsAt` (opcionales); las respuestas de la SAGA (`credits-*`, `ticket-*`) agregan `idempotencyKey`
+      (eco del comando, opcional); `x-delivery-limit` 4 → 10; reintentos 5 s / 30 s / 5 min (antes 1/5/25 s).
     - 1.1.0 (2026-10-14): ADR-0016/D15 — eventos `bandada.ticketing.ticket-void-failed.v1`,
       `bandada.social.comment.hidden.v1` y `bandada.social.post.removed.v1`; motivos `SAGA_ABORTED`
       (`credits-debit-failed`) y `ALREADY_VOIDED` (`ticket-issue-failed`); `credits-refunded` con
@@ -781,7 +784,7 @@ channels:
       x-queue-type: quorum
       x-dead-letter-exchange: bandada.dlx
       x-dead-letter-routing-key: events-service.saga-replies
-      x-delivery-limit: 4
+      x-delivery-limit: 10
     bindings:
       amqp:
         is: queue
@@ -812,7 +815,7 @@ channels:
       x-queue-type: quorum
       x-dead-letter-exchange: bandada.dlx
       x-dead-letter-routing-key: wallet-service.commands
-      x-delivery-limit: 4
+      x-delivery-limit: 10
     bindings:
       amqp:
         is: queue
@@ -843,7 +846,7 @@ channels:
       x-queue-type: quorum
       x-dead-letter-exchange: bandada.dlx
       x-dead-letter-routing-key: ticketing-service.commands
-      x-delivery-limit: 4
+      x-delivery-limit: 10
     bindings:
       amqp:
         is: queue
@@ -888,7 +891,7 @@ channels:
       x-queue-type: quorum
       x-dead-letter-exchange: bandada.dlx
       x-dead-letter-routing-key: social-service.events
-      x-delivery-limit: 4
+      x-delivery-limit: 10
     bindings:
       amqp:
         is: queue
@@ -917,7 +920,7 @@ channels:
       x-queue-type: quorum
       x-dead-letter-exchange: bandada.dlx
       x-dead-letter-routing-key: media-service.events
-      x-delivery-limit: 4
+      x-delivery-limit: 10
     bindings:
       amqp:
         is: queue
@@ -994,7 +997,7 @@ channels:
       x-queue-type: quorum
       x-dead-letter-exchange: bandada.dlx
       x-dead-letter-routing-key: notification-service.events
-      x-delivery-limit: 4
+      x-delivery-limit: 10
     bindings:
       amqp:
         is: queue
@@ -1091,7 +1094,7 @@ channels:
       x-queue-type: quorum
       x-dead-letter-exchange: bandada.dlx
       x-dead-letter-routing-key: insights-service.analytics
-      x-delivery-limit: 4
+      x-delivery-limit: 10
     bindings:
       amqp:
         is: queue
@@ -1136,7 +1139,7 @@ channels:
       x-queue-type: quorum
       x-dead-letter-exchange: bandada.dlx
       x-dead-letter-routing-key: n8n.automation
-      x-delivery-limit: 4
+      x-delivery-limit: 10
     bindings:
       amqp:
         is: queue
@@ -2939,6 +2942,9 @@ components:
         sagaId:
           type: string
           format: uuid
+        idempotencyKey:
+          type: string
+          description: Eco del `idempotencyKey` del comando que originó la respuesta (`<sagaId>:<step>`). Opcional.
         registrationId:
           type: string
           format: uuid
@@ -2973,6 +2979,9 @@ components:
         sagaId:
           type: string
           format: uuid
+        idempotencyKey:
+          type: string
+          description: Eco del `idempotencyKey` del comando que originó la respuesta (`<sagaId>:<step>`). Opcional.
         registrationId:
           type: string
           format: uuid
@@ -3013,6 +3022,9 @@ components:
         sagaId:
           type: string
           format: uuid
+        idempotencyKey:
+          type: string
+          description: Eco del `idempotencyKey` del comando que originó la respuesta (`<sagaId>:<step>`). Opcional.
         registrationId:
           type: string
           format: uuid
@@ -3050,6 +3062,9 @@ components:
         sagaId:
           type: string
           format: uuid
+        idempotencyKey:
+          type: string
+          description: Eco del `idempotencyKey` del comando que originó la respuesta (`<sagaId>:<step>`). Opcional.
         registrationId:
           type: string
           format: uuid
@@ -3077,6 +3092,9 @@ components:
         sagaId:
           type: string
           format: uuid
+        idempotencyKey:
+          type: string
+          description: Eco del `idempotencyKey` del comando que originó la respuesta (`<sagaId>:<step>`). Opcional.
         registrationId:
           type: string
           format: uuid
@@ -3107,6 +3125,9 @@ components:
         sagaId:
           type: string
           format: uuid
+        idempotencyKey:
+          type: string
+          description: Eco del `idempotencyKey` del comando que originó la respuesta (`<sagaId>:<step>`). Opcional.
         registrationId:
           type: string
           format: uuid
@@ -3131,6 +3152,9 @@ components:
         sagaId:
           type: string
           format: uuid
+        idempotencyKey:
+          type: string
+          description: Eco del `idempotencyKey` del comando que originó la respuesta (`<sagaId>:<step>`). Opcional.
         registrationId:
           type: string
           format: uuid
@@ -3323,6 +3347,7 @@ components:
       - eventTitle
       - eventStartsAt
       - venue
+      - organizerId
       - deadlineAt
       properties:
         sagaId:
@@ -3348,6 +3373,20 @@ components:
           format: date-time
         venue:
           type: string
+        organizerId:
+          type: string
+          format: uuid
+          description: Organizador del evento. ticketing-service lo copia al ticket para autorizar la validación en puerta (UC-14).
+        staffUserIds:
+          type: array
+          description: Usuarios autorizados además del organizador a validar entradas (personal de puerta). Opcional; vacío si no hay.
+          items:
+            type: string
+            format: uuid
+        eventEndsAt:
+          type: string
+          format: date-time
+          description: Fin del evento; cierra la ventana de validación. Si falta, ticketing usa `eventStartsAt + 12 h`.
         deadlineAt:
           type: string
           format: date-time
@@ -5323,6 +5362,10 @@ components:
             eventTitle: Taller de Docker para principiantes
             eventStartsAt: '2026-10-20T22:00:00Z'
             venue: Auditorio de la Facultad de Tecnología, UMSA
+            organizerId: 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a99
+            staffUserIds:
+            - 0192a3b4-5c6d-7e8f-9a0b-1c2d3e4f5a77
+            eventEndsAt: '2026-10-21T00:00:00Z'
             deadlineAt: '2026-10-14T14:00:33Z'
     TicketingCmdVoidTicketV1:
       name: TicketingCmdVoidTicketV1
