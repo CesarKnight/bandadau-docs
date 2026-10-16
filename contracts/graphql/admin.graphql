@@ -1,6 +1,6 @@
 # =============================================================================
 # Bandada U — GraphQL del panel de administración (admin-gateway)
-# Versión: 1.4.0 (2026-10-15) — schema-first según D11, D13, D14 y D15 (ADR-0016).
+# Versión: 1.5.0 (2026-10-16) — schema-first según D11, D13, D14 y D15 (ADR-0016).
 # Servido por admin-gateway (NestJS 11 + Apollo Server 5) en /graphql
 # (HTTP + WebSocket `graphql-ws` para suscripciones).
 #
@@ -30,6 +30,9 @@
 # `QUERY_TOO_DEEP`, `QUERY_TOO_COMPLEX`, `GRAPHQL_VALIDATION_FAILED`, `INTERNAL_SERVER_ERROR`.
 #
 # Changelog
+# - 1.5.0 (2026-10-16): motor del agente de reportes seleccionable (ADR-0022): enum `ReportEngine` (AUTO|OPENCODE|OLLAMA|STUB), argumento
+#   `engine` de `requestReport` (por defecto AUTO, compatible hacia atrás), tipo `ReportEngineInfo` y query `reportEngines` (solo ADMIN, nunca
+#   devuelve claves ni URLs con credenciales), `GeneratedReport.engine`/`model` (quién redactó) y `AgentRun.engine`/`engineMode`.
 # - 1.4.1 (2026-10-15): `ModerationResult.frameScores` (nuevo tipo `FrameScore`) y `worstFrameIndex`: puntajes por fotograma de la moderación de video (M-4).
 # - 1.4.0 (2026-10-15): `ContentReport.comment` (nuevo tipo `Comment` y enum `CommentStatus`, R-1); `ContentReport.post` también se
 #   resuelve en denuncias de comentario (post del comentario). Origen: `GET /internal/v1/comments/{commentId}` de social.
@@ -269,6 +272,21 @@ enum AlertKind {
   MODERATION_BACKLOG
   METRIC_ANOMALY
   MODERATION_ESCALATION
+}
+
+"""
+Motor que redacta/ejecuta el agente de reportes. `AUTO` usa el primero disponible de la cadena configurada
+(`LLM_PROVIDERS`) y cae al siguiente ante error, tiempo agotado, 429 o formato inválido; un motor explícito se usa
+tal cual y, si falla, cae a `STUB` dejando constancia en `GeneratedReport.model` (p. ej. `glm-5.2+stub-fallback`).
+"""
+enum ReportEngine {
+  AUTO
+  "API externa OpenAI-compatible (OpenCode Go) o Anthropic; los nombres de personas se seudonimizan."
+  OPENCODE
+  "Ollama local (qwen2.5:3b), modo híbrido."
+  OLLAMA
+  "Generador determinista (sin modelo)."
+  STUB
 }
 
 """Estado de un reporte generativo (`GeneratedReportStatus`; no confundir con `ReportStatus` de denuncias)."""
@@ -755,9 +773,28 @@ type GeneratedReport {
   audioUrl: String
   audioDurationSeconds: Int
   agentRun: AgentRun
+  "Motor real que atendió el reporte (nunca AUTO). Nulo en reportes anteriores a 1.5.0."
+  engine: ReportEngine
+  "Modelo que redactó (p. ej. `glm-5.2`, `qwen2.5:3b`, `glm-5.2+stub-fallback`, `stub-deterministic-1`)."
+  model: String
   failureReason: String
   createdAt: DateTime!
   completedAt: DateTime
+}
+
+"""Un motor disponible para el agente de reportes. Nunca incluye claves ni URLs con credenciales."""
+type ReportEngineInfo {
+  engine: ReportEngine!
+  "Nombre legible para el selector del panel."
+  label: String!
+  "Modelo configurado (nulo para STUB)."
+  model: String
+  "El motor responde ahora (salud en caché, circuito cerrado y clave presente si es externo)."
+  available: Boolean!
+  "true si los datos salen de la plataforma hacia un tercero (se seudonimizan los nombres)."
+  external: Boolean!
+  "AGENT (tool-calling nativo), HYBRID (planificador determinista + el modelo solo redacta) o DETERMINISTIC."
+  mode: String!
 }
 
 type GeneratedReportEdge {
@@ -816,6 +853,9 @@ type AgentRun {
   trigger: String!
   status: AgentRunStatus!
   model: String
+  "Motor real y modo (AGENT|HYBRID|DETERMINISTIC) con que corrió el agente (ADR-0022)."
+  engine: ReportEngine
+  engineMode: String
   toolsUsed: [String!]!
   tokens: TokenUsage
   steps: [AgentRunStep!]!
@@ -1068,6 +1108,9 @@ type Query {
   """Reporte por id."""
   report(id: UUID!): GeneratedReport @auth(requires: [ADMIN])
 
+  """Motores disponibles para el agente de reportes (con su disponibilidad actual). Solo ADMIN."""
+  reportEngines: [ReportEngineInfo!]! @auth(requires: [ADMIN])
+
   """Alertas por estado."""
   alerts(
     status: AlertStatus
@@ -1113,7 +1156,7 @@ type Mutation {
     @auth(requires: [MODERATOR, ADMIN])
 
   """Solicita un reporte generativo; el idioma por defecto es el del usuario (D14)."""
-  requestReport(question: String!, locale: Locale): RequestReportPayload! @auth(requires: [ADMIN])
+  requestReport(question: String!, locale: Locale, engine: ReportEngine = AUTO): RequestReportPayload! @auth(requires: [ADMIN])
 
   """Reconoce una alerta."""
   acknowledgeAlert(id: UUID!): AcknowledgeAlertPayload! @auth(requires: [ADMIN])

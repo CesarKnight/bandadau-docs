@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — insights-service
-  version: 1.1.1
+  version: 1.2.0
   summary: Reportes generativos, alertas, ejecuciones de agentes y servidor MCP.
   description: |
     API REST del bounded context **Insights** (`insights-service`, TypeScript + NestJS 11,
@@ -22,6 +22,9 @@ info:
       [`bandadau-docs/contracts/mcp/tools.schema.json`](../mcp/tools.schema.json).
 
     ## Changelog
+    - 1.2.0 (2026-10-16): motor del agente de reportes seleccionable (ADR-0022): `RequestReportRequest.engine`
+      (`AUTO|OPENCODE|OLLAMA|STUB`, por defecto `AUTO`), `GET /insights/reports/engines` (`listReportEngines`, solo `ADMIN`,
+      nunca devuelve claves ni URLs con credenciales), `GeneratedReport.engine/model` y `AgentRun.engine/engineMode`.
     - 1.1.1 (2026-10-14): ejemplo de `audioUrl` con el bucket `bandada-reports` y la clave
       `reports/<reportId>/summary.<locale>.mp3` (catálogo §3, `agentes-y-reportes-generativos.md`).
     - 1.1.0 (2026-10-14): ADR-0016/D15 — enums e internos aceptados (sin `x-proposal`, salvo
@@ -77,6 +80,10 @@ paths:
                 value:
                   question: ¿Cómo evolucionaron las inscripciones a eventos y el uso de créditos en septiembre comparado con agosto?
                   locale: es
+              motor_explicito:
+                value:
+                  question: ¿Quién compró el último ticket?
+                  engine: OLLAMA
               ingles:
                 value:
                   question: Summarize last week's moderation backlog and failed registrations.
@@ -116,6 +123,43 @@ paths:
           $ref: './shared/components.yaml#/components/responses/UnprocessableEntity'
         '429':
           $ref: './shared/components.yaml#/components/responses/TooManyRequests'
+
+  /insights/reports/engines:
+    get:
+      tags: [reports]
+      operationId: listReportEngines
+      summary: Listar los motores del agente de reportes
+      description: |
+        Motores configurados (`OPENCODE`, `OLLAMA`, `STUB`) con su disponibilidad actual (salud barata en caché y
+        *circuit breaker*). Nunca devuelve claves de API ni URLs con credenciales. `AUTO` no se lista: es la
+        selección del primero disponible. Requiere `ADMIN`.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+        - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Motores.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReportEngineInfo'
+              examples:
+                sin_clave:
+                  value:
+                    items:
+                      - { engine: OPENCODE, label: OpenCode Go, model: glm-5.2, available: false, external: true, mode: AGENT }
+                      - { engine: OLLAMA, label: Ollama local, model: 'qwen2.5:3b', available: true, external: false, mode: HYBRID }
+                      - { engine: STUB, label: Determinista, model: null, available: true, external: false, mode: DETERMINISTIC }
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
 
   /insights/reports/{reportId}:
     get:
@@ -828,6 +872,36 @@ components:
         locale:
           $ref: './shared/components.yaml#/components/schemas/Locale'
           description: Idioma del reporte y del audio. Por defecto, `User.locale` del solicitante.
+        engine:
+          $ref: '#/components/schemas/ReportEngine'
+    ReportEngine:
+      type: string
+      enum: [AUTO, OPENCODE, OLLAMA, STUB]
+      default: AUTO
+      description: |
+        Motor del agente de reportes. `AUTO` usa el primero disponible de la cadena `LLM_PROVIDERS` y cae al siguiente
+        ante error, tiempo agotado, 429 o formato inválido. Un motor explícito se usa tal cual y, si falla, cae a `STUB`
+        dejando constancia en `model` (p. ej. `glm-5.2+stub-fallback`).
+    ReportEngineInfo:
+      type: object
+      required: [engine, label, available, external, mode]
+      properties:
+        engine:
+          $ref: '#/components/schemas/ReportEngine'
+        label:
+          type: string
+        model:
+          type: [string, 'null']
+          description: Modelo configurado; nulo para `STUB`.
+        available:
+          type: boolean
+          description: Responde ahora (salud en caché, circuito cerrado, clave presente si es externo).
+        external:
+          type: boolean
+          description: Los datos salen a un tercero; los nombres de personas se seudonimizan antes de enviarse.
+        mode:
+          type: string
+          enum: [AGENT, HYBRID, DETERMINISTIC]
     RequestReportResponse:
       type: object
       required: [reportId, agentRunId, status, locale]
@@ -892,6 +966,14 @@ components:
           format: uuid
         hasAudio:
           type: boolean
+        engine:
+          description: Motor real que atendió el reporte (nunca `AUTO`). Ausente en reportes anteriores a 1.2.0.
+          oneOf:
+            - $ref: '#/components/schemas/ReportEngine'
+            - type: 'null'
+        model:
+          type: [string, 'null']
+          description: Quién redactó (p. ej. `glm-5.2`, `qwen2.5:3b`, `glm-5.2+stub-fallback`, `stub-deterministic-1`).
         createdAt:
           type: string
           format: date-time
@@ -1050,6 +1132,11 @@ components:
         model:
           type: string
           example: claude-sonnet-5-5
+        engine:
+          $ref: '#/components/schemas/ReportEngine'
+        engineMode:
+          type: string
+          enum: [AGENT, HYBRID, DETERMINISTIC]
         toolsUsed:
           type: array
           items:
