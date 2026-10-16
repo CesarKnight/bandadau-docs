@@ -11,39 +11,39 @@ en `bandadau-docs`. Prioridad: **A** = antes de la entrega (10-nov), **B** = si 
 | ~~S-1~~ ✅ | `bandadau-backend/services/admin-gateway` | Ejecutar `pnpm schema:sync` (la copia `schema/admin.graphql` debe ser idéntica a `bandadau-docs/contracts/graphql/admin.graphql` 1.2.0: agrega `updateUniversity`, `UpdateUniversityInput/Payload` y comentarios) y su prueba de igualdad | A — **Hecho** (`cb7dace`) |
 | ~~S-2~~ ✅ | `bandadau-shared` | Ejecutar `pnpm contracts:gen` (regenera `@bandada/contracts-ts` desde OpenAPI/AsyncAPI nuevos) y `pnpm i18n:check` | A — **Hecho** (`01c21ef`) |
 | ~~S-3~~ ✅ | `bandadau-shared/packages/i18n` | Agregar (es/en) los códigos que ahora figuran en los OpenAPI y faltan en `locales/*/errors.json`: `IDEMPOTENCY_KEY_REQUIRED`, `MALFORMED_REQUEST`, `INVALID_CURSOR`, `CONCURRENT_MODIFICATION`, `DEPENDENCY_UNAVAILABLE`, `MEDIA_UNAVAILABLE`, `NOTIFICATION_NOT_FOUND`, `INVALID_DEVICE_TOKEN`, `TYPE_NOT_MUTABLE`, `TICKET_NOT_FOUND`, `VALIDATION_WINDOW_CLOSED`, `INVALID_TOPUP_PACKAGE`, `TOPUP_NOT_PENDING`, `TOPUP_EXPIRED`, `TOPUP_NOT_FOUND`, `WEBHOOK_EXPIRED`, `AMOUNT_MISMATCH`, `GATEWAY_REF_CONFLICT`, `INVALID_RANGE`. Reemplazar `IDEMPOTENCY_KEY_MISSING` por `IDEMPOTENCY_KEY_REQUIRED` en `PROTOCOL_CODES` (`scripts/extract-error-codes.mjs`) y en los catálogos | A — **Hecho** (`01c21ef`) |
-| S-4 | `bandadau-admin/shell`, `bandadau-admin/mfe-moderation` | Regenerar tipos GraphQL; el panel ya espera `ALREADY_MODERATED`, `CANNOT_DEMOTE_SELF`, `CANNOT_SUSPEND_SELF`, `ROLES_REQUIRED` (ver D-3) | B |
+| ~~S-4~~ ✅ | `bandadau-admin/shell`, `bandadau-admin/mfe-moderation` | Regenerar tipos GraphQL; el panel ya espera `ALREADY_MODERATED`, `CANNOT_DEMOTE_SELF`, `CANNOT_SUSPEND_SELF`, `ROLES_REQUIRED` (ver D-3) | B — **Hecho (`7a890a3`, `5133ef3`)** |
 
 ## 2. Cumplimiento de contrato (el código debe cambiar)
 
 | # | Servicio | Qué falta | Contrato / doc | Prio |
 |---|---|---|---|---|
-| D-1 | events-service | Aceptar `endsAt` opcional en `createEvent` y exponer `endsAt` en `Event` (hoy solo se calcula `startsAt + EVENT_DEFAULT_DURATION`) | OpenAPI events 1.2.0 | B |
+| ~~D-1~~ ✅ | events-service | Aceptar `endsAt` opcional en `createEvent` y exponer `endsAt` en `Event` (hoy solo se calcula `startsAt + EVENT_DEFAULT_DURATION`) | OpenAPI events 1.2.0 | B — **Hecho (`8d359fc`)** |
 | ~~D-2~~ ✅ | events-service | Enviar `organizerId` (requerido), `staffUserIds` y `eventEndsAt` en `issue-ticket` (otro agente lo implementa; verificar con un test de contrato) y quitar la rama `STRICT_ORGANIZER_CHECK=false` de ticketing cuando todos los tickets nuevos lo traigan | AsyncAPI 1.2.0 | A — **Hecho** (`6e23da9`) |
-| D-3 | admin-gateway / identity | Emitir `CANNOT_DEMOTE_SELF`, `CANNOT_SUSPEND_SELF` y `ROLES_REQUIRED` (el panel los espera; hoy solo existe `LAST_ADMIN` en identity); mapear `MEDIA_NOT_FLAGGED` de media a `ALREADY_MODERATED` en `moderateMedia` o hacer que el panel acepte ambos | GraphQL 1.2.0 | B |
+| ~~D-3~~ ✅ | admin-gateway / identity | Emitir `CANNOT_DEMOTE_SELF`, `CANNOT_SUSPEND_SELF` y `ROLES_REQUIRED` (el panel los espera; hoy solo existe `LAST_ADMIN` en identity); mapear `MEDIA_NOT_FLAGGED` de media a `ALREADY_MODERATED` en `moderateMedia` o hacer que el panel acepte ambos | GraphQL 1.2.0 | B — **Hecho (`da279bc`)** |
 | ~~D-4~~ ✅ | admin-gateway | Implementar el resolver `updateUniversity` (identity `PATCH /internal/v1/universities/{id}` ya existe) | GraphQL 1.2.0 | A — **Hecho** (`cb7dace`) |
-| D-5 | admin-gateway | `suspendUser.until` se ignora (`UpdateUserStatusRequest` no tiene el campo); `User.suspendedAt/suspensionReason` solo se rellenan tras suspender en la misma petición; `ContentReport.post` devuelve `null`; `Registration.saga` busca entre las 100 SAGAs más recientes; el `item` de `moderationQueueChanged` es mínimo | graphql-admin.md | B |
-| D-6 | admin-gateway | Falta endpoint interno de evento y de post (se usa la API pública con el token del usuario): agregar `GET /internal/v1/events/{id}` y `GET /internal/v1/posts/{id}` a los contratos y al gateway | OpenAPI events/social | B |
-| D-7 | identity-service + todos los servicios | **No se exigen scopes** en `/internal/**` (solo `typ=service` y `aud=bandada-internal`). Exigir `internal:read`/`internal:write` según método | seguridad-y-sso.md §2.1 | B |
-| D-8 | ticketing-service | `VALIDATION_FAILED` responde 422; el contrato (y media/social) usa 400. Unificar a 400 con `errors[]` | components.yaml `BadRequest` | B |
-| D-9 | social-service | Exponer `avatarStatus` (`PENDING|APPROVED|REJECTED`) en `Profile` para que la app muestre «en revisión» (hoy `pendingAvatarMediaId` es interno) | OpenAPI social 1.3.0 | B |
-| D-10 | identity-service | `registerUser` no recibe `displayName` (se deriva del correo): decidir si se agrega al contrato; `REGISTER_HIDE_EXISTING_ACCOUNTS` está en `false` por defecto (UC-01 pedía anti-enumeración) | UC-01, OpenAPI identity 1.2.0 | B |
-| D-11 | notification-service | `ALERT` solo notifica si el evento trae `recipientUserIds` (no está en AsyncAPI: agregarlo en fase 2 junto a UC-20); los textos de comentarios/reacciones no incluyen el nombre del actor (el evento no lo trae) | UC-24 | F2 |
-| D-12 | media-service | No se verifican *magic bytes* del objeto (solo `Content-Type` y tamaño); modelos ONNX y ffmpeg no integrados (`MODERATION_MODE` `allow-all`/`manual`) | UC-05, ml-dl.md | F2 |
-| D-13 | media-service / infra | `UPLOAD_URL_TTL_SECONDS` es 900 por defecto en el servicio y 300 en el Compose: elegir un valor único en `.env.example` e infra | OpenAPI media 1.2.0 | B |
-| D-14 | wallet-service | `PAYMENT_GATEWAY_UNAVAILABLE` (UC-15) no existe: la pasarela es simulada; revisar si se necesita | UC-15 | F2 |
-| D-15 | notification-service | Web Push: se acepta la suscripción pero no se envía; exportador OTLP diferido; `PUSH_ENABLED=false` | UC-24 | F2 |
-| D-16 | todos | Rate limit de identity en memoria por instancia (no distribuido); el de Traefik es por instancia | seguridad-y-sso.md §8 | F2 |
-| D-17 | social-service | Los 404 usan `NOT_FOUND` (el contrato no define `POST_NOT_FOUND`); en `/internal` el motivo `AUTHOR_SUSPENDED` se presenta como `MODERATOR` | OpenAPI social 1.3.0 | B |
+| ~~D-5~~ ✅ | admin-gateway | `suspendUser.until` se ignora (`UpdateUserStatusRequest` no tiene el campo); `User.suspendedAt/suspensionReason` solo se rellenan tras suspender en la misma petición; `ContentReport.post` devuelve `null`; `Registration.saga` busca entre las 100 SAGAs más recientes; el `item` de `moderationQueueChanged` es mínimo | graphql-admin.md | B — **Hecho salvo comentarios denunciados: `until` retirado (GraphQL 1.3.0), `suspendedAt/suspensionReason` (`514e5a7`, `a1741b6`)** |
+| ~~D-6~~ ✅ | admin-gateway | Falta endpoint interno de evento y de post (se usa la API pública con el token del usuario): agregar `GET /internal/v1/events/{id}` y `GET /internal/v1/posts/{id}` a los contratos y al gateway | OpenAPI events/social | B — **Hecho (`8d359fc`, `cf3dd59`)** |
+| ~~D-7~~ ✅ | identity-service + todos los servicios | **No se exigen scopes** en `/internal/**` (solo `typ=service` y `aud=bandada-internal`). Exigir `internal:read`/`internal:write` según método | seguridad-y-sso.md §2.1 | B — **Hecho: identity, events, social, media y servicios PHP exigen `internal:read/write`** |
+| ~~D-8~~ ✅ | ticketing-service | `VALIDATION_FAILED` responde 422; el contrato (y media/social) usa 400. Unificar a 400 con `errors[]` | components.yaml `BadRequest` | B — **Hecho (`9617678`; contrato `ab126ea`)** |
+| ~~D-9~~ ✅ | social-service | Exponer `avatarStatus` (`PENDING|APPROVED|REJECTED`) en `Profile` para que la app muestre «en revisión» (hoy `pendingAvatarMediaId` es interno) | OpenAPI social 1.3.0 | B — **Hecho (`cf3dd59`)** |
+| ~~D-10~~ ✅ | identity-service | `registerUser` no recibe `displayName` (se deriva del correo): decidir si se agrega al contrato; `REGISTER_HIDE_EXISTING_ACCOUNTS` está en `false` por defecto (UC-01 pedía anti-enumeración) | UC-01, OpenAPI identity 1.2.0 | B — **Hecho (`82c1fd5`)** |
+| ~~D-11~~ ✅ | notification-service | `ALERT` solo notifica si el evento trae `recipientUserIds` (no está en AsyncAPI: agregarlo en fase 2 junto a UC-20); los textos de comentarios/reacciones no incluyen el nombre del actor (el evento no lo trae) | UC-24 | F2 — **Hecho: `recipientUserIds` y `actorDisplayName` (`1c19ed1`, `7d91f59`)** |
+| ~~D-12~~ ✅ | media-service | No se verifican *magic bytes* del objeto (solo `Content-Type` y tamaño); modelos ONNX y ffmpeg no integrados (`MODERATION_MODE` `allow-all`/`manual`) | UC-05, ml-dl.md | F2 — **Hecho: *magic bytes* (`c614a87`)** |
+| ~~D-13~~ ✅ | media-service / infra | `UPLOAD_URL_TTL_SECONDS` es 900 por defecto en el servicio y 300 en el Compose: elegir un valor único en `.env.example` e infra | OpenAPI media 1.2.0 | B — **Hecho: TTL 900 en servicio, compose y `.env`** |
+| ~~D-14~~ ✅ | wallet-service | `PAYMENT_GATEWAY_UNAVAILABLE` (UC-15) no existe: la pasarela es simulada; revisar si se necesita | UC-15 | F2 — **Hecho: `PAYMENT_GATEWAY_MODE` (`920f029`)** |
+| ~~D-15~~ ✅ | notification-service | Web Push: se acepta la suscripción pero no se envía; exportador OTLP diferido; `PUSH_ENABLED=false` | UC-24 | F2 — **Hecho salvo OTLP en PHP (`1c19ed1`); Web Push probado solo con push service simulado** |
+| ~~D-16~~ ✅ | todos | Rate limit de identity en memoria por instancia (no distribuido); el de Traefik es por instancia | seguridad-y-sso.md §8 | F2 — **Hecho: Postgres, ADR-0019 (`82c1fd5`)** |
+| ~~D-17~~ ✅ | social-service | Los 404 usan `NOT_FOUND` (el contrato no define `POST_NOT_FOUND`); en `/internal` el motivo `AUTHOR_SUSPENDED` se presenta como `MODERATOR` | OpenAPI social 1.3.0 | B — **Hecho (`cf3dd59`)** |
 
 ## 3. Pendientes de infraestructura y operación
 
 | # | Tema | Detalle | Prio |
 |---|---|---|---|
-| I-1 | Cola `events-service.saga-replies` | Contiene 2 mensajes de prueba (inocuos); purgar con la UI de RabbitMQ | B |
+| ~~I-1~~ ✅ | Cola `events-service.saga-replies` | Contiene 2 mensajes de prueba (inocuos); purgar con la UI de RabbitMQ | B — **Hecho (cola vacía)** |
 | I-2 | AWS | Despliegue EC2 + RDS + DynamoDB + S3/CloudFront (ADR-0012) sin implementar; CI de GitHub Actions de los repos por verificar | A |
 | I-3 | Observabilidad | LGTM y dashboards completos, alertas `SagaCompensationRateHigh`, etc. | B |
 | I-4 | RabbitMQ | Un usuario por servicio en prod (RNF-07); hoy un usuario compartido en local | B |
-| I-5 | Contratos | Cuando `bandadau-docs` tenga `Makefile`: `make contracts-lint` y `make links` (HT-03) | B |
+| ~~I-5~~ ✅ | Contratos | Cuando `bandadau-docs` tenga `Makefile`: `make contracts-lint` y `make links` (HT-03) | B — **Hecho: `Makefile` de docs (`contracts-lint`, `links`)** |
 
 ## 4. Aplicación Expo y verificaciones de integración
 
@@ -68,15 +68,15 @@ Pendientes menores de configuración en `bandadau-infra` y servicios (sin impact
 
 | ID | Hallazgo | Acción |
 |---|---|---|
-| C-1 | `UPLOAD_URL_TTL_SECONDS=300` en compose frente a 900 en servicio y contrato | Unificar (el contrato manda: 900) |
-| C-2 | `COVER_CHECK` no está en el compose de events (default `off`): la portada no se valida contra media en local | Definirlo `on` cuando el cliente de servicio `events-service` exista en `SERVICE_CLIENTS` |
-| C-3 | admin-gateway no recibe `RABBITMQ_MANAGEMENT_*` ni `NOTIFICATION_SERVICE_URL` explícitos en el compose | Pasarlos |
-| C-4 | `identity-service/.env.example`: `SERVICE_CLIENTS`, `MAIL_FROM` y `JWT_KEY_ID` difieren de los del compose; `bandadau-infra/.env.example` no define `JWT_KEK` | Alinear ejemplos |
-| C-5 | Alias muertos `SIMULATE_PAYMENT_ENABLED` y `QR_KEY_ID` en compose y `.env.example` | Retirar |
-| C-6 | `SAGA_COMMAND_MAX_RETRIES` está en el compose pero no en el `.env.example` de events | Añadir |
-| C-7 | Plantillas de CI: texto "cuando los 8 servicios existan" ya no aplica | Actualizar |
-| C-8 | `bandadau-infra/{README,AGENTS}.md`: faltan los targets `mock*` y el relay de notification figura como "suposición" | Corregir (tras terminar el agente de n8n) |
-| C-9 | `eventos-y-mensajeria.md` §5.3 e `idempotencia.md` no verificados contra identity/events/wallet/social/media | Revisión cruzada |
+| ~~C-1~~ ✅ | `UPLOAD_URL_TTL_SECONDS=300` en compose frente a 900 en servicio y contrato | Unificar (el contrato manda: 900) — **Hecho** |
+| ~~C-2~~ ✅ | `COVER_CHECK` no está en el compose de events (default `off`): la portada no se valida contra media en local | Definirlo `on` cuando el cliente de servicio `events-service` exista en `SERVICE_CLIENTS` — **Hecho** |
+| ~~C-3~~ ✅ | admin-gateway no recibe `RABBITMQ_MANAGEMENT_*` ni `NOTIFICATION_SERVICE_URL` explícitos en el compose | Pasarlos — **Hecho** |
+| ~~C-4~~ ✅ | `identity-service/.env.example`: `SERVICE_CLIENTS`, `MAIL_FROM` y `JWT_KEY_ID` difieren de los del compose; `bandadau-infra/.env.example` no define `JWT_KEK` | Alinear ejemplos — **Hecho** |
+| ~~C-5~~ ✅ | Alias muertos `SIMULATE_PAYMENT_ENABLED` y `QR_KEY_ID` en compose y `.env.example` | Retirar — **Hecho** |
+| ~~C-6~~ ✅ | `SAGA_COMMAND_MAX_RETRIES` está en el compose pero no en el `.env.example` de events | Añadir — **Hecho** |
+| ~~C-7~~ ✅ | Plantillas de CI: texto "cuando los 8 servicios existan" ya no aplica | Actualizar — **Hecho** |
+| ~~C-8~~ ✅ | `bandadau-infra/{README,AGENTS}.md`: faltan los targets `mock*` y el relay de notification figura como "suposición" | Corregir (tras terminar el agente de n8n) — **Hecho** |
+| ~~C-9~~ ✅ | `eventos-y-mensajeria.md` §5.3 e `idempotencia.md` no verificados contra identity/events/wallet/social/media | Revisión cruzada — **Hecho; divergencias de código en la sección de cierre** |
 
 ## Moderación con deep learning (fase 2, 2026-10-15)
 
@@ -94,3 +94,21 @@ video con ffmpeg). p95 282 ms por imagen. Pendiente / diferencias con `ml-dl.md`
 | M-6 | Procedencia | El modelo base fue afinado por su autor con un dataset propietario de licencia desconocida; no hay fine-tune propio |
 | M-7 | Formato | HEIC no se decodifica (va a revisión humana); int8 solo MatMul (Δprob ≤ 0.023) |
 | M-8 | Salud | `/health/ready` añade `moderation.state` (READY/DEGRADED) |
+
+
+## Cierre de la ronda de backend y admin (2026-10-16)
+
+Pendiente después de esta ronda (el resto de ítems de arriba quedó cerrado y verificado con `make seed` 63/0 y `make smoke` 41/41):
+
+| ID | Tema | Detalle | Prio |
+|---|---|---|---|
+| R-1 | `ContentReport.post` en denuncias de comentario | Sigue `null`: falta `GET /internal/v1/comments/{id}` en social (contrato + código) | B |
+| R-2 | I-3 observabilidad | Dashboards y 6 alertas provisionados (validados con `PROJECT=test`); los paneles de SAGA quedan vacíos hasta que events-service exporte OTLP; hay que recrear Traefik para las métricas | B |
+| R-3 | I-4 usuarios RabbitMQ por servicio | Implementado y validado con `PROJECT=test`; **no aplicado** al stack local (ver `infraestructura.md` §2.8) | B |
+| R-4 | D-15 OTLP en notification (PHP) | Sin SDK OpenTelemetry en las dependencias; Web Push solo probado con push service simulado | F2 |
+| R-5 | C-9 divergencias de código | Idempotencia HTTP de identity/events en su Postgres (no DynamoDB); prefijos `ticketing#`/`insights#` en la tabla de idempotencia; los docs ya lo reflejan | B |
+| R-6 | M-1 recall ≥ 0.90 (RNF-12) | Arnés listo (`bandadau-ml` `5bee4e6`); falta un set curado fuera del repo. RNF-12 sigue **no verificado** | A |
+| R-7 | M-4..M-6 | `frameScores/frameIndex` (contrato + media-service), clasificadores extra y fine-tune propio: opcionales, sin implementar | F2 |
+| R-8 | `/mcp` | No está expuesto por el gateway (se prueba en `localhost:7008/mcp`); la revocación tarda hasta 5 s por la caché de insights | B |
+| R-9 | `bandadau-frontend` | Tras recompilar shared hay que correr `corepack pnpm install --force` allí; aplicar B-1 de la auditoría (cabecera `Authorization`) | A |
+| R-10 | `bandadau-admin` | Cambios sin commitear ajenos a esta ronda (ThemeToggle, RefreshButton, páginas del shell) | — |

@@ -967,3 +967,14 @@ persister, PWA ni pruebas; UC-05/08/10/13/14/17 ausentes o simulados; `/profiles
 
 **Pendientes (P1 restante):** A-1 (UC-05 publicar real), A-3 (UC-08/10 seguir/denunciar), A-4 (cola offline T7/T8),
 A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 (PWA/Workbox); C-3 (`/profiles/{id}/posts` en el contrato).
+
+## 2026-10-16 — Cierre de deuda técnica de backend y admin, seed ampliado, landing
+
+- **Landing** (`bandadau-landing`): mockups reales de la app Expo, logos del repo `bandadau-brand`, toggle de tema claro/oscuro con círculo animado y modal 3D del ticket (`fc37521`, revertido el rediseño experimental en `2b180a6`).
+- **Seed ampliado** (`bandadau-infra` `b8d24c6` y siguientes): 9 usuarios con perfil, seguidores, grupos, 10 posts (7 con foto), comentarios, reacciones, 6 eventos con portada, recargas e inscripciones; limpia los eventos de smoke. Credenciales de demo: `Bandada#2026` para `lucia|marco|sofia|diego|camila|org|org2|mod|admin@umsa.edu.bo`.
+- **Backend** (contratos primero en `bandadau-docs`): D-1, D-3, D-5, D-6, D-7, D-8, D-9, D-10, D-11, D-12, D-13, D-14, D-15, D-16, D-17, tokens MCP (identity, gateway e insights con revocación) y purga de outbox en identity y events.
+- **Infra/docs**: C-1…C-9, I-1, I-3, I-4, I-5 (`Makefile` de docs), M-2/M-3 y arnés de recall M-1.
+- **Pruebas**: `make seed` 63/0, `make smoke` 41/41, tests de integración de ticketing reparados (16/16), test intermitente de `mfe-moderation` corregido.
+- **Auditoría Expo**: `docs/06-plan/auditoria-app-expo.md` (A-1…A-16, B-1…B-14, C-1…C-9). Bloqueante: la app no envía `Authorization` (B-1) y los mocks están activos por defecto (B-3).
+- **Pendiente**: ver la sección «Cierre de la ronda de backend y admin» de `deuda-tecnica.md` (R-1…R-10).
+
