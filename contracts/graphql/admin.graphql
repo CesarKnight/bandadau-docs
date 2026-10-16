@@ -1,6 +1,6 @@
 # =============================================================================
 # Bandada U — GraphQL del panel de administración (admin-gateway)
-# Versión: 1.3.0 (2026-10-15) — schema-first según D11, D13, D14 y D15 (ADR-0016).
+# Versión: 1.4.0 (2026-10-15) — schema-first según D11, D13, D14 y D15 (ADR-0016).
 # Servido por admin-gateway (NestJS 11 + Apollo Server 5) en /graphql
 # (HTTP + WebSocket `graphql-ws` para suscripciones).
 #
@@ -30,6 +30,8 @@
 # `QUERY_TOO_DEEP`, `QUERY_TOO_COMPLEX`, `GRAPHQL_VALIDATION_FAILED`, `INTERNAL_SERVER_ERROR`.
 #
 # Changelog
+# - 1.4.0 (2026-10-15): `ContentReport.comment` (nuevo tipo `Comment` y enum `CommentStatus`, R-1); `ContentReport.post` también se
+#   resuelve en denuncias de comentario (post del comentario). Origen: `GET /internal/v1/comments/{commentId}` de social.
 # - 1.3.0 (2026-10-15): se retira `SuspendUserInput.until` (identity no tiene suspensión temporal: `UpdateUserStatusRequest`
 #   solo admite `status` y `reason`; aceptar el campo y descartarlo engañaría al moderador). La suspensión es indefinida hasta
 #   `reactivateUser`. `User.suspendedAt/suspensionReason` se rellenan si identity los devuelve en `/internal/v1/users`.
@@ -112,6 +114,13 @@ enum PostVisibility {
 enum PostStatus {
   PENDING_MEDIA
   PUBLISHED
+  HIDDEN
+  REMOVED
+}
+
+"""Estado de un comentario."""
+enum CommentStatus {
+  VISIBLE
   HIDDEN
   REMOVED
 }
@@ -539,6 +548,17 @@ type ModerationResult {
   scores: JSON!
   maxScore: Float!
   modelVersion: String!
+  "Solo video: puntaje por fotograma analizado (el `maxScore` es el máximo); `null` en imágenes."
+  frameScores: [FrameScore!]
+  "`index` del fotograma con mayor puntaje; `null` si no hay `frameScores`."
+  worstFrameIndex: Int
+}
+
+"""Puntaje NSFW de un fotograma de video (1 cada `VIDEO_FRAME_INTERVAL_SECONDS`)."""
+type FrameScore {
+  index: Int!
+  timestampSeconds: Float!
+  nsfw: Float!
 }
 
 """Post de la red social (vista de moderación)."""
@@ -550,6 +570,16 @@ type Post {
   visibility: PostVisibility!
   status: PostStatus!
   media: [MediaAsset!]!
+  createdAt: DateTime!
+}
+
+"""Comentario de un post (visible para moderación en cualquier estado)."""
+type Comment {
+  id: UUID!
+  postId: UUID!
+  author: User
+  text: String!
+  status: CommentStatus!
   createdAt: DateTime!
 }
 
@@ -595,6 +625,8 @@ type ContentReport {
   targetId: UUID!
   "Post denunciado (o post del comentario denunciado)."
   post: Post
+  "Comentario denunciado (solo si `targetType = COMMENT`; null en denuncias de post o si ya no existe)."
+  comment: Comment
   reporter: User
   reason: ReportReason!
   "Explicación opcional del denunciante."

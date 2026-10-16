@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — social-service
-  version: 1.4.0
+  version: 1.5.0
   summary: Red social (perfiles, posts, feed, comentarios, reacciones, seguidores, grupos y denuncias).
   description: |
     API del bounded context **Social** (`social-service`, TypeScript + NestJS 11, Clean
@@ -34,6 +34,7 @@ info:
     - Un `post.removed` (moderador) conserva el contenido; `post.deleted` solo ocurre por borrado del autor.
 
     ## Changelog
+    - 1.5.0 (2026-10-15): nuevo `GET /internal/v1/comments/{commentId}` (`getCommentInternal`, R-1): comentario en cualquier estado para el detalle de denuncias de comentario; `404 COMMENT_NOT_FOUND`.
     - 1.4.0 (2026-10-15): `Profile.avatarStatus` (D-9); códigos 404 de dominio `POST_NOT_FOUND`/`COMMENT_NOT_FOUND`/`PROFILE_NOT_FOUND`/`GROUP_NOT_FOUND` (D-17);
       `ModerationPost.hiddenReason` conserva `AUTHOR_SUSPENDED`; nuevo `GET /internal/v1/posts/{postId}` (`getPostInternal`, D-6); scopes `internal:read|write` exigidos (D-7).
     - 1.3.0 (2026-10-15): consolidación fase 1 — `HiddenReason` agrega `AUTHOR_SUSPENDED` (deja de ser propuesta); documentado el flujo de avatar pendiente
@@ -1316,6 +1317,41 @@ paths:
         '404':
           $ref: './shared/components.yaml#/components/responses/NotFound'
 
+  /internal/v1/comments/{commentId}:
+    parameters:
+      - $ref: '#/components/parameters/CommentId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: getCommentInternal
+      summary: Obtener un comentario en cualquier estado (interno)
+      description: |
+        Devuelve el comentario sin filtrar por visibilidad ni estado (`VISIBLE`, `HIDDEN`, `REMOVED`), con autor, `postId` y texto.
+        Usado por `admin-gateway` (detalle de denuncias de comentario, `ContentReport.comment`). Requiere scope `internal:read`.
+        Inexistente → `404 COMMENT_NOT_FOUND`.
+      servers:
+        - url: http://social-service:7002
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      responses:
+        '200':
+          description: Comentario.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
   /internal/v1/posts/{postId}/status:
     parameters:
       - $ref: '#/components/parameters/PostId'
@@ -1717,6 +1753,14 @@ components:
         type: string
         format: uuid
       example: 0192f1a2-4c5d-7e6f-9a01-8293a4b5c6d7
+    CommentId:
+      name: commentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 0192f2a0-6c7d-7e8f-9a01-b2c3d4e5f607
     PostId:
       name: postId
       in: path
