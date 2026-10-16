@@ -347,6 +347,8 @@ paths:
                               safe: 0.29
                             decision: REVIEW
                             frameIndex: null
+                            frameScores: null
+                            worstFrameIndex: null
                             createdAt: '2026-10-14T11:00:07Z'
                         finalDecision: null
                     nextCursor: null
@@ -491,6 +493,8 @@ paths:
                           safe: 0.45
                         decision: REVIEW
                         frameIndex: null
+                        frameScores: null
+                        worstFrameIndex: null
                         createdAt: '2026-10-14T11:00:07Z'
                     finalDecision: null
         '401':
@@ -755,7 +759,7 @@ components:
 
     ModerationResult:
       type: object
-      required: [model, modelVersion, labels, scores, decision, frameIndex, createdAt]
+      required: [model, modelVersion, labels, scores, decision, frameIndex, frameScores, worstFrameIndex, createdAt]
       properties:
         model:
           type: string
@@ -776,10 +780,38 @@ components:
           $ref: '#/components/schemas/ModerationDecision'
         frameIndex:
           type: [integer, 'null']
-          description: Índice del frame analizado (solo video).
+          description: Alias de `worstFrameIndex` (se conserva por compatibilidad). `null` en imágenes.
+        frameScores:
+          type: [array, 'null']
+          description: |
+            Solo video: puntaje P(nsfw) de cada fotograma analizado (1 cada `VIDEO_FRAME_INTERVAL_SECONDS`), para que el
+            moderador vea por qué se marcó. El puntaje del video (`scores.nsfw`) es el máximo. `null` en imágenes (un único
+            puntaje en `scores`) y en resultados sin análisis por fotograma (`allow-all`, `manual`, degradado).
+          items:
+            $ref: '#/components/schemas/FrameScore'
+        worstFrameIndex:
+          type: [integer, 'null']
+          description: '`index` del fotograma con mayor puntaje en `frameScores`; `null` si no hay `frameScores`.'
         createdAt:
           type: string
           format: date-time
+
+    FrameScore:
+      type: object
+      required: [index, timestampSeconds, nsfw]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+          description: Posición del fotograma entre los analizados (0 = primero).
+        timestampSeconds:
+          type: number
+          minimum: 0
+          description: Instante del video del fotograma (`index * VIDEO_FRAME_INTERVAL_SECONDS`).
+        nsfw:
+          type: number
+          minimum: 0
+          maximum: 1
 
     ModeratedMedia:
       allOf:

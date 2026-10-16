@@ -30,6 +30,7 @@
 # `QUERY_TOO_DEEP`, `QUERY_TOO_COMPLEX`, `GRAPHQL_VALIDATION_FAILED`, `INTERNAL_SERVER_ERROR`.
 #
 # Changelog
+# - 1.4.1 (2026-10-15): `ModerationResult.frameScores` (nuevo tipo `FrameScore`) y `worstFrameIndex`: puntajes por fotograma de la moderación de video (M-4).
 # - 1.4.0 (2026-10-15): `ContentReport.comment` (nuevo tipo `Comment` y enum `CommentStatus`, R-1); `ContentReport.post` también se
 #   resuelve en denuncias de comentario (post del comentario). Origen: `GET /internal/v1/comments/{commentId}` de social.
 # - 1.3.0 (2026-10-15): se retira `SuspendUserInput.until` (identity no tiene suspensión temporal: `UpdateUserStatusRequest`

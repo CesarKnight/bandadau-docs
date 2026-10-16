@@ -317,7 +317,7 @@ flowchart TD
 | Moderación | `MODERATION_MODE=onnx` → `OnnxModerationAdapter` (imágenes y video con ffmpeg); solo `scores: { nsfw }`. `violence-classifier`, CLIP, OCR y `nsfw-mobile` **no implementados** (opcionales) |
 | Formatos | HEIC no se decodifica: pasa a revisión humana (`FLAGGED`). INT8 cuantiza solo MatMul (Δprob ≤ 0.023 vs fp32) |
 | Salud | `/health/ready` incluye `moderation.state` (`READY` / `DEGRADED`) |
-| Persistencia | `frameScores` y `frameIndex` se guardan en `ModerationResult`; su exposición en OpenAPI/GraphQL está pendiente (requiere contrato) |
+| Persistencia y API | Video: `ModerationResult.frameScores` (`[{index, timestampSeconds, nsfw}]`) y `worstFrameIndex` (alias `frameIndex`) se guardan con la decisión y se exponen en `/internal/v1/media/*` (OpenAPI) y en `ModerationResult` del GraphQL del panel; el puntaje del video es el máximo. Imágenes: un único puntaje (`frameScores: null`) |
 | Procedencia | Checkpoint de terceros afinado con dataset propietario de licencia desconocida; sin fine-tune propio (ver model card) |
 | Recall | No medido: ver §5.1 |
 
