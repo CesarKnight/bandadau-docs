@@ -1018,6 +1018,18 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 
 **Verificación:** `pnpm build` (depcruise + tsc) ✅ · `pnpm test` (13) ✅ · `pnpm lint` ✅ · `pnpm typecheck` ✅. Commit `bandadau-backend@afc31ec`.
 
+---
+
+### 2026-10-15 — App Expo: publicar real (UC-05, A-1)
+
+**Agente:** OpenCode · **Repo:** `bandadau-frontend`.
+
+**Hecho:** flujo de publicación conectado al backend: `useCreateUpload` → `PUT` a la URL prefirmada (`uploadToPresignedUrl`) → `useCompleteUpload` → `usePublishPost`; `clientId` **UUIDv7** generado on-device (`newClientId`, `src/lib/ids.ts`); manejo de error por `code` (`ApiError`) y navegación al feed con invalidación. Se quitó el `mockNote`. Commit `bandadau-frontend@3670f1d`.
+
+**Verificación:** `typecheck` ✅ · `lint` ✅ · `i18n:check` ✅ · `export web`/`ios` ✅.
+
+**Pendiente de UC-05:** cola offline (A-4) y pre-chequeo NSFW on-device (solo avisa); selector de grupo para `visibility = GROUP`.
+
 ### 2026-10-16 (segunda ronda) — pendientes técnicos y commits de frontend/admin
 
 - R-1 (comentarios denunciados), R-2/R-4 (OTLP en events y notification), R-3 (usuarios de RabbitMQ por servicio aplicados al stack real), R-8 (`/mcp` por Traefik) y M-4 (`frameScores` en moderación de video) cerrados; frontend y admin commiteados y sincronizados con los contratos.
