@@ -170,6 +170,41 @@ escritura mayor). Reglas:
 - Sin `responseSchema` nativo garantizado: el adaptador pide "solo JSON", valida con Zod y reintenta 1 vez.
 - Selección: `LLM_PROVIDER=claude|ollama`. Las pruebas E2E de CI usan un `FakeLlmAdapter` con guion.
 
+### 3.4 Motores seleccionables, cadena de respaldo y privacidad (ADR-0022)
+
+El panel elige el **motor** de cada reporte (`requestReport(engine)`; por defecto `AUTO`) a partir de `reportEngines`:
+
+| Motor | Qué es | Modo | Externo |
+|---|---|---|---|
+| `OPENCODE` | API OpenAI-compatible de OpenCode Go (o Anthropic vía `ANTHROPIC_BASE_URL`) | `AGENT` (tool-calling nativo) o `HYBRID` (`OPENCODE_MODE`) | sí |
+| `OLLAMA` | `qwen2.5:3b` local | `HYBRID` | no |
+| `STUB` | generador determinista | `DETERMINISTIC` | no |
+
+**Selección.** `LLM_PROVIDERS=opencode,ollama,stub` fija el orden de `AUTO` (sin la variable se deriva de `LLM_PROVIDER`). `AUTO` usa el primer motor
+disponible (health en caché 30 s: OpenCode = clave presente + `GET /v1/models`; Ollama = `GET /api/tags` con el modelo descargado) y cae al siguiente ante
+error, tiempo agotado, 429 o formato inválido. Un motor explícito se usa tal cual; si falla responde `STUB` y `model` lo dice (`deepseek-v4.1-flash+stub-fallback`).
+*Circuit breaker*: 3 fallos seguidos (o un 429/401) sacan el motor 60 s–5 min. `GeneratedReport.engine/model` y `AgentRun.engine/engineMode` registran quién respondió.
+
+**OpenCode Go (variables en `bandadau-infra/.env.example`).** `OPENCODE_API_KEY` (solo en el `.env` local), `OPENCODE_BASE_URL`
+(`https://opencode.ai/inference/go`), `OPENCODE_CHAT_PATH` (`/openai/v1/chat/completions`; si responde 404 se prueba `/v1/chat/completions`; también existe
+`/zen/go/v1/chat/completions`), `OPENCODE_MODEL` (`deepseek-v4.1-flash`; alternativas verificadas: `glm-5.3-flash`, `glm-5.2`, `kimi-k3`, `deepseek-v4-pro`, `qwen3.8-max`),
+`OPENCODE_MODE` (`agent`|`hybrid`), `OPENCODE_ALLOWED_MODELS`. Para usar `claude-haiku-5-5` por el endpoint Anthropic de OpenCode:
+`LLM_PROVIDERS=claude,ollama,stub`, `ANTHROPIC_BASE_URL=https://opencode.ai/inference/go/anthropic`, `ANTHROPIC_API_KEY=<clave OpenCode>` (pendiente de validar con clave real).
+El cliente se identifica con `User-Agent: bandada-insights/<versión>` y un `x-opencode-session` estable por proceso y `AgentRun` (sin él OpenCode responde 400 `MissingSessionID`).
+
+**Costos y límites.** OpenCode Go es una suscripción con límites en dólares por ventana (5 h, semana, mes). Medido en vivo (deepseek-v4.1-flash, 4 preguntas): modo `agent`
+20–45 s y 10–20 mil tokens por reporte (el modelo redacta un reporte completo y a veces necesita la corrección de cifras); modo `hybrid` 5–8 s y 2–3 mil tokens.
+Un 429 (`Retry-After`) abre el circuito y la cadena cae al siguiente motor.
+
+**Términos de uso (advertencia).** OpenCode Go está pensado para OpenCode y agentes de código similares; usarlo desde un servicio propio es una decisión del equipo
+que debe revisarse contra sus condiciones vigentes. Los modelos «contributor» (`gemini-*-contributor`, `muse-spark-*-contributor`) **se usan para entrenar** y se rechazan
+siempre; GLM, Kimi, Qwen, DeepSeek y MiniMax tienen retención 0 días y no entrenan.
+
+**Privacidad hacia motores externos.** Antes de enviar cualquier petición (`PseudonymizingLlmAdapter`): los `displayName` de los resultados de herramientas se sustituyen por
+«Persona A/B…» (mapa solo en memoria, por petición) y se **restituyen** en la respuesta final y en los argumentos de herramientas; correos, teléfonos y tokens se enmascaran; los
+datos agregados (cifras, títulos de eventos) sí salen. Limitación: un nombre escrito por el administrador en la pregunta no se conoce de antemano y sale tal cual. Los motores locales
+(`OLLAMA`, `STUB`) reciben los nombres reales. La prueba `engines.spec.ts` demuestra con un servidor simulado que ningún nombre llega al cuerpo enviado y que se restituyen.
+
 ### 3.3 TTS por idioma
 
 | Locale | `PollyAdapter` (prod) | `PiperAdapter` (local) |
