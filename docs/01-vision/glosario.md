@@ -44,3 +44,4 @@ tablas, colecciones y enums **deben** usar la columna "Código".
 | Preferencia de tema | `ThemePreference` (`SYSTEM`, `LIGHT`, `DARK`) | Transversal | Modo visual elegido por el usuario |
 | Token de diseño | design token | UI | Decisión de diseño con nombre (color, espacio, tipografía, radio, sombra) consumida por todas las UIs |
 | Clave de traducción | i18n key | UI | Identificador estable de un texto (`events.registration.confirmed`) con su mensaje ICU por idioma |
+| Dictado por voz | `useSpeechDictation` | Insights | Entrada de la pregunta de UC-19 hablando, con la Web Speech API del navegador (requisito X4) |

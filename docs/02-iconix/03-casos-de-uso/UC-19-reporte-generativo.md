@@ -43,6 +43,7 @@
 **Cursos alternos**
 
 - **2a. Doble clic o reintento de red:** la misma `Idempotency-Key` con el mismo cuerpo devuelve el mismo `{ reportId }` con `Idempotent-Replayed: true`; no se crea un segundo reporte ni un segundo `AgentRun`.
+- **2c. Dictado por voz (la pregunta se habla):** en el paso 1 el administrador pulsa el botón de micrófono (o `Alt+V`) en lugar de teclear. El MFE usa la Web Speech API del navegador (`SpeechRecognition`, idioma `es-BO` con respaldo `es-419`/`es-ES`, o `en-US` según el idioma del panel): muestra «Escuchando…», luego el texto provisional en vivo (atenuado) en la propia caja y, al terminar el habla, el texto final con una cuenta regresiva de 2 s («Generando reporte en 2 s…», «Cancelar», «Editar»). Si no hay intervención, envía la pregunta con el **mismo** `requestReport(question, locale)` y `Idempotency-Key` del paso 2 (el backend no distingue el origen). Si el usuario toca el texto, edita, pulsa Cancelar o Editar, no se envía solo. Si el texto final es más corto que el mínimo (5 caracteres) no hay envío automático. Errores (mensajes i18n, la caja sigue usable): navegador sin soporte (botón deshabilitado con «usa Chrome o Safari»), contexto no seguro, permiso de micrófono denegado, sin voz (`no-speech`), sin micrófono (`audio-capture`), sin red (`network`), interrupción (`aborted`). Limitaciones en `agentes-y-reportes-generativos.md` §5.5.
 - **3a. El usuario no tiene rol `ADMIN` o el token expiró:** el `admin-gateway` devuelve un error GraphQL `UNAUTHENTICATED`/`FORBIDDEN`; el MFE emite `bandada:auth-expired` al shell, que renueva la sesión (UC-02) o redirige al login.
 - **5a. Se pierde la conexión WebSocket:** el MFE hace *polling* de `report(id)` cada 5 s hasta obtener un estado terminal.
 - **6a. Pregunta fuera de alcance** (p. ej. "Escríbeme un poema", "Dame el correo de Juan Pérez"): el ReportAgent no invoca herramientas; marca el reporte `FAILED` con `failureReason = OUT_OF_SCOPE` y un `markdown` breve que explica qué tipos de preguntas se admiten (métricas de usuarios, contenido, eventos, créditos, moderación). El `AgentRun` queda registrado con 0 herramientas.
@@ -324,6 +325,14 @@ Escenario: Reporte en inglés con voz en inglés
   Y el markdown, los títulos del gráfico y el audio están en inglés
   Y TtsPort recibió una voz en-US
 
+Escenario: Pregunta dictada por voz
+  Dado un administrador autenticado en un navegador con SpeechRecognition y permiso de micrófono
+  Cuando pulsa el micrófono y dice "cuántos usuarios nuevos hubo hoy"
+  Entonces ve «Escuchando…» y el texto provisional atenuado en la caja de pregunta
+  Y al terminar el habla ve la cuenta regresiva «Generando reporte en 2 s…» con Cancelar y Editar
+  Y sin intervención se envía requestReport con ese texto y el locale del panel
+  Pero si pulsa Cancelar, Editar o modifica el texto, la pregunta no se envía sola
+
 Escenario: Doble envío con la misma Idempotency-Key
   Dado que ya se solicitó un reporte con la clave K
   Cuando el MFE reenvía requestReport con la misma clave K y la misma pregunta
@@ -378,3 +387,7 @@ Escenario: Usuario sin rol ADMIN
 - PROPUESTA: agregar a decisiones-clave.md el enum `GeneratedReportStatus` = `PENDING`, `RUNNING`, `READY`, `FAILED` (no se reutiliza `ReportStatus`, que ya pertenece a `ContentReport`) y el campo `failureReason` (`OUT_OF_SCOPE`, `DATA_UNAVAILABLE`, `BUDGET_EXCEEDED`, `LLM_UNAVAILABLE`).
 - PROPUESTA: agregar a decisiones-clave.md el enum `AgentRunStatus` = `RUNNING`, `SUCCEEDED`, `FAILED` y `AgentRun.stopReason` (`COMPLETED`, `STEP_LIMIT`, `TOKEN_LIMIT`, `ERROR`).
 - **Resuelto (ADR-0016)** con la cola `admin-gateway.subscriptions.<instanceId>` (catálogo §5). Propuesta original: agregar a decisiones-clave.md (y ADR para `catalogo-servicios.md` §5) una cola `admin-gateway.realtime` (exclusiva por instancia) con bindings `bandada.insights.report.ready.v1`, `bandada.insights.alert.raised.v1`, `bandada.media.asset.flagged.v1`, que alimenta las subscriptions de GraphQL; hoy el catálogo no le asigna cola al `admin-gateway`.
+
+### Guion de demostración (paso 8: «hablar» la pregunta)
+
+Paso del guion de la entrega para UC-19: con el panel en `http://admin.bandada.localhost/insights/` (Chrome o Safari, permiso de micrófono concedido), pulsar el micrófono y **decir** «¿Cuántos usuarios nuevos hubo hoy?»; mostrar el texto apareciendo en vivo, la cuenta regresiva y cómo se genera y narra el reporte. Plan B si falla el micrófono o la red: pulsar un chip de pregunta sugerida o teclear.
