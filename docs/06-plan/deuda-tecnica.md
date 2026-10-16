@@ -98,17 +98,20 @@ video con ffmpeg). p95 282 ms por imagen. Pendiente / diferencias con `ml-dl.md`
 
 ## Cierre de la ronda de backend y admin (2026-10-16)
 
-Pendiente después de esta ronda (el resto de ítems de arriba quedó cerrado y verificado con `make seed` 63/0 y `make smoke` 41/41):
+Verificado con todo integrado: `make seed` 63/0 (dos veces seguidas) y `make smoke` 41/41 (dos veces seguidas), todos los servicios `healthy` y conectados a RabbitMQ con su usuario propio.
 
-| ID | Tema | Detalle | Prio |
-|---|---|---|---|
-| R-1 | `ContentReport.post` en denuncias de comentario | Sigue `null`: falta `GET /internal/v1/comments/{id}` en social (contrato + código) | B |
-| R-2 | I-3 observabilidad | Dashboards y 6 alertas provisionados (validados con `PROJECT=test`); los paneles de SAGA quedan vacíos hasta que events-service exporte OTLP; hay que recrear Traefik para las métricas | B |
-| R-3 | I-4 usuarios RabbitMQ por servicio | Implementado y validado con `PROJECT=test`; **no aplicado** al stack local (ver `infraestructura.md` §2.8) | B |
-| R-4 | D-15 OTLP en notification (PHP) | Sin SDK OpenTelemetry en las dependencias; Web Push solo probado con push service simulado | F2 |
-| R-5 | C-9 divergencias de código | Idempotencia HTTP de identity/events en su Postgres (no DynamoDB); prefijos `ticketing#`/`insights#` en la tabla de idempotencia; los docs ya lo reflejan | B |
-| R-6 | M-1 recall ≥ 0.90 (RNF-12) | Arnés listo (`bandadau-ml` `5bee4e6`); falta un set curado fuera del repo. RNF-12 sigue **no verificado** | A |
-| R-7 | M-4..M-6 | `frameScores/frameIndex` (contrato + media-service), clasificadores extra y fine-tune propio: opcionales, sin implementar | F2 |
-| R-8 | `/mcp` | No está expuesto por el gateway (se prueba en `localhost:7008/mcp`); la revocación tarda hasta 5 s por la caché de insights | B |
-| R-9 | `bandadau-frontend` | Tras recompilar shared hay que correr `corepack pnpm install --force` allí; aplicar B-1 de la auditoría (cabecera `Authorization`) | A |
-| R-10 | `bandadau-admin` | Cambios sin commitear ajenos a esta ronda (ThemeToggle, RefreshButton, páginas del shell) | — |
+| ID | Tema | Estado |
+|---|---|---|
+| ~~R-1~~ ✅ | `ContentReport.comment`/`post` en denuncias de comentario | **Hecho** (`3a37f82`, `2372677`, `56215e6`): `GET /internal/v1/comments/{id}`, resolvers del gateway y sección en `mfe-moderation` |
+| ~~R-2~~ ✅ | Observabilidad (I-3) | **Hecho**: dashboards y alertas validados con el stack real; events (`d92b6b9`) y notification (`ff03e7f`) exportan OTLP (activar con `OTEL_SDK_DISABLED=false`, `make up-obs`) |
+| ~~R-3~~ ✅ | Usuarios de RabbitMQ por servicio (I-4) | **Hecho** en el stack real (`87328f8`); un servicio no puede usar colas ajenas |
+| ~~R-4~~ ✅ | OTLP en notification (PHP) | **Hecho** con `open-telemetry/sdk` + exportador OTLP (trazas; sin métricas). Web Push solo probado con push service simulado |
+| R-5 | C-9 divergencias de código | Idempotencia HTTP de identity/events en su Postgres (no DynamoDB); prefijos `ticketing#`/`insights#` en la tabla de idempotencia. Los docs ya lo reflejan; alinear el código es opcional (B) |
+| R-6 | M-1 recall ≥ 0.90 (RNF-12) | Arnés listo (`bandadau-ml` `5bee4e6`); falta un set curado fuera del repo. RNF-12 sigue **no verificado** (A) |
+| R-7 | M-5, M-6 | Clasificadores extra (violencia, CLIP, OCR) y fine-tune propio: exigen descargar modelos/entrenar; opcionales (F2). **M-4 hecho** (`51d47fa`, `6515e29`): `frameScores` y `worstFrameIndex` |
+| ~~R-8~~ ✅ | `/mcp` | **Hecho**: router `insights-mcp` en Traefik con CORS y límite de 20/s (`87328f8`); revocación efectiva en ≤ 5 s (caché de insights) |
+| ~~R-9~~ ✅ | `bandadau-frontend` | **Hecho**: `Authorization` corregido (`68fe972`), mocks y locales sincronizados con los contratos (`97b0967`), trabajo pendiente commiteado (`8f722e7`) |
+| ~~R-10~~ ✅ | `bandadau-admin` | **Hecho**: cambios del shell commiteados (`bdf7442`) |
+| R-11 | `test:int` de admin-gateway | Falla con ECONNREFUSED al RabbitMQ de pruebas (puerto 15706) también sin los cambios de esta ronda: levantar el broker auxiliar del servicio (ver su AGENTS.md) |
+| R-12 | Seed pasados 15 min | `createUpload` con la misma `Idempotency-Key` devuelve la URL prefirmada vencida (PUT 403). El seed ya reintenta con otra clave (`fix(infra)`); la solución de fondo sería que media renueve la URL en el replay idempotente (B) |
+| R-13 | I-2, E-2, E-3 | Despliegue en AWS y pruebas app↔panel (SSO, cookie de refresco): fuera de esta ronda (A) |

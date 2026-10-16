@@ -976,7 +976,7 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 - **Infra/docs**: C-1…C-9, I-1, I-3, I-4, I-5 (`Makefile` de docs), M-2/M-3 y arnés de recall M-1.
 - **Pruebas**: `make seed` 63/0, `make smoke` 41/41, tests de integración de ticketing reparados (16/16), test intermitente de `mfe-moderation` corregido.
 - **Auditoría Expo**: `docs/06-plan/auditoria-app-expo.md` (A-1…A-16, B-1…B-14, C-1…C-9). Bloqueante: la app no envía `Authorization` (B-1) y los mocks están activos por defecto (B-3).
-- **Pendiente**: ver la sección «Cierre de la ronda de backend y admin» de `deuda-tecnica.md` (R-1…R-10).
+- **Pendiente**: ver la sección «Cierre de la ronda de backend y admin» de `deuda-tecnica.md`.
 
 ---
 
@@ -995,4 +995,10 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 
 **Pendiente P1:** A-1 (UC-05 publicar real), A-4 (cola offline T7/T8), A-5 (UC-14 escáner), A-9 (pruebas Jest/RNTL + Maestro), A-10 (PWA/Workbox).
 **Pendiente P2/P3:** B-5/B-8…B-14, A-11…A-16, C-7/C-8 (el CLI `i18n-check` solo acepta un `--src`; la app tiene `src/`+`app/`)/C-9.
+
+### 2026-10-16 (segunda ronda) — pendientes técnicos y commits de frontend/admin
+
+- R-1 (comentarios denunciados), R-2/R-4 (OTLP en events y notification), R-3 (usuarios de RabbitMQ por servicio aplicados al stack real), R-8 (`/mcp` por Traefik) y M-4 (`frameScores` en moderación de video) cerrados; frontend y admin commiteados y sincronizados con los contratos.
+- Se purgaron las DLQ con restos de las pruebas de caos (notification 7, insights 1, wallet 1).
+- Abiertos: R-5, R-6 (recall RNF-12), R-7 (M-5/M-6), R-11, R-12, R-13 (AWS y app↔panel).
 
