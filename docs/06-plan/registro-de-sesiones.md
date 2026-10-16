@@ -50,6 +50,25 @@ Reglas:
 
 ## Entradas
 
+### 2026-10-15 — Tickets: filtro Recientes/Por fecha (sort global + GSI3, ADR-0020)
+
+**Agente:** OpenCode · **Repos:** `bandadau-docs`, `bandadau-backend`, `bandadau-infra`, `bandadau-frontend`.
+
+**Hecho**
+- **Contrato (`bandadau-docs`):** `ticketing-service.yaml` 1.3.0 — `listMyTickets` acepta `sort` (`TicketSort`: `eventDate` por defecto, `recent`); ADR-0020 + índice + catálogo §6 (GSI1 corregida a `STARTS#…`, GSI3 nueva). Aplica D1 (contract-first) y regla 10 (ADR por cambio de catálogo).
+- **Backend (`ticketing-service`):** `entities/ticket-sort.ts`; `ListTicketsQuery.sort`; el repositorio Dynamo elige GSI1 (evento asc) o GSI3 (adquisición desc) y valida el cursor contra el índice de origen; controlador valida `sort` (400 `INVALID_VALUE`); `toTicketItem` escribe `gsi3pk`/`gsi3sk`. Test unitario nuevo y caso de integración (`sort=recent`, `sort` inválido).
+- **Infra:** `dynamodb/tables/ticketing.json` (+GSI3); mock `listMyTickets` respeta `sort` (default `eventDate` asc; antes ordenaba por `issuedAt` desc, sin seguir el contrato).
+- **Frontend:** `useMyTickets(sort)` envía `sort`; `queryKeys.tickets.mine(sort)`; chips Recientes/Por fecha en `app/tickets` (i18n `sort.*`); se elimina el orden local (lo resuelve el servicio).
+- **Sesión web (fix):** coordinación *cross-tab* del refresh con Web Locks (`src/lib/refresh-lock.{ts,web.ts}` + `api-client.ts`) — evita que dos pestañas presenten la misma cookie rotativa y disparen el reuso (`REFRESH_TOKEN_REUSED`, `seguridad-y-sso.md` §4). No se toca `SameSite=Strict` (D4); para web en dev hay que usar mismo *site* (`app.bandada.localhost` ↔ `api.bandada.localhost`), no `localhost:8081`/IP LAN.
+
+**Decisión (en ADR-0020):** GSI3 `USER#<userId>` / `ISSUED#<issuedAt>#<id>`. Las entradas anteriores al cambio no tienen `gsi3*` y no aparecen en `sort=recent` hasta reemitirse → en dev `make reset && make seed`.
+
+**Verificación:** `make contracts-lint` ✅ · `make links` ✅ · backend `typecheck`/`lint`/`arch`/`test` (37) ✅ · frontend `typecheck`/`lint`/`i18n:check` ✅ · infra `make validate` ✅. (El `npm test` del mock falla por `endsAt` de eventos: deuda preexistente, ajena a esta sesión.)
+
+**Pendiente:** recrear la tabla `bandada-ticketing` en dev para materializar GSI3; `pnpm test:int` de ticketing requiere el stack local (`make infra-up`).
+
+---
+
 ### 2026-10-15 — Consolidación de contratos y documentación tras la fase 1 (ADR-0018)
 
 **Agente:** Claude Code (consolidador de `bandadau-docs`) · **Objetivo:** que contratos y documentos describan lo implementado en la fase 1 (`make smoke` 26/26); el código que funciona es la referencia de hecho.
@@ -1084,4 +1103,22 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 **Verificación:** `typecheck` ✅ · `lint` ✅ · `test` (18) ✅ · `i18n:check` ✅ · `export web`/`ios` ✅.
 
 **Pendiente:** A-12 (UC-17 asistente offline — requiere `react-native-executorch`/WebLLM, fase 2); resto de A-9 (Maestro/Playwright/componentes, requieren dispositivo/CI); P2 (B-8/B-9/B-10/B-11/B-12/B-14, C-8).
+
+### 2026-10-16 — App Expo: cierre de los P2 de la auditoría (B-8…B-14, C-8) y fixes de Traefik
+
+**Agente:** OpenCode · **Repos:** `bandadau-frontend`, `bandadau-infra`.
+
+**Hecho (`bandadau-frontend`):**
+- **B-14:** eliminadas las copias duplicadas `docs/tickets/*(1)*`.
+- **C-8:** `i18n:check` ahora valida las claves usadas (`--src` sobre `app/` + `src/`, unidas en un temporal como el panel). Detectó un bug real: `showPassword`/`hidePassword` vivían bajo `auth.login` pero el `PasswordField` (genérico, usado en login y registro) las lee en la raíz de `auth`; se movieron.
+- **B-8:** sombra desde token (`src/lib/shadow.ts`, `shadowStyle(tokens.shadow.md)`) en `post-card`/`post-card-skeleton`; la paleta de marca (`BandadaLogo`, `app.config.ts`, `theme-color`) queda documentada como excepción.
+- **B-10:** `feed-list.tsx` → `src/components/ui/virtual-list.tsx` (`VirtualList`); actualizadas las 9 rutas.
+- **B-9:** quitados los `useMemo`/`useCallback` reflejo (React Compiler) en auth, `custom-tabs` y los paneles de comentarios web; comentados los justificados (gorhom/`usePresentableSheet`, estilos por token, `memo` de la tab bar).
+- **B-11:** `useInfiniteList` pasa el `AbortSignal` de TanStack a `apiRequest` (feed, eventos, inscripciones, billetera, grupos, notificaciones, perfil, comentarios) y clave `profile.posts` en el factory. Las mutaciones ya ignoran `isAbortError` (`query-client.ts`).
+
+**Hecho (`bandadau-infra`):** Traefik — `(Host(a) || Host(b))` en vez de `Host(a, b)` (esta versión rechaza 2 argumentos → 404 de toda la API) y CORS con el origen LAN (`http://LAN_HOST:{3000,3001,4201,8081}`).
+
+**Verificación:** `typecheck` ✅ · `lint` ✅ · `test` (18) ✅ · `i18n:check` ✅.
+
+**Pendiente:** A-12 (UC-17, fase 2) y el resto de A-9 (E2E en dispositivo/CI). En B-11 no se tocaron `tickets/api.ts` ni `query-keys.ts` (tenían WIP en curso).
 
