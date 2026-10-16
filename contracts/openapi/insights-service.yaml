@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — insights-service
-  version: 1.2.0
+  version: 1.3.0
   summary: Reportes generativos, alertas, ejecuciones de agentes y servidor MCP.
   description: |
     API REST del bounded context **Insights** (`insights-service`, TypeScript + NestJS 11,
@@ -22,6 +22,8 @@ info:
       [`bandadau-docs/contracts/mcp/tools.schema.json`](../mcp/tools.schema.json).
 
     ## Changelog
+    - 1.3.0 (2026-10-16): modo Q&A del agente de reportes: `AgentRun.verification` (`passed`, `retries`, `unsupportedNumbers`) y
+      `model` con sufijo `+retry` (regeneración silenciosa) o `+stub-fallback` (borrador determinista).
     - 1.2.0 (2026-10-16): motor del agente de reportes seleccionable (ADR-0022): `RequestReportRequest.engine`
       (`AUTO|OPENCODE|OLLAMA|STUB`, por defecto `AUTO`), `GET /insights/reports/engines` (`listReportEngines`, solo `ADMIN`,
       nunca devuelve claves ni URLs con credenciales), `GeneratedReport.engine/model` y `AgentRun.engine/engineMode`.
@@ -1137,6 +1139,24 @@ components:
         engineMode:
           type: string
           enum: [AGENT, HYBRID, DETERMINISTIC]
+        verification:
+          type: object
+          description: >-
+            Verificación de cifras y formato del texto final (modo Q&A): `passed` es el resultado definitivo; `retries` (0 o 1) cuenta la
+            regeneración silenciosa; `unsupportedNumbers` son las cifras sin respaldo detectadas en el primer borrador. El usuario nunca ve
+            una disculpa: si la regeneración falla, el texto es el borrador determinista (`model` termina en `+stub-fallback`).
+          required: [passed, retries, unsupportedNumbers]
+          properties:
+            passed:
+              type: boolean
+            retries:
+              type: integer
+              minimum: 0
+              maximum: 1
+            unsupportedNumbers:
+              type: array
+              items:
+                type: number
         toolsUsed:
           type: array
           items:
