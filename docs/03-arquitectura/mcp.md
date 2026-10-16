@@ -98,7 +98,7 @@ Reglas:
 
 ## 4. Herramientas → endpoints
 
-Todas devuelven **agregados**; ninguna devuelve correos ni nombres de usuarios (RNF-08). Se responde
+Casi todas devuelven **agregados**; ninguna devuelve correos, teléfonos ni tokens (RNF-08). **Excepción (v1.2, 2026-10-16)**: `list_recent_registrations` y `get_top_credit_spenders` incluyen el nombre para mostrar (`displayName`) del comprador, porque el MCP es solo `ADMIN`/servicio y queda auditado en `AgentRun`; el campo se enmascara en los logs del agente (ver `agentes-y-reportes-generativos.md`, «Decisión de privacidad»). Se responde
 con contenido de texto JSON y, si el SDK lo soporta, `structuredContent` según el `outputSchema` del contrato.
 
 | Herramienta | Entrada (resumen) | Fuente | Endpoint / origen | Escritura |
@@ -107,6 +107,8 @@ con contenido de texto JSON y, si el SDK lo soporta, `structuredContent` según 
 | `get_registration_stats` | `from`, `to`, `groupBy (day\|event\|status)` | events | `GET /internal/v1/stats/registrations?from&to&groupBy` (`getRegistrationStats`) | no |
 | `list_events` | `from`, `to`, `status?`, `limit ≤ 50` | events | `GET /internal/v1/events?startsFrom&startsTo&status` (**pendiente en D1**, ver PROPUESTAS; los tokens `typ=service` no se aceptan en `/api/v1`) | no |
 | `get_credit_stats` | `from`, `to` | wallet | `GET /internal/v1/stats/credits?from&to` (`getCreditStats`) | no |
+| `list_recent_registrations` | `from?`, `to?`, `status?` (CONFIRMED), `eventId?`, `limit ≤ 50` (10) | events + social | `GET /internal/v1/registrations` (`listRegistrationsInternal`) + `GET /internal/v1/profiles?ids` (`getProfileNamesInternal`, nombres en lote) | no |
+| `get_top_credit_spenders` | `from`, `to`, `limit ≤ 20` | wallet + social | `GET /internal/v1/stats/top-spenders` (`getTopSpenders`) + `getProfileNamesInternal` | no |
 | `get_content_stats` | `from`, `to` | social | `GET /internal/v1/stats/daily` | no |
 | `list_flagged_content` | `limit ≤ 50` | media + social | `GET /internal/v1/media?status=FLAGGED` + `GET /internal/v1/reports?status=OPEN` + `GET /internal/v1/posts?status=HIDDEN` → unifica `{ source, id, kind, score, reason, ageMinutes }` (sin texto completo del post: solo los primeros 140 caracteres) | no |
 | `list_failed_sagas` | `since`, `status (FAILED\|COMPENSATED)` | events | `GET /internal/v1/sagas?status&since` (`listSagas`) | no |
@@ -205,7 +207,7 @@ hashtags, extractos de posts, motivos de denuncia). Un usuario malicioso podría
 |---|---|
 | Contenido = datos | Los *handlers* devuelven el texto de usuarios en campos JSON etiquetados (`userText`), truncados (≤ 140 chars) y sin Markdown activo. Los agentes internos envuelven resultados en `<tool_data>` y su prompt de sistema declara que nunca se siguen instrucciones de esos datos |
 | Mínimo privilegio | No hay herramientas destructivas. El LLM de los agentes no ve `raise_alert`. Los clientes externos no ven `raise_alert` |
-| Sin datos personales | Herramientas agregadas; `list_flagged_content` no devuelve autores, solo IDs de contenido |
+| Datos personales mínimos | Herramientas agregadas; `list_flagged_content` no devuelve autores, solo IDs de contenido. Excepción acotada: `displayName` del comprador en `list_recent_registrations`/`get_top_credit_spenders` (solo ADMIN, auditado, enmascarado en logs); correo/teléfono/tokens nunca |
 | Validación estricta | Esquemas con `additionalProperties: false`, rangos y longitudes máximas |
 | Sin salida a la red | Las herramientas solo llaman URLs internas configuradas; ningún argumento puede contener URLs a las que el servidor haga peticiones (sin SSRF) |
 | Descripciones de herramientas | Son parte del contrato y se revisan en PR: una descripción manipulada es en sí un vector de inyección |

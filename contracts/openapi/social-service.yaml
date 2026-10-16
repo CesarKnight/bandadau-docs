@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — social-service
-  version: 1.6.0
+  version: 1.7.0
   summary: Red social (perfiles, posts, feed, comentarios, reacciones, seguidores, grupos y denuncias).
   description: |
     API del bounded context **Social** (`social-service`, TypeScript + NestJS 11, Clean
@@ -34,6 +34,7 @@ info:
     - Un `post.removed` (moderador) conserva el contenido; `post.deleted` solo ocurre por borrado del autor.
 
     ## Changelog
+    - 1.7.0 (2026-10-16): nuevo `GET /internal/v1/profiles` (`getProfileNamesInternal`): resuelve en lote (≤ 50 ids) el `displayName` de varios usuarios para los reportes del panel (MCP `list_recent_registrations`, `get_top_credit_spenders`); solo `userId` y `displayName`, nunca correo ni teléfono. Scope `internal:read`.
     - 1.6.0 (2026-10-15): nuevo `GET /profiles/{userId}/posts` (`listUserPosts`): posts de un estudiante para la grilla del perfil (UC-04); faltaba en el contrato y la app lo consumía.
     - 1.5.0 (2026-10-15): nuevo `GET /internal/v1/comments/{commentId}` (`getCommentInternal`, R-1): comentario en cualquier estado para el detalle de denuncias de comentario; `404 COMMENT_NOT_FOUND`.
     - 1.4.0 (2026-10-15): `Profile.avatarStatus` (D-9); códigos 404 de dominio `POST_NOT_FOUND`/`COMMENT_NOT_FOUND`/`PROFILE_NOT_FOUND`/`GROUP_NOT_FOUND` (D-17);
@@ -1586,6 +1587,65 @@ paths:
           $ref: './shared/components.yaml#/components/responses/Forbidden'
         '404':
           $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /internal/v1/profiles:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: getProfileNamesInternal
+      summary: Nombres para mostrar de varios usuarios (interno, lote)
+      description: |
+        Resuelve el `displayName` de hasta 50 usuarios en una sola llamada (`ids` separados por comas).
+        Los ids sin perfil se omiten del resultado (no es un error). Solo expone `userId` y `displayName`:
+        nunca correo, teléfono ni otros datos. Lo usa `insights-service` para que los reportes del
+        administrador nombren al comprador. Exige el scope `internal:read`.
+      servers:
+        - url: http://social-service:7002
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          description: UUID de usuarios separados por comas (1 a 50).
+          schema:
+            type: string
+          example: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6,0192f1a2-5d6e-7f80-8a12-93a4b5c6d7e8
+      responses:
+        '200':
+          description: Nombres encontrados.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [userId, displayName]
+                      properties:
+                        userId:
+                          type: string
+                          format: uuid
+                        displayName:
+                          type: string
+              examples:
+                lote:
+                  value:
+                    items:
+                      - userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
+                        displayName: Diego Flores
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
 
   /internal/v1/profiles/{userId}:
     parameters:

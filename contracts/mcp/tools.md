@@ -1,7 +1,7 @@
 # Servidor MCP — Bandada U (`insights-service`)
 
 > Contrato de las herramientas, recursos y prompts MCP (D8, D9, RF-26, UC-22).
-> Versión **1.1.0** (2026-10-14). Los mismos esquemas en formato máquina están en
+> Versión **1.2.0** (2026-10-16). Los mismos esquemas en formato máquina están en
 > [`tools.schema.json`](tools.schema.json) — ambos archivos deben mantenerse idénticos
 > (CI compara nombres y esquemas). Endpoint HTTP documentado en
 > [`../openapi/insights-service.yaml`](../openapi/insights-service.yaml) (`/mcp`).
@@ -45,8 +45,12 @@
   llevan `readOnlyHint: false`.
 - Los agentes internos tienen límite de **8 pasos** y de tokens por ejecución; cada llamada queda
   en `AgentRun.steps`.
-- Datos **agregados**: ninguna herramienta devuelve correos, nombres ni texto de posts; los usuarios
-  aparecen solo por UUID.
+- Datos **agregados** por defecto: ninguna herramienta devuelve correos, teléfonos, tokens ni texto de posts.
+  **Excepción de privacidad (v1.2.0)**: `list_recent_registrations` y `get_top_credit_spenders` incluyen el
+  **nombre para mostrar** (`displayName`, el que el propio estudiante publica en su perfil) del comprador, para que el
+  administrador pueda responder «¿quién compró el último ticket?». Justificación: el MCP y el agente de reportes son
+  solo `ADMIN`/servicio y cada llamada queda auditada en `AgentRun`; el campo se **enmascara en los logs** del agente
+  (`Diego F.`) y nunca se devuelve correo, teléfono ni tokens. Ver `docs/03-arquitectura/agentes-y-reportes-generativos.md` §Privacidad.
 - Rangos de fechas máximos de 366 días; listas con `limit` acotado.
 - Rate-limit: 60 llamadas/min por token.
 
@@ -66,6 +70,8 @@ contra `inputSchema` producen error JSON-RPC `-32602`.
 | `get_registration_stats` | lectura | events-service — `GET /internal/v1/stats/registrations?from&to&groupBy` (`getRegistrationStats`) |
 | `list_events` | lectura | events-service — `GET /internal/v1/events?startsFrom&startsTo&status` (`listEventsInternal`, D15) |
 | `get_credit_stats` | lectura | wallet-service — `GET /internal/v1/stats/credits?from&to&groupBy` (`getCreditStats`) |
+| `list_recent_registrations` | lectura | events-service — `GET /internal/v1/registrations?from&to&status&eventId&limit` (`listRegistrationsInternal`) + social-service — `GET /internal/v1/profiles?ids` (`getProfileNamesInternal`, nombres en lote) |
+| `get_top_credit_spenders` | lectura | wallet-service — `GET /internal/v1/stats/top-spenders?from&to&limit` (`getTopSpenders`) + social-service (nombres en lote) |
 | `get_content_stats` | lectura | social-service — `GET /internal/v1/stats/daily?from&to` |
 | `list_flagged_content` | lectura | media-service — `GET /internal/v1/media?status=FLAGGED` (`listFlaggedMedia`) + social-service — `GET /internal/v1/posts?status=HIDDEN` y `GET /internal/v1/reports?status=OPEN` |
 | `list_failed_sagas` | lectura | events-service — `GET /internal/v1/sagas?status&since` (`listSagas`) |
@@ -829,6 +835,365 @@ contra `inputSchema` producen error JSON-RPC `-32602`.
           "topUpCredits": 300,
           "debitCredits": 210,
           "refundCredits": 15
+        }
+      ]
+    },
+    "isError": false
+  }
+}
+```
+
+### `list_recent_registrations` — Inscripciones recientes
+
+**Descripción (la que ve el LLM):**
+
+> Lista las inscripciones (compras de entradas) más recientes de todos los eventos, de la más nueva a la más antigua, con el evento, el comprador (userId y nombre para mostrar; nunca correo ni teléfono), los créditos pagados y la fecha de confirmación. Por defecto solo las CONFIRMED. Úsala para preguntas como «¿quién compró el último ticket?», «¿quién se inscribió hoy?» o «¿quiénes se inscribieron al evento X?». Para cifras agregadas usa get_registration_stats.
+
+- **Servicio fuente / endpoint:** events-service — `GET /internal/v1/registrations?from&to&status&eventId&limit` (`listRegistrationsInternal`) + social-service — `GET /internal/v1/profiles?ids` (`getProfileNamesInternal`) para `displayName`
+- **Permisos:** Rol `ADMIN` o token de servicio. Los nombres para mostrar (`displayName`) están permitidos por la decisión de privacidad de §1; correo, teléfono y tokens jamás se devuelven.
+- **Solo lectura:** sí · **Annotations:** `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: false`
+
+**inputSchema**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "from": {
+      "type": "string",
+      "format": "date",
+      "description": "Fecha inicial inclusiva (UTC), YYYY-MM-DD. Se aplica a confirmedAt (status=CONFIRMED) o createdAt."
+    },
+    "to": {
+      "type": "string",
+      "format": "date",
+      "description": "Fecha final inclusiva (UTC), YYYY-MM-DD."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "CONFIRMED",
+        "FAILED",
+        "CANCELLATION_PENDING",
+        "CANCELLED"
+      ],
+      "default": "CONFIRMED",
+      "description": "Estado de la inscripción."
+    },
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Opcional: limitar a un evento."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 10,
+      "description": "Máximo de inscripciones devueltas."
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+**outputSchema**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "registrationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ticketId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "event": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title"
+            ],
+            "additionalProperties": false
+          },
+          "buyer": {
+            "type": "object",
+            "properties": {
+              "userId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "displayName": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Nombre para mostrar; null si el perfil aún no existe. Nunca correo ni teléfono."
+              }
+            },
+            "required": [
+              "userId",
+              "displayName"
+            ],
+            "additionalProperties": false
+          },
+          "creditsPaid": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "CONFIRMED",
+              "FAILED",
+              "CANCELLATION_PENDING",
+              "CANCELLED"
+            ]
+          },
+          "confirmedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "registrationId",
+          "event",
+          "buyer",
+          "creditsPaid",
+          "status",
+          "confirmedAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "true si había más inscripciones que `limit`."
+    }
+  },
+  "required": [
+    "items",
+    "truncated"
+  ],
+  "additionalProperties": false
+}
+```
+
+**Ejemplo — llamada**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 8,
+  "method": "tools/call",
+  "params": {
+    "name": "list_recent_registrations",
+    "arguments": {
+      "limit": 1
+    }
+  }
+}
+```
+
+**Ejemplo — respuesta**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 8,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"items\": [{\"registrationId\": \"0192f3c1-2d3e-7f40-a152-637485960a1b\", \"ticketId\": \"0192f3c2-9a8b-7c6d-8e5f-4a3b2c1d0e9f\", \"event\": {\"id\": \"0192f3b0-7c1e-7a2b-9c3d-4e5f60718293\", \"title\": \"Taller de React Native\"}, \"buyer\": {\"userId\": \"0192f1a2-3b4c-7d5e-8f60-718293a4b5c6\", \"displayName\": \"Diego Flores\"}, \"creditsPaid\": 25, \"status\": \"CONFIRMED\", \"confirmedAt\": \"2026-10-16T18:32:02Z\"}], \"truncated\": true}"
+      }
+    ],
+    "structuredContent": {
+      "items": [
+        {
+          "registrationId": "0192f3c1-2d3e-7f40-a152-637485960a1b",
+          "ticketId": "0192f3c2-9a8b-7c6d-8e5f-4a3b2c1d0e9f",
+          "event": {
+            "id": "0192f3b0-7c1e-7a2b-9c3d-4e5f60718293",
+            "title": "Taller de React Native"
+          },
+          "buyer": {
+            "userId": "0192f1a2-3b4c-7d5e-8f60-718293a4b5c6",
+            "displayName": "Diego Flores"
+          },
+          "creditsPaid": 25,
+          "status": "CONFIRMED",
+          "confirmedAt": "2026-10-16T18:32:02Z"
+        }
+      ],
+      "truncated": true
+    },
+    "isError": false
+  }
+}
+```
+
+### `get_top_credit_spenders` — Usuarios que más créditos gastaron
+
+**Descripción (la que ve el LLM):**
+
+> Devuelve el ranking de usuarios que más créditos gastaron en inscripciones en un rango (débitos menos reembolsos), con su nombre para mostrar (nunca correo ni teléfono), créditos gastados y número de inscripciones. Úsala para preguntas como «¿quién gastó más créditos esta semana?». Para el total de la plataforma usa get_credit_stats.
+
+- **Servicio fuente / endpoint:** wallet-service — `GET /internal/v1/stats/top-spenders?from&to&limit` (`getTopSpenders`) + social-service — `GET /internal/v1/profiles?ids` (`getProfileNamesInternal`) para `displayName`
+- **Permisos:** Rol `ADMIN` o token de servicio. Los nombres para mostrar (`displayName`) están permitidos por la decisión de privacidad de §1; correo, teléfono y tokens jamás se devuelven.
+- **Solo lectura:** sí · **Annotations:** `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: false`
+
+**inputSchema**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "from": {
+      "type": "string",
+      "format": "date",
+      "description": "Fecha inicial inclusiva (UTC), formato YYYY-MM-DD."
+    },
+    "to": {
+      "type": "string",
+      "format": "date",
+      "description": "Fecha final inclusiva (UTC), formato YYYY-MM-DD. Máximo 366 días después de `from`."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20,
+      "default": 5,
+      "description": "Máximo de usuarios devueltos."
+    }
+  },
+  "required": [
+    "from",
+    "to"
+  ],
+  "additionalProperties": false
+}
+```
+
+**outputSchema**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "from": {
+      "type": "string",
+      "format": "date"
+    },
+    "to": {
+      "type": "string",
+      "format": "date"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "creditsSpent": {
+            "type": "integer"
+          },
+          "registrations": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "userId",
+          "displayName",
+          "creditsSpent",
+          "registrations"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "from",
+    "to",
+    "items"
+  ],
+  "additionalProperties": false
+}
+```
+
+**Ejemplo — llamada**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 8,
+  "method": "tools/call",
+  "params": {
+    "name": "get_top_credit_spenders",
+    "arguments": {
+      "from": "2026-10-10",
+      "to": "2026-10-16",
+      "limit": 1
+    }
+  }
+}
+```
+
+**Ejemplo — respuesta**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 8,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"from\": \"2026-10-10\", \"to\": \"2026-10-16\", \"items\": [{\"userId\": \"0192f1a2-3b4c-7d5e-8f60-718293a4b5c6\", \"displayName\": \"Diego Flores\", \"creditsSpent\": 45, \"registrations\": 2}]}"
+      }
+    ],
+    "structuredContent": {
+      "from": "2026-10-10",
+      "to": "2026-10-16",
+      "items": [
+        {
+          "userId": "0192f1a2-3b4c-7d5e-8f60-718293a4b5c6",
+          "displayName": "Diego Flores",
+          "creditsSpent": 45,
+          "registrations": 2
         }
       ]
     },
@@ -2436,6 +2801,7 @@ Usando el puente `mcp-remote` para servidores HTTP remotos con cabeceras:
 
 ## 6. Changelog
 
+- 1.2.0 (2026-10-16): herramientas de solo lectura `list_recent_registrations` y `get_top_credit_spenders` (con `displayName` del comprador; decisión de privacidad en Guardarraíles). Ahora 14 herramientas.
 - 1.1.0 (2026-10-14): ADR-0016/D15 — herramienta de solo lectura `query_metrics` (PromQL acotado a
   una allowlist; solo token de servicio o `ADMIN`); clientes externos con **token MCP de 8 h**
   (`createMcpToken`, `aud=mcp`, scope `mcp:tools`); `list_events` usa `listEventsInternal`;

@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://bandadau.com/contracts/mcp/tools.schema.json",
   "title": "Bandada U — herramientas MCP (insights-service)",
-  "description": "Definiciones de herramientas MCP (name, title, description, inputSchema, outputSchema, annotations) para generar código. Fuente de verdad junto con tools.md. Versión 1.1.0.",
-  "version": "1.1.0",
+  "description": "Definiciones de herramientas MCP (name, title, description, inputSchema, outputSchema, annotations) para generar código. Fuente de verdad junto con tools.md. Versión 1.2.0.",
+  "version": "1.2.0",
   "server": {
     "name": "bandada-insights",
     "transport": "streamable-http",
@@ -523,6 +523,253 @@
         "openWorldHint": false
       },
       "x-source": "wallet-service — `GET /internal/v1/stats/credits?from&to&groupBy` (`getCreditStats`)",
+      "x-permissions": "Rol `ADMIN` o token de servicio.",
+      "x-internal-only": false
+    },
+    {
+      "name": "list_recent_registrations",
+      "title": "Inscripciones recientes",
+      "description": "Lista las inscripciones (compras de entradas) más recientes de todos los eventos, de la más nueva a la más antigua, con el evento, el comprador (userId y nombre para mostrar; nunca correo ni teléfono), los créditos pagados y la fecha de confirmación. Por defecto solo las CONFIRMED. Úsala para preguntas como «¿quién compró el último ticket?», «¿quién se inscribió hoy?» o «¿quiénes se inscribieron al evento X?». Para cifras agregadas usa get_registration_stats.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "Fecha inicial inclusiva (UTC), YYYY-MM-DD. Se aplica a confirmedAt (status=CONFIRMED) o createdAt."
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "description": "Fecha final inclusiva (UTC), YYYY-MM-DD."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "CONFIRMED",
+              "FAILED",
+              "CANCELLATION_PENDING",
+              "CANCELLED"
+            ],
+            "default": "CONFIRMED",
+            "description": "Estado de la inscripción."
+          },
+          "eventId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Opcional: limitar a un evento."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10,
+            "description": "Máximo de inscripciones devueltas."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "registrationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "ticketId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "event": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title"
+                  ],
+                  "additionalProperties": false
+                },
+                "buyer": {
+                  "type": "object",
+                  "properties": {
+                    "userId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "displayName": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Nombre para mostrar; null si el perfil aún no existe. Nunca correo ni teléfono."
+                    }
+                  },
+                  "required": [
+                    "userId",
+                    "displayName"
+                  ],
+                  "additionalProperties": false
+                },
+                "creditsPaid": {
+                  "type": "integer"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "PENDING",
+                    "CONFIRMED",
+                    "FAILED",
+                    "CANCELLATION_PENDING",
+                    "CANCELLED"
+                  ]
+                },
+                "confirmedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "registrationId",
+                "event",
+                "buyer",
+                "creditsPaid",
+                "status",
+                "confirmedAt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "true si había más inscripciones que `limit`."
+          }
+        },
+        "required": [
+          "items",
+          "truncated"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Inscripciones recientes",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-source": "events-service — `GET /internal/v1/registrations?from&to&status&eventId&limit` (`listRegistrationsInternal`) + social-service — `GET /internal/v1/profiles?ids` (`getProfileNamesInternal`) para `displayName`",
+      "x-permissions": "Rol `ADMIN` o token de servicio.",
+      "x-internal-only": false
+    },
+    {
+      "name": "get_top_credit_spenders",
+      "title": "Usuarios que más créditos gastaron",
+      "description": "Devuelve el ranking de usuarios que más créditos gastaron en inscripciones en un rango (débitos menos reembolsos), con su nombre para mostrar (nunca correo ni teléfono), créditos gastados y número de inscripciones. Úsala para preguntas como «¿quién gastó más créditos esta semana?». Para el total de la plataforma usa get_credit_stats.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date",
+            "description": "Fecha inicial inclusiva (UTC), formato YYYY-MM-DD."
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "description": "Fecha final inclusiva (UTC), formato YYYY-MM-DD. Máximo 366 días después de `from`."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 5,
+            "description": "Máximo de usuarios devueltos."
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "userId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "displayName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "creditsSpent": {
+                  "type": "integer"
+                },
+                "registrations": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "userId",
+                "displayName",
+                "creditsSpent",
+                "registrations"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Usuarios que más créditos gastaron",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      },
+      "x-source": "wallet-service — `GET /internal/v1/stats/top-spenders?from&to&limit` (`getTopSpenders`) + social-service — `GET /internal/v1/profiles?ids` (`getProfileNamesInternal`) para `displayName`",
       "x-permissions": "Rol `ADMIN` o token de servicio.",
       "x-internal-only": false
     },
