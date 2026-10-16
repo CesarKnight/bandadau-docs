@@ -1122,3 +1122,11 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 
 **Pendiente:** A-12 (UC-17, fase 2) y el resto de A-9 (E2E en dispositivo/CI). En B-11 no se tocaron `tickets/api.ts` ni `query-keys.ts` (tenían WIP en curso).
 
+### 2026-10-16 (tercera ronda) — limpieza, reinicio en limpio y reportes del panel
+
+- **Docker:** caché de compilación 35 GB → 0,6 GB; imágenes 28 → 20 GB (versiones viejas de Mongo y etiquetas `dev`/`test`). Sin tocar Homy/Intersectia ni datos de Bandada.
+- **Reinicio en limpio:** `make reset` + arranque con imágenes existentes + `make seed` (63/0) y `make smoke` (41/41) previo; bug corregido en el seed (pedía los nombres viejos de scope, D-7; `ed5563c`).
+- **Reportes del agente (UC-19):** herramientas MCP `list_recent_registrations` y `get_top_credit_spenders` (solo ADMIN, solo `displayName`; contratos events 1.4.0, wallet 1.3.0, social 1.7.0, `tools.md` 1.2.0), planificador por intención con respuesta directa en la primera línea y chips de preguntas sugeridas en `mfe-insights`. Verificado contra la base (créditos del día, comprador del último ticket, quién gastó más, evento con más inscritos, usuarios nuevos).
+- **LLM local:** servicio `ollama` (perfil `llm`, `ollama/ollama:0.40.5`, modelo `qwen2.5:3b`). Un 3B no planifica de forma fiable (herramientas nativas: no las llama; esquema JSON: ~50 % de acierto, fechas inventadas), así que el diseño es **híbrido**: el código decide herramientas y fechas; el modelo solo reescribe el borrador determinista y el código valida cifras, nombres y forma (si falla → texto determinista, `AgentRun.model` = `qwen2.5:3b+stub-fallback`). Con `LLM_PROVIDER=ollama`; para Claude: `LLM_PROVIDER=claude` + `ANTHROPIC_API_KEY` en `.env` (sin probar: no hay clave).
+- Abierto: probar Claude con clave real; el modelo de 3B tarda 2–30 s por respuesta en CPU.
+
