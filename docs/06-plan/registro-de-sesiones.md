@@ -1008,6 +1008,16 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 
 **Pendiente A-9:** pruebas de componentes (RNTL, requiere config del `QueryClient` en Jest), flujos **Maestro** (uc02/uc05/uc12/uc14) y **Playwright** (PWA).
 
+---
+
+### 2026-10-15 — Backend: `listUserPosts` (fix del 404 del perfil)
+
+**Agente:** OpenCode · **Repo:** `bandadau-backend`.
+
+**Hecho:** implementado `GET /profiles/{userId}/posts` (`listUserPosts`) en `social-service` (Clean): puerto `PostRepository.listAuthorPosts` + adaptador Mongo (keyset), `ListUserPostsUseCase` (visibilidad por viewer: propio → todas; siguiendo → PUBLIC+FOLLOWERS; si no → PUBLIC; respuesta `FeedItem[]`), `@Get(':userId/posts')` en `ProfilesController` y wiring del módulo. Alinea el contrato (C-3) y **arregla el 404** de la grilla del perfil.
+
+**Verificación:** `pnpm build` (depcruise + tsc) ✅ · `pnpm test` (13) ✅ · `pnpm lint` ✅ · `pnpm typecheck` ✅. Commit `bandadau-backend@afc31ec`.
+
 ### 2026-10-16 (segunda ronda) — pendientes técnicos y commits de frontend/admin
 
 - R-1 (comentarios denunciados), R-2/R-4 (OTLP en events y notification), R-3 (usuarios de RabbitMQ por servicio aplicados al stack real), R-8 (`/mcp` por Traefik) y M-4 (`frameScores` en moderación de video) cerrados; frontend y admin commiteados y sincronizados con los contratos.
