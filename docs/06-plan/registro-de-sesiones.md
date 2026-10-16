@@ -978,3 +978,21 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 - **Auditoría Expo**: `docs/06-plan/auditoria-app-expo.md` (A-1…A-16, B-1…B-14, C-1…C-9). Bloqueante: la app no envía `Authorization` (B-1) y los mocks están activos por defecto (B-3).
 - **Pendiente**: ver la sección «Cierre de la ronda de backend y admin» de `deuda-tecnica.md` (R-1…R-10).
 
+---
+
+### 2026-10-15 — App Expo: cierre de P1 de la auditoría (2ª parte)
+
+**Agente:** OpenCode · **Repos:** `bandadau-frontend`, `bandadau-shared`, `bandadau-docs`.
+
+**Hecho (commits):**
+- **UC-12:** no permitir recompra si ya hay inscripción (`GET /registrations/me`) y navegar a `/tickets` refrescando la lista (`e974be0`).
+- **Sesión web:** `X-Bandada-Client=web` en web → el backend fija la cookie `bandada_rt` y la sesión **persiste al recargar**; guarda de ruta en el detalle de evento (`a15fe3e`).
+- **A-3:** UC-08 seguir/dejar de seguir (+ `getProfile` para el estado) y UC-10 denunciar contenido (API social + hoja de denuncia en el post + botón en el perfil ajeno) (`7f77baa`).
+- **C-3:** `GET /profiles/{userId}/posts` (`listUserPosts`) agregado al OpenAPI social (**1.6.0**) + `contracts-ts` regenerado (`bandadau-docs@1db328b`, `bandadau-shared@c993bf6`).
+- **B-7** a11y «Cargando» vía i18n · **C-1** `AGENTS.md` al día (`8b369f9`).
+
+**Verificación:** `typecheck` ✅ · `lint` ✅ · `i18n:check` ✅ · `contracts-lint` ✅ · `export web`/`ios` ✅.
+
+**Pendiente P1:** A-1 (UC-05 publicar real), A-4 (cola offline T7/T8), A-5 (UC-14 escáner), A-9 (pruebas Jest/RNTL + Maestro), A-10 (PWA/Workbox).
+**Pendiente P2/P3:** B-5/B-8…B-14, A-11…A-16, C-7/C-8 (el CLI `i18n-check` solo acepta un `--src`; la app tiene `src/`+`app/`)/C-9.
+
