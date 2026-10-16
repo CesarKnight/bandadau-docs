@@ -244,7 +244,8 @@ Decisiones que conviene no redescubrir:
 | `wallet` | `/api/v1/wallet` | wallet-service:7005 | `api-chain` |
 | `ticketing` | `/api/v1/tickets` | ticketing-service:7006 | `api-chain` |
 | `notification` | `/api/v1/notifications`, `/api/v1/devices` | notification-service:7007 | `api-chain` |
-| `insights` | `/api/v1/insights`, `/mcp` | insights-service:7008 | `api-chain`; **502 hasta la fase 2** |
+| `insights` | `/api/v1/insights` | insights-service:7008 | `api-chain` |
+| `insights-mcp` | `/mcp` (prioridad 150; R-8) | insights-service:7008 | `mcp-chain` = `cors-mcp` (añade `MCP-Protocol-Version`, `Mcp-Session-Id`, `Accept`; solo `POST`/`OPTIONS`; orígenes de desarrollo + `:6274` del MCP Inspector), `ratelimit-mcp` (20/s, ráfaga 40), `secure-headers` (sin `compress`: respuestas SSE). **Traefik no autentica**: insights valida el JWT (ADMIN `aud=bandada-admin` o token MCP `aud=mcp`) y responde 401 sin token válido o revocado (caché de 5 s). `/internal/**` sigue en 403 (`api-internal-block`, prioridad 10000) |
 | `graphql` | `/graphql` (HTTP + WebSocket `graphql-ws`) | admin-gateway:7010 | `cors`, `ratelimit-default`, `secure-headers` (sin `compress`, para no interferir con el *upgrade*) |
 | `landing` | `Host(${BASE_DOMAIN}) \|\| Host(www.${BASE_DOMAIN})` | `host.docker.internal:3000` | — |
 | `app` | `Host(app.${BASE_DOMAIN})` | `host.docker.internal:8081` | — |
@@ -374,6 +375,12 @@ Imagen `rabbitmq:4.2.9-management`.
     1) copia al `.env` los 18 pares de variables de `.env.example`; 2) `make rabbit-defs` (regenera `rabbitmq/definitions.json`; contraseña por defecto `<servicio>_dev`);
     3) recrea RabbitMQ para que importe los usuarios, o impórtalos sin reiniciar: `curl -u admin:admin -H 'content-type: application/json' -X POST http://localhost:15672/api/definitions -d @rabbitmq/definitions.json`;
     4) `docker compose --profile services up -d` recrea los servicios con su usuario. Una vez migrado se puede quitar `bandada` de la plantilla. En AWS la contraseña de cada usuario va a Secrets Manager.
+  - **Aplicado al stack local (R-3, 2026-10-16)**: respaldo previo de las definiciones (`GET /api/definitions`) y del `.env`; se añadieron al `.env` los 18 pares de `.env.example`, `make rabbit-defs` (sin cambios en el JSON versionado)
+    e importación vía API sin tocar el volumen (`POST /api/definitions` → 204: 13 usuarios). Se recrearon con `up -d --no-deps --force-recreate` (perfil `'*'`) `identity-service`, `wallet-service` (+ `wallet-worker`, `wallet-relay`),
+    `ticketing-service` e `insights-service`, uno a uno hasta `healthy`; `identity`, `wallet`, `ticketing` e `insights` ya conectan y consumen con su usuario (`/api/connections`, `/api/consumers`).
+    `social-service`, `media-service`, `events-service`, `notification-service` (+ worker y relay) y `admin-gateway` siguen con `bandada` hasta que se recreen (`docker compose --profile '*' up -d <svc>` ya toma el usuario propio del `.env`).
+    Con `seed` 63/0 y `smoke` 41/41. Prueba de ACL con AMQP real como `ticketing-service`: `basic.consume` sobre `wallet-service.commands` y `queue.declare` de `wallet-service.x` → `403 ACCESS-REFUSED`; cola propia y publicación en `bandada.events` → OK.
+    **Rollback**: restaurar el `.env` previo, recrear los servicios y, si hiciera falta, reimportar el respaldo de definiciones (el usuario `bandada` nunca se elimina).
 
 #### n8n
 
@@ -406,6 +413,10 @@ Imagen `rabbitmq:4.2.9-management`.
   y `ScrapeTargetDown`. No hay contact point configurado (se ven en *Alerting → Alert rules*; conectar correo/Slack queda para producción).
   Verificado con `PROJECT=test` + perfil `observability` (traefik, rabbitmq, lgtm): los tres *targets* en `up`, las 3 carpetas/dashboards y 6 reglas provisionadas, todas las consultas de los paneles resuelven
   y `ServiceDown` pasa a *pending* en un broker sin consumidores. **Traefik debe recrearse** (`docker compose up -d traefik`) para leer el bloque `metrics` de su configuración estática.
+  **Aplicado al stack real (R-2, 2026-10-16)**: Traefik recreado (`--no-deps --force-recreate`, `healthy` en segundos; `api`, `admin`, `app` y landing siguen en 200, `/internal` en 403, `:8080/metrics` expone `traefik_*`).
+  Arranque corto del perfil con el stack real (`docker compose --profile '*' up -d --no-deps lgtm`, `healthy` en ~1 min): los 3 *targets* (`rabbitmq`, `rabbitmq-queues`, `traefik`) en `up`, las carpetas/dashboards «Bandada U · RED por servicio / SAGA de inscripciones / RabbitMQ y colas»
+  y las 6 reglas cargadas (`ok`), `traefik_service_requests_total` por servicio con tráfico real; `DlqHasMessages` estaba **firing con razón** (DLQ con restos de las pruebas de caos: `notification-service.events.dlq` 7, `insights-service.analytics.dlq` 1, `wallet-service.commands.dlq` 1).
+  Después se detuvo con `docker compose --profile observability stop lgtm` (volumen `lgtm-data` intacto).
 - Algunos servicios (identity, wallet, notification) declaran en su `.env.example` que en la fase 1 **no incluyen exportador OTLP** y solo propagan `traceparent`: las trazas completas dependen de su
   implementación. Ver `bandadau-docs/docs/03-arquitectura/observabilidad.md`.
 

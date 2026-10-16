@@ -33,7 +33,7 @@ Convenciones: `UPPER_SNAKE_CASE`; públicas de build con prefijo `NEXT_PUBLIC_*`
 | MFEs (F3, F4) | `http://mfe.bandada.localhost/{moderation,insights}/` (dev servers `:4201` / `:4301`) | `https://mfe.dev.bandadau.com/…` | `https://mfe.bandadau.com/…` |
 | API REST | `http://api.bandada.localhost/api/v1` | `https://api.dev.bandadau.com/api/v1` | `https://api.bandadau.com/api/v1` |
 | GraphQL (HTTP / WS) | `http://api.bandada.localhost/graphql` · `ws://…/graphql` | `https://…/graphql` · `wss://…` | `https://api.bandadau.com/graphql` · `wss://api.bandadau.com/graphql` |
-| MCP | `http://api.bandada.localhost/mcp` (la ruta existe en Traefik; responde 502 hasta la fase 2) | `https://api.dev.bandadau.com/mcp` | `https://api.bandadau.com/mcp` |
+| MCP | `http://api.bandada.localhost/mcp` (router `insights-mcp` en Traefik; autenticación en insights-service: 401 sin token, `initialize` 200 con token MCP o ADMIN) | `https://api.dev.bandadau.com/mcp` | `https://api.bandadau.com/mcp` |
 | JWKS | `http://api.bandada.localhost/.well-known/jwks.json` | … | `https://api.bandadau.com/.well-known/jwks.json` |
 | Objetos (URLs prefirmadas) | `http://localhost:9000` (MinIO; `S3_PUBLIC_ENDPOINT`; también `http://s3.bandada.localhost` vía Traefik) | `https://bandada-dev-media.s3.us-east-1.amazonaws.com` | `https://bandada-prod-media.s3.us-east-1.amazonaws.com` |
 | n8n | `http://n8n.bandada.localhost` / `http://localhost:5678` | `https://n8n.dev.bandadau.com` (protegido) | `https://n8n.bandadau.com` (protegido) |
@@ -59,7 +59,7 @@ Fuente: `bandadau-infra/docker-compose.yaml` y `.env.example` (cada puerto publi
 | 7005 | wallet-service | `WALLET_HOST_PORT` | ídem |
 | 7006 | ticketing-service | `TICKETING_HOST_PORT` | ídem |
 | 7007 | notification-service | `NOTIFICATION_HOST_PORT` | ídem |
-| 7008 | insights-service | — | **Pendiente fase 2**: no hay contenedor; Traefik ya enruta `/api/v1/insights` y `/mcp` hacia `insights-service:7008` (502 mientras no exista) |
+| 7008 | insights-service | — | Contenedor `insights-service`; Traefik enruta `/api/v1/insights` (`api-chain`) y `/mcp` (`mcp-chain`, R-8) hacia `insights-service:7008` |
 | 7010 | admin-gateway | `ADMIN_GATEWAY_HOST_PORT` | sí |
 | 3000 | landing (dev server en el host) | — | Traefik → `host.docker.internal:3000` |
 | 3001 | admin-shell (dev server en el host) | — | ídem |
