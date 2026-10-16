@@ -422,6 +422,73 @@ Requisito adicional X4 (UC-19, flujo alterno 2c). La pregunta puede **hablarse**
 
 **Alternativa futura (no implementada):** un puerto `SttPort` en el servidor con proveedor elegido por `STT_PROVIDER` (Whisper autoalojado o Amazon Transcribe), para controlar la privacidad y no depender del navegador.
 
+### 5.6 Modo respuesta (Q&A)
+
+Una **pregunta concreta** («¿Cuántos usuarios están suspendidos?») no es un reporte: se contesta en modo respuesta. Un pedido explícito de *resumen, reporte o
+informe* (`isSummaryRequest`) conserva el formato de §5.2. Catálogo de preguntas soportadas: [preguntas-soportadas-reportes.md](preguntas-soportadas-reportes.md).
+
+| Aspecto | Modo respuesta |
+|---|---|
+| Salida | **Primera línea = respuesta directa y completa en una oración** (con cifras y nombres de las herramientas), luego `## Detalle` (tabla o lista ≤ 6 filas) y `## Limitaciones` solo si el dato es parcial; ≤ 120 palabras |
+| Prohibido en el texto final | Disculpas, «retiro», «aclaro», «tienes razón», menciones a un «reporte anterior» o a la verificación. El código lo detecta (`hasProcessChatter`) y regenera; el usuario nunca lo ve |
+| Fechas relativas | Resueltas por el **código** (`entities/policies/relative-dates.ts`) y entregadas en el primer mensaje: hoy, ayer, esta semana (lunes → hoy), semana pasada, este mes, mes pasado, últimos 7/30 días, «últimos N días»; zona UTC explícita |
+| Rondas | ≤ 4 rondas de herramientas (+ la respuesta final), llamadas independientes en paralelo; `max_tokens` de ~700 por llamada |
+| Herramientas ofrecidas | Solo las del tema de la pregunta (`entities/policies/tool-routing.ts`); `calculate` solo si la pregunta pide una cifra derivada. El agente puede llamar a cualquiera de las herramientas permitidas, pero el modelo solo ve la selección |
+| Ahorro de tokens/tiempo | Definiciones de herramientas compactas (`compactTool`), resultados compactos (`compactResult`: sin nulos, ≤ 40 elementos por lista, 2 decimales), **caché por (herramienta, argumentos, minuto)** dentro del `AgentRun`, sin histórico previo y **sin guion de audio por LLM** (el audio narra la primera línea) |
+| Quién redacta | Motor `AGENT` (OpenCode): el modelo escribe el texto final en su último turno, sin paso de composición JSON; el `dataset` y el gráfico los deriva el código de los resultados de herramientas (`deriveDataset`). Motores `HYBRID`/`DETERMINISTIC`: paso `compose` con `qaCompose` (JSON con la respuesta primero) |
+
+El planificador determinista (`stub-intents.ts`, `stub-answers.ts`) cubre las mismas preguntas para `stub` y Ollama (híbrido): elige herramientas y fechas y
+escribe la primera línea con los datos reales; para cifras derivadas llama a `calculate` en una segunda ronda (`followUp`).
+
+### 5.7 Verificador de cifras y regeneración silenciosa
+
+`checkNumberFidelity(markdown, dataset, toolResults, contexto)` (A2) acepta una cifra del texto si es:
+
+1. un número de **algún resultado de herramienta** (incluido `calculate`: promedios, diferencias, porcentajes, cambios, cocientes);
+2. **derivada del propio contexto**: años, números de día y mes y cantidad de días de las fechas de la pregunta, del cuadro de fechas y de los argumentos
+   `from`/`to` de las llamadas; los números de la pregunta; los límites pedidos (`limit`, `top`) y las **posiciones** (1.º, «Top 3», «3 eventos»: de 0 hasta
+   el mayor entre el límite y el largo de las listas devueltas);
+3. una suma/promedio por columna del `dataset` (solo en el paso `compose`).
+
+Los **porcentajes y promedios solo valen si vienen de `calculate` o de un campo de herramienta**; el prompt le ordena al modelo usar `calculate` para toda
+cifra derivada. Los marcadores de lista («1.», «2)») no cuentan como cifras.
+
+Si el texto trae cifras sin respaldo, **chatarra de proceso** (disculpas, «reporte anterior») o una primera línea que no responde («Período analizado: …»):
+
+1. **UNA regeneración silenciosa** con una instrucción interna (`rewrite`: «reescribe usando solo estas cifras… no menciones esta instrucción»); el modelo
+   nunca ve una «corrección» a la que disculparse, y el historial no se reenvía a otro paso.
+2. Si vuelve a fallar → **borrador determinista** (`engines.select('STUB')` sobre los mismos resultados de herramientas), nunca una disculpa.
+3. `AgentRun.verification = { passed, retries, unsupportedNumbers }` (contrato OpenAPI 1.3.0; `unsupportedNumbers` = lo detectado en el primer borrador) y
+   `model` con sufijo: `deepseek-v4.1-flash` (sin reintento), `…+retry` (regeneración silenciosa), `…+stub-fallback` (borrador determinista; `engine = STUB`).
+   `GeneratedReport.fidelityWarning = !verification.passed`.
+
+### 5.8 Herramienta `calculate` y medición de velocidad
+
+`calculate {operation: SUM|DIFF|AVG|PERCENT|RATIO|MIN|MAX|PERCENT_CHANGE, values: number[]} → {operation, values, result, formula}` es aritmética pura
+(`use-cases/mcp-tools/calculate.ts`, redondeo a 2 decimales, errores tipados `DIVISION_BY_ZERO`/`INVALID_OPERANDS`): hace que toda cifra derivada tenga
+**procedencia en una herramienta** y que el verificador pueda trazarla.
+
+Objetivo de velocidad (pregunta puntual, OpenCode `deepseek-v4.1-flash`, modo `agent`): **p50 ≤ 12 s y ≤ 4 000 tokens**. Se mide con `make qa`
+(`bandadau-infra/smoke/qa-battery.mjs`). Antes de este modo: 17–67 s y 10 000–20 000 tokens por pregunta, ~25 % de respuestas con disculpa.
+
+**Medición (2026-10-16, `make qa`, 51 preguntas es/en, OpenCode `deepseek-v4.1-flash`, stack real):**
+
+| Camino (`OPENCODE_MODE`) | Directas | Sin disculpa | Verificadas* | Tiempo p50 / p95 | Tokens p50 / p95 |
+|---|---|---|---|---|---|
+| Antes (bucle + composición + «corrección» visible) | n/d (muchas abrían con «Período analizado…») | ~75 % | — | 17–67 s (batería de 40) | 10 000–20 000 |
+| `agent` (por defecto, modo respuesta) | 100 % | 100 % | 100 % de 50 | 7,2 s / 14,3 s | 4 727 / 11 935 |
+| `hybrid` (planificador determinista + el modelo solo redacta la primera línea) | 96 % | 100 % | 96 % de 50 | 7,3 s / 10,1 s | 2 500 / 3 781 |
+
+\* contra una consulta MCP independiente de la misma herramienta (o una expresión esperada si el dato cambia con el tiempo).
+
+Lectura: el tiempo cumple el objetivo con ambos caminos (p50 ≤ 12 s). **Los tokens de `agent` quedan en ~4,7 mil (objetivo 4 mil)**: el costo fijo es el prompt de
+sistema + las definiciones de las herramientas del tema + dos llamadas (herramientas y respuesta); las preguntas con reintentos, rankings o `calculate`
+(2–3 rondas) llegan a 10–13 mil. `hybrid` cumple el objetivo de tokens (p95 3,8 mil) pero la mayoría de sus respuestas termina con el borrador determinista
+(`+stub-fallback`: la validación estricta rechaza la reescritura del modelo) y no responde preguntas que el planificador no reconoce con un resumen útil.
+**Ambos caminos quedan configurables**: `OPENCODE_MODE=agent|hybrid` (por defecto `agent`; `hybrid` para minimizar tokens y costo) y, por petición, el motor
+`OLLAMA` o `STUB` en el selector del panel. La primera medición de `hybrid` (96 %) incluyó preguntas sobre eventos que fallaban por un `limit` fuera de rango en
+el planificador (corregido: `limit ≤ 50`).
+
 ## 6. `MonitoringAgent` (UC-20)
 
 ### 6.1 Ejecución

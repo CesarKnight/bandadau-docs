@@ -63,6 +63,7 @@ algo lo contradice, se corrige el otro documento o se escribe un ADR.
 | [ia-local-y-offline.md](03-arquitectura/ia-local-y-offline.md) | Offline-first, cola offline, LocalLlm, PWA |
 | [ml-dl.md](03-arquitectura/ml-dl.md) | Modelos DL/ML, pipeline de media, MLOps |
 | [agentes-y-reportes-generativos.md](03-arquitectura/agentes-y-reportes-generativos.md) | MonitoringAgent, ReportAgent, prompts, TTS |
+| [preguntas-soportadas-reportes.md](03-arquitectura/preguntas-soportadas-reportes.md) | Catálogo de preguntas del agente de reportes por tema y herramienta (es/en), límites y pruebas |
 | [mcp.md](03-arquitectura/mcp.md) | Servidor MCP, auth, herramientas, clientes |
 | [automatizacion-n8n.md](03-arquitectura/automatizacion-n8n.md) | Router + workflows wf-01…wf-06 |
 | [observabilidad.md](03-arquitectura/observabilidad.md) | OpenTelemetry, métricas, dashboards, alertas |
