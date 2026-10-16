@@ -1291,7 +1291,7 @@ paths:
         cae en el rango (UTC, inclusivo): `REGISTRATIONS` = número, `REVENUE` = suma de `priceCredits`, `FILL_RATE` =
         inscripciones del rango / `capacity` (0–1, 4 decimales). Orden descendente por `value` (desempate por `title` y `eventId`);
         solo se listan eventos con al menos una inscripción, salvo con `ids`. Sin datos personales. Para la herramienta MCP
-        `get_event_ranking`. Rango inválido → `400` `INVALID_RANGE`. Exige el scope `internal:read`.
+        `get_event_ranking`. Rango, `by`, `limit` o `ids` inválidos → `400` `VALIDATION_FAILED` (con `errors[]`, igual que `/stats/registrations`). Exige el scope `internal:read`.
       servers:
         - url: http://events-service:7004
           description: Red interna (Docker/VPC)

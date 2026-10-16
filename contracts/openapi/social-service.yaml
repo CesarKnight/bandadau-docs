@@ -1905,7 +1905,7 @@ paths:
         posts por autor (solo `userId`; insights resuelve el nombre con `GET /internal/v1/profiles`), `POSTS` = posts `PUBLIC`
         con más reacciones (suma de los cuatro tipos; desempate por comentarios y `postId`), con un extracto de ≤ 80 caracteres.
         Solo se rellena la lista que corresponde a `by`. Nunca expone correo ni teléfono; los posts de grupo o solo para seguidores
-        no aparecen en `POSTS`. Para la herramienta MCP `get_content_rankings`. Rango inválido → `400` `INVALID_RANGE`.
+        no aparecen en `POSTS`. Para la herramienta MCP `get_content_rankings`. Rango o parámetros inválidos → `400` `VALIDATION_FAILED` (con `errors[]`, igual que `/stats/daily`).
         Exige el scope `internal:read`.
       servers:
         - url: http://social-service:7002
