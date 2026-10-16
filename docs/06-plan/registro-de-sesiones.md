@@ -1153,6 +1153,18 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 
 **Verificación:** `typecheck` ✅ · `lint` ✅ · `test` (48) ✅ · `i18n:check` ✅ · `export web`/`ios` ✅. Commits `2f6ee2f`…`c392fe1`.
 
+### 2026-10-16 — App Expo: UC-17 con backends LLM on-device (ExecuTorch/WebLLM) + descarga del modelo
+
+**Agente:** OpenCode · **Repo:** `bandadau-frontend`.
+
+- **Adaptador nativo** `ExecutorchLlm` (`local-llm.impl.native.ts`) sobre `react-native-executorch@0.10.5`: `download(models.llm.*)` → `createLLMChatSession` (hilo de fondo) → `sendMessage(onToken)` + `stop()/dispose()`; import **lazy** (degrada al extractivo si el módulo nativo no está). Modelos: `LLAMA3_2_1B` / `QWEN2_5_0_5B` (registro curado de la librería).
+- **Adaptador web** `BrowserLlm` (`local-llm.impl.web.ts`) sobre `@mlc-ai/web-llm@0.2.86`: `CreateMLCEngine` + `chat.completions` en streaming; selección por `navigator.gpu`.
+- **Descarga con guardas** (`model-manager.ts` + `free-space.{native,web}.ts`): espacio libre ×1.2 (`Paths.availableDiskSpace` / `storage.estimate`) y confirmación Wi-Fi/datos (`NetInfo`), con progreso y "Eliminar" en la pantalla del asistente.
+- **Degradación**: `StudyAssistant.summarize` cae al resumen extractivo si el modelo no está listo o el runtime falta.
+- **Diferido**: el fallback web `transformers.js` (rompe el export de Metro vía `onnxruntime-web`) y publicar los pesos + `manifest.json` en el bucket.
+
+**Verificación:** `typecheck` ✅ · `lint` ✅ · `test` (48) ✅ · `i18n:check` ✅ · `export web`/`ios` ✅. Commit `3443b2d`.
+
 ### 2026-10-16 (tercera ronda) — limpieza, reinicio en limpio y reportes del panel
 
 - **Docker:** caché de compilación 35 GB → 0,6 GB; imágenes 28 → 20 GB (versiones viejas de Mongo y etiquetas `dev`/`test`). Sin tocar Homy/Intersectia ni datos de Bandada.

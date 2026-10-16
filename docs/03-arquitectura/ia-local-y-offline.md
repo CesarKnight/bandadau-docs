@@ -4,11 +4,14 @@
 > y los requisitos RF-08, RF-09, RF-21, RNF-09, RNF-10 y RNF-11. Casos de uso: UC-05, UC-06, UC-17.
 > Si algo aquí contradice `catalogo-servicios.md` o `decisiones-clave.md`, mandan ellos.
 
-> **Estado (2026-10-16):** la **cola offline** (outbox + sync con NetInfo, `src/offline/`), el **persister** de TanStack
-> Query y el **asistente offline** (UC-17, `src/ai/` + `app/(tabs)/assistant`) están implementados. El motor on-device
-> es **extractivo** (JS puro, `src/ai/extractive-summary.ts`) y los backends LLM (`react-native-executorch`,
-> `@mlc-ai/web-llm`, `@huggingface/transformers`) se enchufan en `local-llm.impl.{native,web}.ts` al añadir sus
-> dependencias (requieren build de desarrollo).
+> **Estado (2026-10-16):** la **cola offline** (outbox + sync con NetInfo), el **persister** de TanStack
+> Query y el **asistente offline** (UC-17, `src/ai/` + `app/(tabs)/assistant`) están implementados, con los
+> **backends LLM on-device enchufados**: `ExecutorchLlm` (nativo, `react-native-executorch@0.10.5`) y
+> `BrowserLlm` (web, `@mlc-ai/web-llm@0.2.86`), sobre la API imperativa `createLLMChatSession`/`CreateMLCEngine`.
+> El fallback **extractivo** (JS puro) sigue disponible para dispositivos sin soporte. La **descarga del modelo**
+> (espacio libre ×1.2 + confirmación Wi-Fi) vive en la pantalla del asistente. **Pendiente:** el fallback web
+> **transformers.js** (difiere: `onnxruntime-web` rompe el export de Metro) y publicar los pesos + `manifest.json`
+> en el bucket de modelos (D7).
 
 **Versiones.** Las librerías nombradas (`react-native-executorch`, `@mlc-ai/web-llm`,
 `@huggingface/transformers`, `onnxruntime-react-native`, `onnxruntime-web`, `workbox-*`,
