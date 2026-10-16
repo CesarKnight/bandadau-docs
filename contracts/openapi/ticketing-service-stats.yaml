@@ -1,0 +1,139 @@
+openapi: 3.1.0
+info:
+  title: Bandada U — ticketing-service (estadísticas internas)
+  version: 1.0.0
+  summary: Lector interno de estadísticas de tickets para las herramientas MCP del panel.
+  description: |
+    Complemento **interno** de `ticketing-service.yaml` (mismo servicio, `ticketing-service`, NestJS 11, Clean Architecture,
+    DynamoDB `bandada-ticketing`). Vive en un archivo aparte para no mezclar este contrato con los cambios pendientes de
+    `ticketing-service.yaml`; al consolidarse se podrá fusionar en él sin cambiar rutas ni `operationId`.
+
+    - Solo red interna con `serviceAuth` (`typ=service`, `aud=bandada-internal`); exige el scope `internal:read` (D-7).
+    - Solo cifras agregadas e identificadores de evento: nunca `userId`, QR ni datos personales.
+    - La lectura recorre la tabla con un `Scan` filtrado y acotado (tope de 20 000 tickets); si se alcanza el tope la respuesta
+      lleva `truncated: true`. Es una consulta administrativa de baja frecuencia (agente de reportes), no del camino crítico.
+    - Errores RFC 9457 con `code` estable (`INVALID_RANGE` en `400`).
+
+    ## Changelog
+    - 1.0.0 (2026-10-16): `GET /internal/v1/stats/tickets` (`getTicketStats`) para la herramienta MCP `get_ticket_stats` y el criterio `ATTENDANCE` de `get_event_ranking`.
+  contact:
+    name: Grupo 24 — Ingeniería de Software II
+servers:
+  - url: http://ticketing-service:7006
+    description: Red interna (Docker/VPC)
+tags:
+  - name: internal
+    description: Endpoints internos (`/internal/v1`), solo con token de servicio.
+paths:
+  /internal/v1/stats/tickets:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: getTicketStats
+      summary: Estadísticas agregadas de tickets (interno)
+      description: |
+        Cuenta los tickets **emitidos** (`issuedAt`) entre `from` y `to` (UTC, inclusivo) y su estado actual:
+        `issued` (todos), `used` (`USED`) y `voided` (`VOIDED`); `usageRate = used / issued` (0 si `issued = 0`, 4 decimales,
+        nunca > 1). `byEvent` desglosa por evento (título tomado del propio ticket) ordenado por `used` desc, luego `issued`
+        desc y `eventId`, con un máximo de 50 filas. `eventId` limita a un evento. Rango máximo 366 días; `from` ≤ `to`,
+        si no → `400` `INVALID_RANGE`. Exige el scope `internal:read`.
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: Inicio inclusivo (UTC), `YYYY-MM-DD`.
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          description: Fin inclusivo (UTC), `YYYY-MM-DD`.
+          schema:
+            type: string
+            format: date
+        - name: eventId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Estadísticas.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketStats'
+              examples:
+                rango:
+                  value:
+                    from: '2026-10-01'
+                    to: '2026-10-16'
+                    issued: 18
+                    used: 5
+                    voided: 2
+                    usageRate: 0.2778
+                    truncated: false
+                    byEvent:
+                      - eventId: 0192f3c1-2d3e-7f41-b263-748596a7b8c9
+                        title: Hackathon UMSA
+                        issued: 9
+                        used: 4
+                        voided: 1
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+components:
+  schemas:
+    TicketStats:
+      type: object
+      required: [from, to, issued, used, voided, usageRate, truncated, byEvent]
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        issued:
+          type: integer
+        used:
+          type: integer
+        voided:
+          type: integer
+        usageRate:
+          type: number
+          minimum: 0
+          maximum: 1
+        truncated:
+          type: boolean
+          description: '`true` si se alcanzó el tope de tickets analizados (cifras parciales).'
+        byEvent:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [eventId, title, issued, used, voided]
+            properties:
+              eventId:
+                type: string
+                format: uuid
+              title:
+                type: string
+              issued:
+                type: integer
+              used:
+                type: integer
+              voided:
+                type: integer
+  securitySchemes:
+    serviceAuth:
+      $ref: './shared/components.yaml#/components/securitySchemes/serviceAuth'

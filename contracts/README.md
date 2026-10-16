@@ -18,6 +18,7 @@ bandadau-docs/contracts/
 │   ├── events-service.yaml        # S4  /events, /registrations (orquestador SAGA)
 │   ├── wallet-service.yaml        # S5  /wallet
 │   ├── ticketing-service.yaml     # S6  /tickets
+│   ├── ticketing-service-stats.yaml  # S6  /internal/v1/stats/tickets (MCP get_ticket_stats)
 │   ├── notification-service.yaml  # S7  /notifications, /devices
 │   └── insights-service.yaml      # S8  /insights
 ├── asyncapi/bandada-events.yaml   # eventos de dominio y comandos SAGA (AsyncAPI 3.0, CloudEvents 1.0)

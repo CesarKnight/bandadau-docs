@@ -32,7 +32,7 @@ vigente a 2026-10; revalidar antes de implementar.
 El panel de administración pregunta cosas como «¿Quién compró el último ticket?» o «¿Quién gastó más créditos esta semana?».
 Con herramientas solo agregadas el agente no podía responder. Decisión:
 
-- Se **permite** que dos herramientas MCP de solo lectura (`list_recent_registrations`, `get_top_credit_spenders`) devuelvan el
+- Se **permite** que dos herramientas MCP de solo lectura (`list_recent_registrations`, `get_top_credit_spenders`; desde v1.3 también `get_wallet_overview` y `get_content_rankings`) devuelvan el
   **nombre para mostrar** (`displayName`, el que el estudiante publica en su perfil) junto con `userId`, evento, créditos y fecha.
 - Se **prohíbe siempre** devolver correo, teléfono, tokens u otros datos del perfil. El endpoint interno de lote de `social-service`
   (`getProfileNamesInternal`) solo expone `userId` y `displayName`.

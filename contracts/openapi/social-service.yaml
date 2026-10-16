@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — social-service
-  version: 1.7.0
+  version: 1.8.0
   summary: Red social (perfiles, posts, feed, comentarios, reacciones, seguidores, grupos y denuncias).
   description: |
     API del bounded context **Social** (`social-service`, TypeScript + NestJS 11, Clean
@@ -34,6 +34,7 @@ info:
     - Un `post.removed` (moderador) conserva el contenido; `post.deleted` solo ocurre por borrado del autor.
 
     ## Changelog
+    - 1.8.0 (2026-10-16): nuevos `GET /internal/v1/stats/careers` (`getCareerStats`) y `GET /internal/v1/stats/rankings` (`getContentRankings`) para las herramientas MCP `get_user_stats` y `get_content_rankings`. Scope `internal:read`.
     - 1.7.0 (2026-10-16): nuevo `GET /internal/v1/profiles` (`getProfileNamesInternal`): resuelve en lote (≤ 50 ids) el `displayName` de varios usuarios para los reportes del panel (MCP `list_recent_registrations`, `get_top_credit_spenders`); solo `userId` y `displayName`, nunca correo ni teléfono. Scope `internal:read`.
     - 1.6.0 (2026-10-15): nuevo `GET /profiles/{userId}/posts` (`listUserPosts`): posts de un estudiante para la grilla del perfil (UC-04); faltaba en el contrato y la app lo consumía.
     - 1.5.0 (2026-10-15): nuevo `GET /internal/v1/comments/{commentId}` (`getCommentInternal`, R-1): comentario en cualquier estado para el detalle de denuncias de comentario; `404 COMMENT_NOT_FOUND`.
@@ -1827,6 +1828,168 @@ paths:
                         count: 64
                       - hashtag: feriauniversitaria
                         count: 41
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+  /internal/v1/stats/careers:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: getCareerStats
+      summary: Perfiles por carrera (interno)
+      description: |
+        Número de perfiles por carrera declarada (`career`), orden descendente (desempate alfabético); los perfiles sin
+        carrera no se cuentan. Solo agregados, sin nombres. Para la herramienta MCP `get_user_stats`. Exige el scope `internal:read`.
+      servers:
+        - url: http://social-service:7002
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Carreras a devolver (1–50, por defecto 10).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Resultado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [totalProfiles, items]
+                properties:
+                  totalProfiles: {type: integer, description: Perfiles existentes.}
+                  items:
+                    type: array
+                    maxItems: 50
+                    items:
+                      type: object
+                      required: [career, users]
+                      properties:
+                        career: {type: string}
+                        users: {type: integer}
+              example:
+                totalProfiles: 9
+                items:
+                  - {career: Ingeniería de Sistemas, users: 4}
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+
+  /internal/v1/stats/rankings:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: getContentRankings
+      summary: Rankings de contenido (hashtags, autores y posts) (interno)
+      description: |
+        Rankings sobre los posts `PUBLISHED` creados en el rango (UTC, inclusivo): `HASHTAGS` = posts por hashtag, `AUTHORS` =
+        posts por autor (solo `userId`; insights resuelve el nombre con `GET /internal/v1/profiles`), `POSTS` = posts `PUBLIC`
+        con más reacciones (suma de los cuatro tipos; desempate por comentarios y `postId`), con un extracto de ≤ 80 caracteres.
+        Solo se rellena la lista que corresponde a `by`. Nunca expone correo ni teléfono; los posts de grupo o solo para seguidores
+        no aparecen en `POSTS`. Para la herramienta MCP `get_content_rankings`. Rango inválido → `400` `INVALID_RANGE`.
+        Exige el scope `internal:read`.
+      servers:
+        - url: http://social-service:7002
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: Inicio inclusivo (UTC) sobre `createdAt` del post.
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          description: Fin inclusivo (UTC). Máximo 366 días.
+          schema:
+            type: string
+            format: date
+        - name: by
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [HASHTAGS, AUTHORS, POSTS]
+        - name: limit
+          in: query
+          required: false
+          description: Filas del ranking (1–20, por defecto 5).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 5
+      responses:
+        '200':
+          description: Resultado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [from, to, by]
+                properties:
+                  from: {type: string, format: date}
+                  to: {type: string, format: date}
+                  by: {type: string, enum: [HASHTAGS, AUTHORS, POSTS]}
+                  hashtags:
+                    type: array
+                    maxItems: 20
+                    items:
+                      type: object
+                      required: [hashtag, posts]
+                      properties:
+                        hashtag: {type: string}
+                        posts: {type: integer}
+                  authors:
+                    type: array
+                    maxItems: 20
+                    items:
+                      type: object
+                      required: [userId, posts]
+                      properties:
+                        userId: {type: string, format: uuid}
+                        posts: {type: integer}
+                  posts:
+                    type: array
+                    maxItems: 20
+                    items:
+                      type: object
+                      required: [postId, authorId, excerpt, reactions, comments]
+                      properties:
+                        postId: {type: string, format: uuid}
+                        authorId: {type: string, format: uuid}
+                        excerpt: {type: string, maxLength: 80, description: Primeros 80 caracteres del texto (solo posts PUBLISHED y PUBLIC).}
+                        reactions: {type: integer}
+                        comments: {type: integer}
+              example:
+                from: '2026-10-01'
+                to: '2026-10-16'
+                by: HASHTAGS
+                hashtags:
+                  - {hashtag: bienvenida, posts: 4}
         '400':
           $ref: './shared/components.yaml#/components/responses/BadRequest'
         '401':

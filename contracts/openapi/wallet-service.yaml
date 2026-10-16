@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — wallet-service
-  version: 1.3.0
+  version: 1.4.0
   summary: Billetera de créditos (saldo, movimientos, recargas y pasarela simulada).
   description: |
     API del bounded context **Billetera** (`wallet-service`, PHP 8.4 + Laravel 12,
@@ -29,6 +29,7 @@ info:
     - Las respuestas de la SAGA a `debit-credits`/`refund-credits` incluyen `idempotencyKey` (eco del comando).
 
     ## Changelog
+    - 1.4.0 (2026-10-16): nuevo `GET /internal/v1/stats/balances` (`getBalanceOverview`): créditos en circulación, billeteras con saldo, saldo promedio y mayores saldos para la herramienta MCP `get_wallet_overview`. Scope `internal:read`.
     - 1.3.0 (2026-10-16): nuevo `GET /internal/v1/stats/top-spenders` (`getTopSpenders`): ranking de usuarios por créditos gastados (débitos − reembolsos) en un rango, para la herramienta MCP `get_top_credit_spenders`. Scope `internal:read`.
     - 1.2.0 (2026-10-15): D-14 — `PAYMENT_GATEWAY_MODE`, `503` `PAYMENT_GATEWAY_UNAVAILABLE` en `createTopUp`/`simulateTopUpPayment`, `outcome: UNAVAILABLE`.
     - 1.1.0 (2026-10-15): consolidación fase 1 — `PAYMENT_SIMULATOR_ENABLED`, cabecera `X-Signature` + `occurredAt` en el cuerpo (`WEBHOOK_EXPIRED` 401), `TOPUP_NOT_FOUND` 404,
@@ -518,6 +519,68 @@ paths:
                       - userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6
                         creditsSpent: 45
                         registrations: 2
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
+
+  /internal/v1/stats/balances:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: getBalanceOverview
+      summary: Agregados de saldos de billeteras (interno)
+      description: |
+        Foto actual de los saldos: créditos en circulación (suma de `balance_credits`), billeteras con saldo > 0, saldo
+        promedio entre ellas y las `limit` billeteras con más saldo (orden descendente; desempate por `userId`). Aquí solo hay
+        `userId`; `insights-service` resuelve el nombre con `social-service`. Para la herramienta MCP `get_wallet_overview`.
+        Exige el scope `internal:read`.
+      servers:
+        - url: http://wallet-service:7005
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Billeteras con más saldo a devolver (1–20, por defecto 5).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 5
+      responses:
+        '200':
+          description: Resultado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [creditsInCirculation, walletsWithBalance, averageBalance, items]
+                properties:
+                  creditsInCirculation: {type: integer, format: int64, description: Suma de los saldos actuales de todas las billeteras.}
+                  walletsWithBalance: {type: integer, description: Billeteras con saldo > 0.}
+                  averageBalance: {type: number, description: creditsInCirculation / walletsWithBalance con 2 decimales (0 si no hay).}
+                  items:
+                    type: array
+                    maxItems: 20
+                    items:
+                      type: object
+                      required: [userId, balanceCredits]
+                      properties:
+                        userId: {type: string, format: uuid}
+                        balanceCredits: {type: integer, format: int64, minimum: 1}
+              example:
+                creditsInCirculation: 412
+                walletsWithBalance: 7
+                averageBalance: 58.86
+                items:
+                  - {userId: 0192f1a2-3b4c-7d5e-8f60-718293a4b5c6, balanceCredits: 120}
         '400':
           $ref: './shared/components.yaml#/components/responses/BadRequest'
         '401':

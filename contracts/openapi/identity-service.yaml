@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — identity-service
-  version: 1.4.0
+  version: 1.5.0
   summary: Identidad y acceso (registro, verificación, sesión, SSO handoff, usuarios y universidades).
   description: |
     API del bounded context **Identidad** (`identity-service`, Java 25 + Spring Boot 4,
@@ -46,6 +46,7 @@ info:
     Identity **no** acepta `aud=mcp` en sus propias rutas.
 
     ## Changelog
+    - 1.5.0 (2026-10-16): nuevo `GET /internal/v1/stats/users` (`getUserStats`): conteos agregados de usuarios (total, activos 30 d, suspendidos, nuevos, por estado y por universidad) para la herramienta MCP `get_user_stats`. Scope `internal:read`.
     - 1.4.0 (2026-10-15): `User.suspendedAt` y `User.suspensionReason` (nullable; se rellenan al suspender y se limpian al reactivar) en `/users/me` y `/internal/v1/users`.
     - 1.3.0 (2026-10-15): `registerUser` acepta `displayName` opcional (si falta se deriva del correo); `REGISTER_HIDE_EXISTING_ACCOUNTS` pasa a `true` por defecto
       (anti-enumeración de UC-01); scopes `internal:read`/`internal:write` **exigidos** en `/internal/v1/**` (D-7); `createMcpToken`/`revokeMcpToken` implementados
@@ -1295,6 +1296,89 @@ paths:
           $ref: './shared/components.yaml#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/UniversityDomainTaken'
+
+  /internal/v1/stats/users:
+    parameters:
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [internal]
+      operationId: getUserStats
+      summary: Conteos agregados de usuarios (interno)
+      description: |
+        Conteos agregados de usuarios para la herramienta MCP `get_user_stats`: total (sin `DELETED`), activos
+        (usuarios distintos con un refresh token emitido en los 30 días hasta `to`, o hasta hoy si se omite), suspendidos,
+        nuevos entre `from` y `to` (solo si se dan ambos), desglose por estado y por universidad (con nombre). Sin correos ni
+        nombres de personas. `from` y `to` van juntos (uno solo → `400` `INVALID_RANGE`); `from` ≤ `to` y máximo 366 días.
+        Exige el scope `internal:read`.
+      servers:
+        - url: http://identity-service:7001
+          description: Red interna (Docker/VPC)
+      security:
+        - serviceAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: false
+          description: Inicio inclusivo (UTC) del rango de `newUsers`.
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          description: Fin inclusivo (UTC); también la fecha de corte de `activeUsers`.
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Resultado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [asOf, totalUsers, activeUsers, suspendedUsers, newUsers, byStatus, byUniversity]
+                properties:
+                  asOf: {type: string, format: date, description: Fecha de corte (UTC) de activeUsers (to o hoy).}
+                  totalUsers: {type: integer, description: Usuarios existentes (excluye DELETED).}
+                  activeUsers: {type: integer, description: Usuarios distintos con una sesión (refresh token emitido) en los 30 días hasta asOf.}
+                  suspendedUsers: {type: integer}
+                  newUsers:
+                    type: [integer, 'null']
+                    description: Usuarios creados entre from y to (UTC, inclusivo); null si no se pidió rango.
+                  byStatus:
+                    type: object
+                    required: [ACTIVE, SUSPENDED, PENDING_VERIFICATION]
+                    properties:
+                      ACTIVE: {type: integer}
+                      SUSPENDED: {type: integer}
+                      PENDING_VERIFICATION: {type: integer}
+                  byUniversity:
+                    type: array
+                    maxItems: 50
+                    items:
+                      type: object
+                      required: [universityId, name, users]
+                      properties:
+                        universityId: {type: string, format: uuid}
+                        name: {type: string}
+                        users: {type: integer}
+              example:
+                asOf: '2026-10-16'
+                totalUsers: 9
+                activeUsers: 9
+                suspendedUsers: 0
+                newUsers: 9
+                byStatus: {ACTIVE: 9, SUSPENDED: 0, PENDING_VERIFICATION: 0}
+                byUniversity:
+                  - {universityId: 0192f1a2-0000-7000-8000-00000000a001, name: Universidad Mayor de San Andrés, users: 5}
+        '400':
+          $ref: './shared/components.yaml#/components/responses/BadRequest'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '403':
+          $ref: './shared/components.yaml#/components/responses/Forbidden'
 
 components:
   parameters:

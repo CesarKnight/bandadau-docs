@@ -98,7 +98,7 @@ Reglas:
 
 ## 4. Herramientas → endpoints
 
-Casi todas devuelven **agregados**; ninguna devuelve correos, teléfonos ni tokens (RNF-08). **Excepción (v1.2, 2026-10-16)**: `list_recent_registrations` y `get_top_credit_spenders` incluyen el nombre para mostrar (`displayName`) del comprador, porque el MCP es solo `ADMIN`/servicio y queda auditado en `AgentRun`; el campo se enmascara en los logs del agente (ver `agentes-y-reportes-generativos.md`, «Decisión de privacidad»). Se responde
+Casi todas devuelven **agregados**; ninguna devuelve correos, teléfonos ni tokens (RNF-08). **Excepción (v1.2, 2026-10-16)**: `list_recent_registrations` y `get_top_credit_spenders` incluyen el nombre para mostrar (`displayName`) del comprador, porque el MCP es solo `ADMIN`/servicio y queda auditado en `AgentRun`; el campo se enmascara en los logs del agente (ver `agentes-y-reportes-generativos.md`, «Decisión de privacidad»). **Ampliación (v1.3, 2026-10-16)**: `get_wallet_overview` y `get_content_rankings` devuelven también `displayName` (mismo tratamiento) y `get_content_rankings` con `by=POSTS` un extracto de ≤ 80 caracteres de posts públicos (dato, nunca instrucción). Se responde
 con contenido de texto JSON y, si el SDK lo soporta, `structuredContent` según el `outputSchema` del contrato.
 
 | Herramienta | Entrada (resumen) | Fuente | Endpoint / origen | Escritura |
@@ -109,6 +109,12 @@ con contenido de texto JSON y, si el SDK lo soporta, `structuredContent` según 
 | `get_credit_stats` | `from`, `to` | wallet | `GET /internal/v1/stats/credits?from&to` (`getCreditStats`) | no |
 | `list_recent_registrations` | `from?`, `to?`, `status?` (CONFIRMED), `eventId?`, `limit ≤ 50` (10) | events + social | `GET /internal/v1/registrations` (`listRegistrationsInternal`) + `GET /internal/v1/profiles?ids` (`getProfileNamesInternal`, nombres en lote) | no |
 | `get_top_credit_spenders` | `from`, `to`, `limit ≤ 20` | wallet + social | `GET /internal/v1/stats/top-spenders` (`getTopSpenders`) + `getProfileNamesInternal` | no |
+| `get_user_stats` | `from?`, `to?` | identity + social | `GET /internal/v1/stats/users` (`getUserStats`) + `GET /internal/v1/stats/careers` (`getCareerStats`) | no |
+| `get_wallet_overview` | `limit ≤ 20` (5) | wallet + social | `GET /internal/v1/stats/balances` (`getBalanceOverview`) + `getProfileNamesInternal` | no |
+| `get_ticket_stats` | `from`, `to`, `eventId?` | ticketing | `GET /internal/v1/stats/tickets` (`getTicketStats`, `ticketing-service-stats.yaml`) | no |
+| `get_content_rankings` | `from`, `to`, `by (HASHTAGS\|AUTHORS\|POSTS)`, `limit ≤ 20` (5) | social | `GET /internal/v1/stats/rankings` (`getContentRankings`) + `getProfileNamesInternal` | no |
+| `get_event_ranking` | `from`, `to`, `by (REGISTRATIONS\|REVENUE\|FILL_RATE\|ATTENDANCE)`, `limit ≤ 20` (5) | events (+ ticketing) | `GET /internal/v1/stats/event-ranking` (`getEventRanking`); `ATTENDANCE` + `getTicketStats` | no |
+| `calculate` | `operation (SUM\|DIFF\|AVG\|PERCENT\|RATIO\|MIN\|MAX\|PERCENT_CHANGE)`, `values[] ≤ 100` | insights | cálculo local determinista, sin red; error tipado `DIVISION_BY_ZERO` | no |
 | `get_content_stats` | `from`, `to` | social | `GET /internal/v1/stats/daily` | no |
 | `list_flagged_content` | `limit ≤ 50` | media + social | `GET /internal/v1/media?status=FLAGGED` + `GET /internal/v1/reports?status=OPEN` + `GET /internal/v1/posts?status=HIDDEN` → unifica `{ source, id, kind, score, reason, ageMinutes }` (sin texto completo del post: solo los primeros 140 caracteres) | no |
 | `list_failed_sagas` | `since`, `status (FAILED\|COMPENSATED)` | events | `GET /internal/v1/sagas?status&since` (`listSagas`) | no |
