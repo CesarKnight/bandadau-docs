@@ -1067,3 +1067,21 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 - Se purgaron las DLQ con restos de las pruebas de caos (notification 7, insights 1, wallet 1).
 - Abiertos: R-5, R-6 (recall RNF-12), R-7 (M-5/M-6), R-11, R-12, R-13 (AWS y app↔panel).
 
+---
+
+### 2026-10-15 — App Expo: UC-09/11, fixes de web/arranque y Traefik
+
+**Agente:** OpenCode · **Repos:** `bandadau-frontend`, `bandadau-infra`.
+
+**Hecho (`bandadau-frontend`):**
+- **A-13 UC-09 (grupos):** crear grupo, detalle (info + miembros + posts), unirse/salir (`app/groups/create.tsx`, `app/groups/[groupId].tsx`, API en `features/groups`).
+- **UC-11 (crear/publicar evento, ORGANIZER):** `app/events/create.tsx` (`createEvent`→`publishEvent`), botón en la pestaña de eventos (`isOrganizer`).
+- **B-13:** errores por `code` al comentar.
+- **Fixes críticos:** `+html.tsx` con `ScrollViewStyleReset` (el layout web estaba roto) y `{children}` en `<body>`; `doRefresh` con try/catch (el `fetch` sin capturar crasheaba `restoreSession`); `restoreSession` defensiva; se quitó el **modo invitado** simulado; mensaje de red en el login.
+
+**Hecho (`bandadau-infra`):** `LAN_HOST` en Traefik con **plantilla condicional** (una versión previa rompió las 12 reglas `Host` de la API → 404; ya corregido).
+
+**Verificación:** `typecheck` ✅ · `lint` ✅ · `test` (18) ✅ · `i18n:check` ✅ · `export web`/`ios` ✅.
+
+**Pendiente:** A-12 (UC-17 asistente offline — requiere `react-native-executorch`/WebLLM, fase 2); resto de A-9 (Maestro/Playwright/componentes, requieren dispositivo/CI); P2 (B-8/B-9/B-10/B-11/B-12/B-14, C-8).
+
