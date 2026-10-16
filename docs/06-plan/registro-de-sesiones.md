@@ -1122,6 +1122,24 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 
 **Pendiente:** A-12 (UC-17, fase 2) y el resto de A-9 (E2E en dispositivo/CI). En B-11 no se tocaron `tickets/api.ts` ni `query-keys.ts` (tenían WIP en curso).
 
+### 2026-10-16 — App Expo: cierre de la auditoría (A-9 pruebas/E2E y A-12 UC-17)
+
+**Agente:** OpenCode · **Repos:** `bandadau-frontend`.
+
+**Hecho — A-9 (pruebas):**
+- **48 pruebas Jest** (criterio ≥ 25): nuevas suites para `use-infinite-list` (RNTL: dedupe, paginado, `hasMore`, error), `ids` (UUIDv7), `idempotencia`, esquemas de auth y la lógica de IA; mock de `expo-crypto` en `jest.setup.ts`.
+- **Flujos Maestro** en `.maestro/` (uc02 login, uc05 publicar, uc12 inscribirse, uc14 escanear) + `README.md` con credenciales y la nota del modo avión.
+- **Playwright PWA** (`playwright.config.ts` + `e2e/pwa.spec.ts`, 3/3): manifest instalable, service worker y pantalla de bienvenida. **Encontró un bug real**: el service worker nunca se registraba en web (el guard `process.env.NODE_ENV` no se inlinea en el bundle y el `load` podía haber ocurrido ya); ahora usa `__DEV__` + `document.readyState`.
+
+**Hecho — A-12 (UC-17 asistente offline):**
+- `src/ai/`: `local-llm.ts` (interfaz `LocalLlm`), `local-llm.impl.{native,web}.ts` (fábrica por plataforma), `extractive-summary.ts` (motor extractivo JS puro, "modo básico"), `prompts.ts` (plantillas es/en), `flashcards.ts` (Zod + parser tolerante), `study-assistant.ts` (resumen + flashcards con map-reduce) y `model-store.ts` (manifiesto, sin pesos en el bundle).
+- Pantalla `app/(tabs)/assistant/index.tsx` (resumen con streaming, "Detener", flashcards volteables, aviso "generado en tu dispositivo") + pestaña en `navigation.ts` + namespace i18n `assistant`.
+- Los backends LLM (ExecuTorch/WebLLM/transformers.js) quedan como adaptadores a enchufar (dependencias nativas opcionales, build de desarrollo).
+
+**Verificación:** `typecheck` ✅ · `lint` ✅ · `test` (48) ✅ · `i18n:check` ✅ · `export web` ✅ · `playwright test` (3/3) ✅.
+
+**Docs:** trazabilidad (RF-21/UC-17 → **I**, UC-14 app), `ia-local-y-offline.md`, `UC-17-asistente-offline.md` y el estado de la auditoría.
+
 ### 2026-10-16 (tercera ronda) — limpieza, reinicio en limpio y reportes del panel
 
 - **Docker:** caché de compilación 35 GB → 0,6 GB; imágenes 28 → 20 GB (versiones viejas de Mongo y etiquetas `dev`/`test`). Sin tocar Homy/Intersectia ni datos de Bandada.

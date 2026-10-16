@@ -9,7 +9,7 @@
 | Requisitos | RF-21, RNF-09, RNF-11, RNF-08, RNF-10 |
 | Tecnologías de la cátedra que demuestra | **T6** (IA local en móvil y frontend web), **T7** (PWA / offline) |
 | Servicios involucrados | `bandadau-frontend` únicamente (iOS, Android y web PWA). **Ningún servicio backend** en tiempo de uso |
-| Estado ICONIX | Pendiente fase 2 (secuencia diseñada; sin implementar) |
+| Estado ICONIX | Implementado (2026-10-16): flujo completo on-device (`src/ai/`, `app/(tabs)/assistant`) con motor **extractivo** (JS puro) y adaptadores LLM (ExecuTorch/WebLLM/transformers.js) listos para enchufar |
 
 ## 1. Narrativa (fase de requisitos)
 

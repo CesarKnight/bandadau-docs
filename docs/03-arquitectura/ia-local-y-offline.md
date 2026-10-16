@@ -4,9 +4,11 @@
 > y los requisitos RF-08, RF-09, RF-21, RNF-09, RNF-10 y RNF-11. Casos de uso: UC-05, UC-06, UC-17.
 > Si algo aquí contradice `catalogo-servicios.md` o `decisiones-clave.md`, mandan ellos.
 
-> **Estado (2026-10-15):** en la app ya existen la **cola offline** (outbox + sync con NetInfo, `src/offline/`) y el
-> **persister** de TanStack Query (SQLite nativo / localStorage web). El **asistente offline** (UC-17) sigue pendiente (fase 2).
-> Orden de entrega: **A-4 → A-15 → A-12** ([auditoría](../06-plan/auditoria-app-expo.md)).
+> **Estado (2026-10-16):** la **cola offline** (outbox + sync con NetInfo, `src/offline/`), el **persister** de TanStack
+> Query y el **asistente offline** (UC-17, `src/ai/` + `app/(tabs)/assistant`) están implementados. El motor on-device
+> es **extractivo** (JS puro, `src/ai/extractive-summary.ts`) y los backends LLM (`react-native-executorch`,
+> `@mlc-ai/web-llm`, `@huggingface/transformers`) se enchufan en `local-llm.impl.{native,web}.ts` al añadir sus
+> dependencias (requieren build de desarrollo).
 
 **Versiones.** Las librerías nombradas (`react-native-executorch`, `@mlc-ai/web-llm`,
 `@huggingface/transformers`, `onnxruntime-react-native`, `onnxruntime-web`, `workbox-*`,

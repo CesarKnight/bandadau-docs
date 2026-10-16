@@ -174,9 +174,10 @@ Prefijos: **A-n** = qué hacer (faltante), **B-n** = qué cambiar (incumplimient
 AGENTS.md, tests). Prioridad: **P1** antes de la entrega (10-nov-2026), **P2** si hay tiempo, **P3** fase 2. Esfuerzo: **S** (<½ día),
 **M** (½-2 días), **L** (>2 días). Repo afectado entre corchetes.
 
-> **Estado (2026-10-16):** hechos **A-1…A-16** (salvo A-12), **B-1…B-14** y **C-1…C-9**.
-> Queda **A-12** (UC-17, fase 2: requiere modelos on-device) y el **resto de A-9** (Maestro/Playwright/
-> componentes, requieren dispositivo/CI). Detalle en `registro-de-sesiones.md`.
+> **Estado (2026-10-16):** hechos **A-1…A-16**, **B-1…B-14** y **C-1…C-9** — el plan está completo.
+> A-9 dejó **48 pruebas Jest**, los flujos **Maestro** (uc02/05/12/14) y un smoke **Playwright** de la PWA;
+> A-12 implementó **UC-17** (motor extractivo on-device; los backends LLM quedan como adaptadores).
+> Detalle en `registro-de-sesiones.md`.
 
 ### 5.1 Qué hacer (faltante)
 

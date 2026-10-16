@@ -49,7 +49,7 @@ en estado distinto de **V**.
 | RF-18 | UC-14 | `validateTicket`, `getTicket`, `listMyTickets` | `bandada.ticketing.ticket.used.v1` | ticketing, events (organizador), mobile | AT-UC14-01… | I |
 | RF-19 | UC-15 | `createTopUp`, `getTopUp`, `simulateTopUpPayment`, `paymentWebhook` | `bandada.wallet.topup.paid.v1` | wallet, mobile | AT-UC15-01… (doble pago = 1 cargo) | I |
 | RF-20 | UC-16 | `getMyWallet`, `listMyLedgerEntries` | — | wallet, mobile | AT-UC16-01… | I |
-| RF-21 | UC-17 | — (on-device) | — | mobile (`LocalLlm`) | AT-UC17-01…, NFR-11 | C |
+| RF-21 | UC-17 | — (on-device) | — | mobile (`LocalLlm`, `StudyAssistant`) | AT-UC17-01…, NFR-11 | I |
 | RF-22 | UC-18 | `listFlaggedMedia`, `decideMedia`, `listPostsByStatus`, `updatePostStatus`, `updateUserStatus` | GraphQL `moderationQueue`, `moderateMedia`, `resolveContentReport`, `suspendUser`, sub. `moderationQueueChanged`; n8n `wf-03` | admin-shell, mfe-moderation, admin-gateway, media, social, identity, n8n | AT-UC18-01… || I |
 | RF-23 | UC-19 | `requestReport`, `getReport`, `listReports`, `getAgentRun` | `bandada.insights.report.ready.v1`; GraphQL `requestReport`, `report`, sub. `reportReady`; MCP `generate_report` + herramientas de lectura | insights, admin-gateway, mfe-insights | AT-UC19-01… || C |
 | RF-24 | UC-20 | `runMonitoringNow`, `listAlerts`, `acknowledgeAlert`, `raiseAlert`, `getServiceHealth` | `bandada.insights.alert.raised.v1`; GraphQL `alerts`, `acknowledgeAlert`, `runMonitoringNow`, sub. `alertRaised`; MCP `detect_anomalies`, `get_service_health`, `list_failed_sagas`; n8n `wf-05` | insights, admin-gateway, mfe-insights, n8n | AT-UC20-01…, E2E-04 || C |
@@ -60,7 +60,7 @@ en estado distinto de **V**.
 | RF-29 | UC-04 | `getMe`, `updateMyPreferences` (`theme`) | `bandada.identity.user.preferences-changed.v1`; GraphQL `User.theme` | identity, mobile, admin-shell, MFEs, landing, `bandadau-shared/packages/ui-tokens` | AT-UC04-0x, NFR-20 (contraste AA claro/oscuro) | I |
 | RF-30 | UC-04, UC-19, UC-24 | `getMe`, `updateMyPreferences` (`locale`), `registerUser` (`locale`), `requestReport` (`locale`) | `bandada.identity.user.preferences-changed.v1`; GraphQL `User.locale`, `requestReport(question, locale)` | identity, notification, insights, todas las apps, `bandadau-shared/packages/i18n` | AT-UC04-0x, AT-UC19-0x (audio en), AT-UC24-0x (plantilla en), NFR-21 | I |
 
-> Fase 1 (2026-10-15): marcados **I** los RF cuyo backend, contrato y panel están implementados. Quedan en **C**: RF-21 (UC-17), RF-23 (UC-19), RF-24 (UC-20), RF-26 (UC-22) y RF-27 (UC-23), todos **Pendiente fase 2**. RF-07 y RF-22 están implementados con moderación **manual** (sin modelos ML: RNF-12 sigue pendiente), RF-09 sin ranking ML. Hasta que el equipo termine la app Expo, ningún RF llega a **V**.
+> Fase 1 (2026-10-15): marcados **I** los RF cuyo backend, contrato y panel están implementados. RF-21 (UC-17) pasó a **I** (2026-10-16) con la app: flujo completo on-device y motor extractivo; los backends LLM quedan como adaptadores. Quedan en **C**: RF-23 (UC-19), RF-24 (UC-20), RF-26 (UC-22) y RF-27 (UC-23), todos **Pendiente fase 2**. RF-07 y RF-22 están implementados con moderación **manual** (sin modelos ML: RNF-12 sigue pendiente), RF-09 sin ranking ML. Hasta que el equipo termine la app Expo, ningún RF llega a **V**.
 
 ### 1.1 Evidencia de la fase 1 (consolidación 2026-10-15)
 
@@ -81,14 +81,15 @@ en estado distinto de **V**.
 | UC-11 Publicar evento | Implementado | `SMK:organizador crea y publica un evento` | events | `endsAt` por defecto +2 h |
 | UC-12 Inscribirse (SAGA) | Implementado | `SMK:inscripción pagada 202→CONFIRMED con ticket`, `SMK:débito de 20 créditos`, `SMK:ticket con QR ES256`, `SMK:inscripción repetida 409 ALREADY_REGISTERED`, `SMK:cupo 1 → 409 EVENT_FULL`, `SMK:notificación in-app` | events: suite SAGA con fallos inyectados y concurrencia de cupo | |
 | UC-13 Cancelar inscripción | Implementado | — (cubierto por pruebas de events) | events/wallet/ticketing: SAGA `CANCELLATION` | sin paso en smoke |
-| UC-14 Validar entrada | Implementado (backend) | `SMK:validación de tickets (org2 → 403, org → 200)`, QR verificable con `/tickets/signing-keys` | ticketing: doble validación, QR manipulado | `organizerId` llega por el comando `issue-ticket` |
+| UC-14 Validar entrada | Implementado (backend + app) | `SMK:validación de tickets (org2 → 403, org → 200)`, QR verificable con `/tickets/signing-keys` | ticketing: doble validación, QR manipulado | escáner en la app (`app/scan.tsx`, `expo-camera` → `validateTicket`); `organizerId` llega por el comando `issue-ticket` |
 | UC-15 Recargar créditos | Implementado | `SMK:createTopUp repetido misma clave`, `SMK:doble pagar simultáneo → +50 una vez` | wallet: webhook idempotente por `gatewayRef` | |
 | UC-16 Movimientos | Implementado | `SMK:débito de 20 créditos aplicado (saldo 30)` | wallet | |
 | UC-18 Moderar | Implementado (manual) | `SMK:GraphQL moderationQueue`, `SMK:estudiante recibe FORBIDDEN`; panel verificado a mano (cola en vivo, «Retirar») | admin-gateway, mfe-moderation | sin ML |
 | UC-21 Gestionar usuarios | Implementado | RBAC GraphQL (`SMK:estudiante FORBIDDEN`) | identity, admin-gateway | `updateUniversity` en el contrato, falta en el gateway |
 | UC-24 Notificaciones | Implementado | `SMK:notificación in-app de la inscripción` | notification: inbox, agrupación, preferencias | Web Push diferido |
 | Compensación SAGA | (UC-12) | `SMK:fallo en ticketing → FAILED y créditos reembolsados` (con `CHAOS_TICKETING_FAIL`) | | |
-| UC-17, UC-19, UC-20, UC-22, UC-23 | **Pendiente fase 2** | — | — | ML/DL, IA local, agentes, MCP, n8n, `insights-service` |
+| UC-17 Asistente offline | Implementado (app, modo básico) | — (on-device; sin red) | `src/ai/*` + pantalla `app/(tabs)/assistant`; Jest (extractivo, prompts, flashcards) | backends LLM (ExecuTorch/WebLLM/transformers.js) como adaptadores a enchufar |
+| UC-19, UC-20, UC-22, UC-23 | **Pendiente fase 2** | — | — | ML/DL, agentes, MCP, n8n, `insights-service` |
 
 ## 2. Requisitos no funcionales → verificación
 
