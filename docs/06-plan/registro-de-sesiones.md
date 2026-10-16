@@ -1140,6 +1140,19 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 
 **Docs:** trazabilidad (RF-21/UC-17 → **I**, UC-14 app), `ia-local-y-offline.md`, `UC-17-asistente-offline.md` y el estado de la auditoría.
 
+### 2026-10-16 — App Expo: cierre del WIP de UC-12 «extend» y mejoras de tickets/publicación/comentarios
+
+**Agente:** OpenCode (finaliza el WIP del equipo) · **Repo:** `bandadau-frontend`.
+
+- **UC-12 alterno (saldo insuficiente):** el detalle del evento detecta saldo < precio y ofrece **«Recargar y continuar»**; la billetera recibe `returnTo`/`needed`, pre-selecciona el paquete mínimo y vuelve al evento al terminar. El fallo `INSUFFICIENT_FUNDS` de la SAGA también lleva a recargar. **Cupos agotados** (badge + CTA) en la card y el detalle.
+- **Tickets:** `GET /tickets/me?sort=` (`recent` | `eventDate`, contrato ticketing v1.3.0) + chips de orden.
+- **UC-05:** `uploadMedia` espera la **moderación** del medio (poll acotado a 10 s; `MEDIA_REJECTED` falla rápido) antes de publicar; si el post queda en cola offline se avisa y se limpia el formulario.
+- **Comentarios:** autor separado del texto; solo los comentarios raíz tienen «Responder».
+- **Fix:** `DELETE /posts/{id}/reactions/me` devuelve `204` (sin cuerpo) → `apiRequest<void>`.
+- **Fix:** refresh de token coordinado **entre pestañas** con **Web Locks** (`navigator.locks`, `seguridad-y-sso.md` §4) para evitar `REFRESH_TOKEN_REUSED`.
+
+**Verificación:** `typecheck` ✅ · `lint` ✅ · `test` (48) ✅ · `i18n:check` ✅ · `export web`/`ios` ✅. Commits `2f6ee2f`…`c392fe1`.
+
 ### 2026-10-16 (tercera ronda) — limpieza, reinicio en limpio y reportes del panel
 
 - **Docker:** caché de compilación 35 GB → 0,6 GB; imágenes 28 → 20 GB (versiones viejas de Mongo y etiquetas `dev`/`test`). Sin tocar Homy/Intersectia ni datos de Bandada.
@@ -1147,4 +1160,13 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 - **Reportes del agente (UC-19):** herramientas MCP `list_recent_registrations` y `get_top_credit_spenders` (solo ADMIN, solo `displayName`; contratos events 1.4.0, wallet 1.3.0, social 1.7.0, `tools.md` 1.2.0), planificador por intención con respuesta directa en la primera línea y chips de preguntas sugeridas en `mfe-insights`. Verificado contra la base (créditos del día, comprador del último ticket, quién gastó más, evento con más inscritos, usuarios nuevos).
 - **LLM local:** servicio `ollama` (perfil `llm`, `ollama/ollama:0.40.5`, modelo `qwen2.5:3b`). Un 3B no planifica de forma fiable (herramientas nativas: no las llama; esquema JSON: ~50 % de acierto, fechas inventadas), así que el diseño es **híbrido**: el código decide herramientas y fechas; el modelo solo reescribe el borrador determinista y el código valida cifras, nombres y forma (si falla → texto determinista, `AgentRun.model` = `qwen2.5:3b+stub-fallback`). Con `LLM_PROVIDER=ollama`; para Claude: `LLM_PROVIDER=claude` + `ANTHROPIC_API_KEY` en `.env` (sin probar: no hay clave).
 - Abierto: probar Claude con clave real; el modelo de 3B tarda 2–30 s por respuesta en CPU.
+
+### 2026-10-16 (cuarta ronda) — ADR-0021 multimedia, filtros de tickets y pantalla de crear
+
+**Agente:** Claude Code · **Repos:** `bandadau-docs` (ADR), `bandadau-frontend` (`app/(tabs)/create.tsx`).
+
+- **ADR-0021 (Propuesta):** CDN `media.<BASE_DOMAIN>` con CloudFront + OAC, URLs firmadas de CloudFront (no públicas) y llaves `uploads/incoming/<ownerId>/<mediaId>/…` → `uploads/media/<ownerId>/<purpose>/<mediaId>/…`. Sin cambios de código; pendiente de aprobación. Detectada divergencia doc/código (`uploads/` vs `media/`).
+- **Crear publicación:** el botón Publicar ya no queda bajo la barra flotante (`insets.bottom + 96`, igual que las listas) y el aviso «sin conexión» es neutro, no un error rojo.
+- **Verificado:** subida → post → feed funciona en web con `EXPO_PUBLIC_API_URL=http://api.bandada.localhost`; `GET /tickets/me?sort=recent|eventDate` responde bien en el backend. Causa del fallo en nativo: `S3_PUBLIC_ENDPOINT=localhost:9000` (dev local fijado a la IP LAN en `bandadau-infra/.env`, no versionado).
+- **Abierto:** los filtros de `/tickets` no se pudieron validar en la UI web de desarrollo (la sesión se pierde al recargar porque `localhost:8081` y `*.bandada.localhost` son sitios distintos para la cookie de refresh); no hay enlace en la app hacia `/tickets`.
 
