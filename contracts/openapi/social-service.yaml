@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Bandada U — social-service
-  version: 1.5.0
+  version: 1.6.0
   summary: Red social (perfiles, posts, feed, comentarios, reacciones, seguidores, grupos y denuncias).
   description: |
     API del bounded context **Social** (`social-service`, TypeScript + NestJS 11, Clean
@@ -34,6 +34,7 @@ info:
     - Un `post.removed` (moderador) conserva el contenido; `post.deleted` solo ocurre por borrado del autor.
 
     ## Changelog
+    - 1.6.0 (2026-10-15): nuevo `GET /profiles/{userId}/posts` (`listUserPosts`): posts de un estudiante para la grilla del perfil (UC-04); faltaba en el contrato y la app lo consumía.
     - 1.5.0 (2026-10-15): nuevo `GET /internal/v1/comments/{commentId}` (`getCommentInternal`, R-1): comentario en cualquier estado para el detalle de denuncias de comentario; `404 COMMENT_NOT_FOUND`.
     - 1.4.0 (2026-10-15): `Profile.avatarStatus` (D-9); códigos 404 de dominio `POST_NOT_FOUND`/`COMMENT_NOT_FOUND`/`PROFILE_NOT_FOUND`/`GROUP_NOT_FOUND` (D-17);
       `ModerationPost.hiddenReason` conserva `AUTHOR_SUSPENDED`; nuevo `GET /internal/v1/posts/{postId}` (`getPostInternal`, D-6); scopes `internal:read|write` exigidos (D-7).
@@ -199,6 +200,36 @@ paths:
                     followedByMe: true
                     createdAt: '2026-09-20T10:00:00Z'
                     updatedAt: '2026-10-02T18:30:00Z'
+        '401':
+          $ref: './shared/components.yaml#/components/responses/Unauthorized'
+        '404':
+          $ref: './shared/components.yaml#/components/responses/NotFound'
+
+  /profiles/{userId}/posts:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: './shared/components.yaml#/components/parameters/AcceptLanguage'
+      - $ref: './shared/components.yaml#/components/parameters/CorrelationId'
+    get:
+      tags: [posts]
+      operationId: listUserPosts
+      summary: Listar los posts de un estudiante
+      description: |
+        Posts visibles del usuario indicado, del más reciente al más antiguo (grilla del perfil, UC-04).
+        Paginado por cursor; solo se incluyen posts visibles para quien consulta.
+      parameters:
+        - $ref: './shared/components.yaml#/components/parameters/Cursor'
+        - $ref: './shared/components.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Página de posts del usuario.
+          headers:
+            Content-Language:
+              $ref: './shared/components.yaml#/components/headers/ContentLanguage'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedPage'
         '401':
           $ref: './shared/components.yaml#/components/responses/Unauthorized'
         '404':
