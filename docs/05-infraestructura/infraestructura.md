@@ -417,8 +417,13 @@ Imagen `rabbitmq:4.2.9-management`.
   Arranque corto del perfil con el stack real (`docker compose --profile '*' up -d --no-deps lgtm`, `healthy` en ~1 min): los 3 *targets* (`rabbitmq`, `rabbitmq-queues`, `traefik`) en `up`, las carpetas/dashboards «Bandada U · RED por servicio / SAGA de inscripciones / RabbitMQ y colas»
   y las 6 reglas cargadas (`ok`), `traefik_service_requests_total` por servicio con tráfico real; `DlqHasMessages` estaba **firing con razón** (DLQ con restos de las pruebas de caos: `notification-service.events.dlq` 7, `insights-service.analytics.dlq` 1, `wallet-service.commands.dlq` 1).
   Después se detuvo con `docker compose --profile observability stop lgtm` (volumen `lgtm-data` intacto).
-- Algunos servicios (identity, wallet, notification) declaran en su `.env.example` que en la fase 1 **no incluyen exportador OTLP** y solo propagan `traceparent`: las trazas completas dependen de su
-  implementación. Ver `bandadau-docs/docs/03-arquitectura/observabilidad.md`.
+- **events-service exporta OTLP (R-2, 2026-10-16)**: trazas y métricas por OTLP/HTTP con `spring-boot-starter-opentelemetry`, activado solo con `OTEL_EXPORTER_OTLP_ENDPOINT` y sin `OTEL_SDK_DISABLED=true`
+  (por defecto apagado). Verificado con `lgtm` + stack real: `saga_duration_seconds_{count,sum,bucket}`, `saga_compensations_total`, `saga_step_resends_total` y `saga_compensation_stuck_total` llegan a Prometheus
+  y las consultas de los paneles de SAGA devuelven series (p. ej. tasa de compensación ≈ 29 % con las SAGAs del seed/caos); las trazas de `events-service` y `notification-service` llegan a Tempo. El histograma de
+  duración declara *buckets* (100 ms … 5 min) y los contadores de reenvío/atascadas se registran en 0. Tras la verificación, `lgtm` se detuvo (`stop lgtm`) y los servicios se recrearon con `OTEL_SDK_DISABLED=true`.
+- **notification-service exporta trazas OTLP (R-4)**: paquetes oficiales `open-telemetry/sdk` + `open-telemetry/exporter-otlp` (http/protobuf, `google/protobuf` en PHP puro; compatible con PHP 8.4 / Laravel 12, sin extensiones nuevas),
+  activado solo con endpoint y sin `OTEL_SDK_DISABLED=true`; span SERVER por petición y CONSUMER por mensaje (hijos del `traceparent`). Sin métricas OTLP. En FPM el envío ocurre tras liberar al cliente.
+- identity y wallet siguen sin exportador OTLP propio (solo propagan `traceparent`; ver `bandadau-docs/docs/03-arquitectura/observabilidad.md`).
 
 ### 2.10 Datos de demo, humo y gateway mock
 
