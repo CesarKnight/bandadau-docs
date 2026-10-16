@@ -185,11 +185,11 @@ UPDATE outbox SET published_at = now(), attempts = attempts + 1 WHERE id = ANY($
 -- purga horaria (events-service: OUTBOX_RETENTION=P7D, OUTBOX_PURGE_INTERVAL=PT1H): DELETE FROM outbox WHERE published_at < now() - interval '7 days';
 ```
 
-- Spring: `@Scheduled` en `OutboxRelay` con `fixedDelay` = `OUTBOX_RELAY_INTERVAL` (**por defecto `PT1S`** en identity y events, no 500 ms; el lote falla en el primer error, anota `attempts`/`last_error` y reintenta en el siguiente ciclo); `RabbitTemplate` con
+- Spring: `@Scheduled` en `OutboxRelay` con `fixedDelay` = `OUTBOX_POLL_INTERVAL` (**por defecto `PT0.5S`** en identity, alias antiguo `OUTBOX_RELAY_INTERVAL`; events conserva `PT1S` hasta alinearlo; el lote falla en el primer error, anota `attempts`/`last_error` y reintenta en el siguiente ciclo); `RabbitTemplate` con
   `spring.rabbitmq.publisher-confirm-type=correlated` y `publisher-returns=true`
   (`mandatory`). Esperar el `CorrelationData.getFuture()` con timeout de 5 s.
 - Laravel (wallet): comando long-running `php artisan bandada:relay` (alias `bandada:outbox-relay` y `wallet:relay-outbox`; bucle con `usleep` de `OUTBOX_POLL_INTERVAL_MS` = 500 ms) que además hace las tareas periódicas (expiración de recargas y purga de filas publicadas con `retention_days = 7`), contenedor propio `wallet-relay`, `restart: unless-stopped`. Notification tiene `notifications:relay-outbox` (alias `bandada:relay`), inactivo mientras el servicio no publica.
-- **La limpieza diaria del SQL de arriba solo existe en wallet**: los relays de identity y events no purgan `outbox` (divergencia abierta; ver el informe de la revisión cruzada de C-9).
+- **Limpieza**: wallet purga en su comando `bandada:relay`; **identity** purga con un job horario (`OutboxRelay.purgePublished`, lotes de 1000) las filas publicadas hace más de `OUTBOX_RETENTION` (por defecto `P7D`, `OUTBOX_PURGE_INTERVAL` = `PT1H`). Events: divergencia abierta si aún no lo hace.
 - `SKIP LOCKED` permite varias réplicas del relay sin publicar el mismo lote en paralelo.
 - Alternativa opcional para reducir latencia: `NOTIFY outbox` tras el insert y
   `LISTEN` en el relay; el polling se mantiene como respaldo.
