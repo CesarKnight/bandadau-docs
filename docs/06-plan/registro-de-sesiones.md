@@ -1030,6 +1030,18 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 
 **Pendiente de UC-05:** cola offline (A-4) y pre-chequeo NSFW on-device (solo avisa); selector de grupo para `visibility = GROUP`.
 
+---
+
+### 2026-10-15 — App Expo: escáner real (UC-14, A-5)
+
+**Agente:** OpenCode · **Repo:** `bandadau-frontend`.
+
+**Hecho:** `app/scan.tsx` reescrito con `expo-camera` (`CameraView` + `onBarcodeScanned` QR) → `useValidateTicket` (`POST /tickets/validate`, ♻️) y **resultado por `code`** (`TICKET_ALREADY_USED`, `TICKET_VOIDED`, `INVALID_QR_SIGNATURE`, `TICKET_EVENT_MISMATCH`, `NOT_EVENT_ORGANIZER`, `TICKET_NOT_FOUND`, `VALIDATION_WINDOW_CLOSED`); permiso de cámara con estado + reintento. Plugin `expo-camera` en `app.config.ts` (los textos de permiso ya están en `locales/ios/{es,en}.json`). Commit `bandadau-frontend@c352041`.
+
+**Verificación:** `typecheck` ✅ · `lint` ✅ · `i18n:check` ✅ · `export web`/`ios` ✅.
+
+**Nota:** requiere que el **dev client** incluya `expo-camera` (rebuild si no). En web el escaneo puede estar limitado.
+
 ### 2026-10-16 (segunda ronda) — pendientes técnicos y commits de frontend/admin
 
 - R-1 (comentarios denunciados), R-2/R-4 (OTLP en events y notification), R-3 (usuarios de RabbitMQ por servicio aplicados al stack real), R-8 (`/mcp` por Traefik) y M-4 (`frameScores` en moderación de video) cerrados; frontend y admin commiteados y sincronizados con los contratos.
