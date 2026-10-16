@@ -172,7 +172,7 @@ relay cae entre el confirm y el `UPDATE`, se republica → lo absorbe el inbox.
 DDL de la tabla `outbox`: ver `saga-inscripcion-evento.md` §5 (idéntica en los 3 servicios).
 
 ```sql
--- Relay: cada 500 ms, en una TX
+-- Relay: cada 1 s (OUTBOX_RELAY_INTERVAL=PT1S), en una TX
 SELECT id, exchange, routing_key, payload, headers
 FROM outbox
 WHERE published_at IS NULL
@@ -182,7 +182,7 @@ FOR UPDATE SKIP LOCKED;
 -- publicar cada fila con confirms; luego:
 UPDATE outbox SET published_at = now(), attempts = attempts + 1 WHERE id = ANY($1);
 -- fallos: attempts + 1, last_error; se reintenta en el siguiente ciclo
--- limpieza diaria: DELETE FROM outbox WHERE published_at < now() - interval '7 days';
+-- purga horaria (events-service: OUTBOX_RETENTION=P7D, OUTBOX_PURGE_INTERVAL=PT1H): DELETE FROM outbox WHERE published_at < now() - interval '7 days';
 ```
 
 - Spring: `@Scheduled` en `OutboxRelay` con `fixedDelay` = `OUTBOX_RELAY_INTERVAL` (**por defecto `PT1S`** en identity y events, no 500 ms; el lote falla en el primer error, anota `attempts`/`last_error` y reintenta en el siguiente ciclo); `RabbitTemplate` con
