@@ -1042,6 +1042,25 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 
 **Nota:** requiere que el **dev client** incluya `expo-camera` (rebuild si no). En web el escaneo puede estar limitado.
 
+---
+
+### 2026-10-15 — App Expo: PWA, offline, push y docs (A-10/A-15/A-4/A-11, C-2…C-9)
+
+**Agente:** OpenCode · **Repos:** `bandadau-frontend`, `bandadau-docs`.
+
+**Hecho (`bandadau-frontend`):**
+- **A-10** PWA instalable: `public/manifest.webmanifest`, service worker de shell (`public/sw.js`), íconos (192/512/maskable/apple), `app/+html.tsx` (manifest + theme-color + meta iOS) y registro del SW (`src/lib/service-worker.{ts,web.ts}`) — `d504a17`.
+- **A-15** persister de TanStack Query (SQLite vía `expo-sqlite/kv-store` en nativo, `localStorage` en web) con `PersistQueryClientProvider`; se limpia en logout — `186ff48`.
+- **A-4** cola offline (T7/T8): `src/offline/outbox.ts` (+ test), `sync.ts` (NetInfo), `handlers.ts`; publicar encola si falla la red y drena al reconectar — `5696479`.
+- **A-11** UC-24: registro de push (`usePushRegistration` nativo, best-effort) + `useRegisterDevice`/preferencias — `25fd346`.
+- (antes en la sesión) **A-1** publicar real `3670f1d`, **A-5** escáner `c352041`, **A-9** pruebas `54ca556`.
+
+**Hecho (`bandadau-docs`):** DoD §4 (mocks off en prod, idempotencia estable), deuda-técnica (mapeo E-1…E-3 → A/B/C), trazabilidad (nota app), ia-local-y-offline (estado + orden A-4→A-15→A-12) y backlog — `e845b17`.
+
+**Verificación:** `typecheck` ✅ · `lint` ✅ · `test` (18) ✅ · `i18n:check` ✅ · `export web`/`ios` ✅.
+
+**Pendiente:** A-13 (UC-09/11 grupos/eventos), A-16 (preferencias/perfil ajeno), A-12 (UC-17 asistente, fase 2), resto de A-9 (Maestro/Playwright/componentes) y P2 (B-8/B-9/B-10/B-11/B-12/B-13/B-14, C-7/C-8).
+
 ### 2026-10-16 (segunda ronda) — pendientes técnicos y commits de frontend/admin
 
 - R-1 (comentarios denunciados), R-2/R-4 (OTLP en events y notification), R-3 (usuarios de RabbitMQ por servicio aplicados al stack real), R-8 (`/mcp` por Traefik) y M-4 (`frameScores` en moderación de video) cerrados; frontend y admin commiteados y sincronizados con los contratos.
