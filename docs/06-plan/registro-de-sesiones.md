@@ -996,6 +996,18 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 **Pendiente P1:** A-1 (UC-05 publicar real), A-4 (cola offline T7/T8), A-5 (UC-14 escáner), A-9 (pruebas Jest/RNTL + Maestro), A-10 (PWA/Workbox).
 **Pendiente P2/P3:** B-5/B-8…B-14, A-11…A-16, C-7/C-8 (el CLI `i18n-check` solo acepta un `--src`; la app tiene `src/`+`app/`)/C-9.
 
+---
+
+### 2026-10-15 — App Expo: pruebas (A-9, parcial) y revisión del backend
+
+**Agente:** OpenCode · **Repos:** `bandadau-frontend`, `bandadau-docs`.
+
+**Hecho:**
+- **A-9 (parcial):** pruebas Jest con `jest-expo` + RNTL: `http` (Authorization/Accept-Language/client/Idempotency-Key), `ApiError`, `media-ratio` (**17 pruebas**). Arreglado el `transformIgnorePatterns` para el layout de **pnpm** (`.pnpm`) y `types: [jest, react]` en `tsconfig` (`bandadau-frontend@54ca556`).
+- **Revisión del backend** (`bandadau-backend`, `main`): ✅ existen `follows` (PUT/DELETE/suggestions), `reports`, reacciones, `registrations/me` y `cancelRegistration`; ❌ **no** existe `listUserPosts` (`GET /profiles/{userId}/posts`) → por eso la grilla del perfil da 404. Ya está en el contrato (C-3); **falta implementarlo en `social-service`**.
+
+**Pendiente A-9:** pruebas de componentes (RNTL, requiere config del `QueryClient` en Jest), flujos **Maestro** (uc02/uc05/uc12/uc14) y **Playwright** (PWA).
+
 ### 2026-10-16 (segunda ronda) — pendientes técnicos y commits de frontend/admin
 
 - R-1 (comentarios denunciados), R-2/R-4 (OTLP en events y notification), R-3 (usuarios de RabbitMQ por servicio aplicados al stack real), R-8 (`/mcp` por Traefik) y M-4 (`frameScores` en moderación de video) cerrados; frontend y admin commiteados y sincronizados con los contratos.
