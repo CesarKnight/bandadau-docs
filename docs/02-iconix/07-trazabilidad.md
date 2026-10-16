@@ -14,6 +14,10 @@ en estado distinto de **V**.
 | **I** | Implementado en todos los componentes listados (pruebas unitarias e integración verdes). En la fase 1 «todos los componentes» excluye la app Expo (a cargo del equipo) y los componentes de fase 2 (ML, insights, n8n) |
 | **V** | Verificado: pruebas de aceptación del UC verdes en CI y demostrado en la DR |
 
+> **Nota (2026-10-15):** la app Expo se está integrando contra el backend real; el estado por UC en el cliente y el plan
+> están en [auditoria-app-expo.md](../06-plan/auditoria-app-expo.md). Ningún RF pasa a **V** desde la app hasta que sus
+> pruebas de aceptación estén verdes.
+
 - Todos los operationId, tipos de evento, campos GraphQL y herramientas MCP citados existen en
   `bandadau-docs/contracts/` (verificado el 2026-10-14 contra `openapi/*.yaml`, `asyncapi/bandada-events.yaml`,
   `graphql/admin.graphql` y `mcp/tools.md`).

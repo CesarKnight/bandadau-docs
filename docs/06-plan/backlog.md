@@ -10,6 +10,8 @@ caso de uso (`bandadau-docs/docs/02-iconix/03-casos-de-uso/00-catalogo.md`) y a 
 - **Release / sprint**: según `roadmap-y-sprints.md`.
 - **Prioridad**: la del UC (Must salvo indicación).
 - Una HU no se toma si su UC no está en estado **Secuencia** (regla ICONIX).
+- **App Expo (fase 1, a cargo del equipo):** el plan A-1…A-16 / B-1…B-14 / C-1…C-9 está en
+  [`auditoria-app-expo.md`](auditoria-app-expo.md).
 - Criterios de aceptación breves; el detalle Given/When/Then vive en la sección 5 del UC.
 
 ## Resumen por épica

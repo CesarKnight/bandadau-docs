@@ -54,6 +54,7 @@ en `bandadau-docs`. Prioridad: **A** = antes de la entrega (10-nov), **B** = si 
 | E-3 | `app.bandada.localhost` | Probar con `make up` cuando la app exista (cookie `bandada_rt` con `X-Bandada-Client: web`, CORS con credenciales) | A |
 
 > **Auditoría 2026-10-15:** el estado real de E-1…E-3 y el plan de ajustes (A-n hacer, B-n cambiar, C-n actualizar) están en [auditoria-app-expo.md](auditoria-app-expo.md).
+> **Mapeo:** E-1 → A-1/A-2/A-4/A-5/A-8/A-9/A-10 y B-1…B-14; E-2/E-3 → C-9 y R-13 (fuera de esta ronda).
 > Bloqueante: `Authorization` no se envía y los mocks están activos por defecto (B-1, B-3).
 
 ## 5. Fase 2 (sin código)

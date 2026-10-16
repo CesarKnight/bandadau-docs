@@ -78,6 +78,8 @@ está documentado y es trazable a su caso de uso ICONIX.
 - [ ] Solo tokens semánticos de `@bandada/ui-tokens` (sin hex ni paleta cruda); funciona y se revisó en **modo claro y oscuro**.
 - [ ] Sin texto literal: claves en `locales/{es,en}/<namespace>.json` (ICU), `i18n:check` en verde; revisada en `es` y `en`.
 - [ ] Datos vía TanStack Query (query keys centralizadas); mutaciones con `Idempotency-Key` estable por intención.
+- [ ] Reintentos reutilizan la **misma** `Idempotency-Key` (no se regenera por intento); `clientId` UUIDv7 en creadoras.
+- [ ] Build de producción con **mocks desactivados** (`EXPO_PUBLIC_USE_MOCKS` ausente o `false`); `src/mocks` fuera del bundle.
 - [ ] Errores mapeados por `code`; estados de carga, vacío y error con reintento.
 - [ ] Accesibilidad: etiquetas, roles, foco, objetivos ≥ 44 px, contraste (axe sin violaciones serias).
 - [ ] Responsive (320–1440 px en web; teléfonos pequeños y tablet en nativo).
