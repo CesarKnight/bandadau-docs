@@ -1189,3 +1189,12 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 - **Preguntas del agente:** MCP pasa de 14 a 20 herramientas (`get_user_stats`, `get_wallet_overview`, `get_ticket_stats`, `get_content_rankings`, `get_event_ranking`, `calculate`; contrato 1.3.0), modo Q&A con respuesta directa en la primera línea, verificador de cifras rediseñado (regeneración silenciosa → borrador determinista), catálogo por temas en el panel y `make qa` (batería de 51 preguntas es/en). Medido: antes 17–67 s y 10–20 mil tokens por pregunta; ahora p50 7,2 s / p95 14,3 s y p50 ≈ 4,7 mil tokens (objetivo 4 mil: no cumplido en modo agente; el modo híbrido sí, a costa de más respaldos deterministas).
 - **Abiertos:** audio del reporte (T11) apagado (`TTS_PROVIDER=none`; opciones: Piper local o voz del navegador); probar el dictado con micrófono real; `/internal/v1/stats/tickets` recorre ≤ 20 000 tickets (`truncated`); registrar ADR-0022 en `adr/README.md` (archivo con cambios de otra sesión); DLQ de notification con 2 mensajes por pruebas.
 
+
+### 2026-10-19 — Investigación de verificación/correo institucional y seed UAGRM
+
+**Agente:** Claude Code · **Repos:** `bandadau-docs` (ADR-0023), `bandadau-infra` (seed).
+
+- **Investigación:** registro y verificación (UC-01) viven en `identity-service` (`RegisterUserService`, `InstitutionalEmailPolicy`, `VerifyEmailService`); la «verificación de 2 pasos» es el código de 6 dígitos por correo, no TOTP. No hay sistema de feature flags en backend.
+- **ADR-0023 (Propuesta):** dos flags (`registration.requireInstitutionalEmail`, `registration.requireEmailVerification`) administrables desde una pestaña «Configuración» del panel. **No implementado**; decisiones abiertas: `universityId` opcional y publicación de `user.registered` sin verificación.
+- **Seed:** universidad `UAGRM` (`uagrm.edu.bo`) y usuarios `jorge.carvajal@`, `cesar.caballero@`, `diego.yebara@uagrm.edu.bo` (rol STUDENT, clave de demo) con perfil. Se hizo en `seed/` (por API, verifica el correo vía Mailpit y deja que `social` cree el perfil) y no como migración Flyway, que dejaría usuarios sin perfil ni eventos y metería credenciales en el esquema.
+- **Pendiente:** registrar ADR-0023 en `adr/README.md` (archivo con cambios de otra sesión sin commitear); ejecutar `make seed` para validar.
