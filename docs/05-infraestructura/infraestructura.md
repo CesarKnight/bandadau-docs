@@ -486,6 +486,9 @@ Los workflows reales viven en el `.github/workflows/` **de cada repositorio** (G
 > sección describen el diseño objetivo, que partirá del `docker-compose.yaml` actual. Al llevarlo a AWS hay que verificar la imagen de MongoDB (local fijada a `8.0.19`, SERVER-121912),
 > la de MinIO (solo local) y la versión de PostgreSQL disponible en RDS.
 
+> **Multi-nube (ADR-0024, 2026-10-29).** Los servicios de la SAGA ya no van todos en el EC2: `events-service` corre en Azure y `wallet-service` en GCP; los datos siguen en AWS.
+> El diagrama de §4.1 y las decisiones de §4.2–§4.5 describen el **entorno AWS base**; lo que cambia está en **§4.6**.
+
 ### 4.1 Diagrama de despliegue
 
 ```mermaid
@@ -636,6 +639,65 @@ on-demand (≈ USD 35 esa semana).
 4. Migraciones: Spring (Flyway) y Laravel (`php artisan migrate --force`) corren al arrancar el
    contenedor; las migraciones deben ser **compatibles hacia atrás** (expand/contract) porque el
    *rollback* no las revierte.
+
+### 4.6 Multi-nube de la SAGA (ADR-0024)
+
+> **Estado: diseño aceptado, no implementado.** Cumple la condición C6 de `cumplimiento-catedra.md`. Procedimiento paso a paso: `guia-despliegue.md`.
+
+```mermaid
+flowchart TB
+    CF["CloudFront + Route 53"]
+    subgraph AWS["AWS us-east-1"]
+        EC2["EC2: Traefik · ticketing-service<br/>identity · social · media · notification · admin-gateway<br/>RabbitMQ (AMQPS 5671) · Mongo · n8n"]
+        RDS[("RDS PostgreSQL<br/>identity_db · events_db · wallet_db")]
+        DDB[("DynamoDB")]
+        S3[("S3")]
+    end
+    subgraph AZ["Azure: VM con Compose"]
+        PX1["proxy TLS<br/>events-origin"]
+        EV["events-service (Java)<br/>orquestador SAGA"]
+    end
+    subgraph GC["GCP: VM con Compose"]
+        PX2["proxy TLS<br/>wallet-origin"]
+        WA["wallet-service + worker + relay (PHP)"]
+    end
+    CF --> EC2
+    EC2 -->|"HTTPS /api/v1/events, /registrations"| PX1 --> EV
+    EC2 -->|"HTTPS /api/v1/wallet"| PX2 --> WA
+    EV <-->|"AMQPS"| EC2
+    WA <-->|"AMQPS"| EC2
+    EV -->|"5432 TLS (lista de IP)"| RDS
+    WA -->|"5432 TLS (lista de IP)"| RDS
+    EV & WA -->|"IAM propio"| DDB
+    EV -->|"JWKS · token de servicio · portada"| EC2
+    WA -->|"JWKS"| EC2
+    EC2 -->|"ticketing → events (REST)"| PX1
+```
+
+**Qué cambia respecto de §4.1–§4.5**
+
+| Tema | Antes (ADR-0012) | Ahora (ADR-0024) |
+|---|---|---|
+| Cómputo | Los 9 servicios en el EC2 | `events-service` en una VM de Azure y `wallet-service` (+ worker y relay) en una VM de GCP; el EC2 conserva el resto (≈ 1.3 GB de RAM libres: evaluar `t3.large`) |
+| RDS | Subred privada, `sg-db` solo desde `sg-host` | Subred pública con `PubliclyAccessible`, `sslmode=require`, `sg-db` :5432 solo desde las IP del EC2, la VM de Azure y la VM de GCP |
+| RabbitMQ | Solo red Docker | Además AMQPS :5671 con TLS; `sg-host` lo abre solo a las IP de Azure y GCP. Se conservan los usuarios por servicio |
+| DynamoDB | Rol IAM del EC2 | Rol IAM del EC2 + un usuario IAM por nube remota con `LeadingKeys` del prefijo del servicio (`events#`, `wallet#`) sobre `bandada-idempotency` |
+| Traefik | Todos los upstreams en la red Docker | Upstreams HTTPS a `events-origin.<BASE_DOMAIN>` y `wallet-origin.<BASE_DOMAIN>` (proxy TLS en cada VM, solo acepta la IP elástica de AWS + `X-Origin-Verify`) |
+| `/internal/**` | Solo red Docker | Sigue 403 en el borde público; el proxy remoto lo admite solo desde la IP de AWS y con JWT `typ=service` |
+| Imágenes | ECR | `events` y `wallet` en GHCR; el resto en ECR |
+| Despliegue | SSM | SSM (AWS) + SSH desde GitHub Actions (Azure, GCP) |
+| Secretos | SSM Parameter Store | SSM en AWS; archivo `.env` `chmod 600` en cada VM remota |
+
+**Dependencias REST que cruzan nubes** (cada una es una variable de entorno): `events → identity` y `wallet → identity` solo por **JWKS** público (`JWKS_URL`),
+`ticketing → events` (`EVENTS_SERVICE_URL`) y `admin-gateway`/`insights`/`n8n → events`/`wallet` (`*_SERVICE_URL`, `*_INTERNAL_URL`). `events → media`
+(`COVER_CHECK`) requeriría el token de servicio, bloqueado en el borde público: en la demo `COVER_CHECK=off` en la VM de Azure.
+
+**IP fijas.** Las tres VMs necesitan IP pública estática (EIP en AWS, IP reservada en GCP, IP pública estática en Azure) porque RDS y RabbitMQ filtran por IP origen.
+
+**Costo (orientativo, verificar en las calculadoras y con créditos gratuitos de cada nube).** Dos VMs pequeñas adicionales: Azure ≥ 2 GB de RAM (la JVM de events usa hasta 512 MB) y GCP ≥ 2 GB
+(web + worker + relay, 3 × 256 MB). Se compensa en parte bajando el EC2. Con apagado programado en las tres nubes se mantiene la recomendación de §4.4; sin él, el presupuesto de RNF-18 no se cumple.
+
+**Plan B** (si la cátedra exige que los datos también estén en la nube del servicio): un Postgres en contenedor por VM remota (`events_db` en Azure, `wallet_db` en GCP) con `pg_dump` diario a un bucket. No se adopta por costo y por tiempo.
 
 ---
 

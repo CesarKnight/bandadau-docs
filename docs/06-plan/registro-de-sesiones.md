@@ -1198,3 +1198,17 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 - **ADR-0023 (Propuesta):** dos flags (`registration.requireInstitutionalEmail`, `registration.requireEmailVerification`) administrables desde una pestaña «Configuración» del panel. **No implementado**; decisiones abiertas: `universityId` opcional y publicación de `user.registered` sin verificación.
 - **Seed:** universidad `UAGRM` (`uagrm.edu.bo`) y usuarios `jorge.carvajal@`, `cesar.caballero@`, `diego.yebara@uagrm.edu.bo` (rol STUDENT, clave de demo) con perfil. Se hizo en `seed/` (por API, verifica el correo vía Mailpit y deja que `social` cree el perfil) y no como migración Flyway, que dejaría usuarios sin perfil ni eventos y metería credenciales en el esquema.
 - **Pendiente:** registrar ADR-0023 en `adr/README.md` (archivo con cambios de otra sesión sin commitear); ejecutar `make seed` para validar.
+
+### 2026-10-29 — Regla multi-nube de la cátedra (ADR-0024) y guías de despliegue / levantamiento local
+
+**Agente:** Claude Code · **Repo:** `bandadau-docs` (solo documentación; sin código ni infraestructura).
+
+- **Regla nueva de la cátedra:** microservicios en instancias de proveedores distintos (AWS, GCP, Azure; un cuarto va en AWS). Decisión del equipo: se demuestra con los 3 servicios de la SAGA.
+- **ADR-0024 (Aceptada, diseño):** `events-service` en Azure, `wallet-service` (+ worker y relay) en GCP, `ticketing-service` y el resto en AWS; **todos los datos en AWS** (RDS accesible por lista de IP, DynamoDB con usuarios IAM por nube,
+  RabbitMQ por AMQPS 5671). ADR-0012 queda parcialmente reemplazada. Catálogo de servicios **sin cambios**. Nueva condición C6 en `cumplimiento-catedra.md`.
+- **Hallazgos al revisar el Compose:** events y wallet dependen de DynamoDB (tabla de idempotencia); `/api/v1/auth/service-token` y `/internal/**` están bloqueados en el borde público, por lo que `events → media` (`COVER_CHECK`) no
+  funcionaría entre nubes: en la demo `COVER_CHECK=off`; `ticketing → events` (REST) y las llamadas internas del panel cruzan nubes por `*-origin`.
+- **Docs nuevos:** `05-infraestructura/guia-despliegue.md` (procedimiento manual) y `guia-levantamiento-local.md`; `infraestructura.md` §4.6.
+- **No verificado:** nada de la multi-nube se ha ejecutado. Supuestos a comprobar en la primera prueba (marcados ⚠ en la guía): soporte `amqps://` en los clientes de events (Spring) y wallet (php-amqplib), prefijo real de `bandada-idempotency`
+  por servicio, perfil Spring de producción, versión de PostgreSQL en RDS, sintaxis del Caddyfile y latencia de la SAGA entre nubes. El supuesto "los datos pueden estar solo en AWS" se basa en la lectura de la regla por el equipo; confirmarlo con la cátedra (plan B en ADR-0024).
+- **Abierto:** `adr/README.md` no lista ADR-0022 ni ADR-0023 (no se tocaron); crear `bandadau-infra/aws/` y los *override* de producción cuando se implemente.

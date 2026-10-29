@@ -30,3 +30,4 @@ Reglas:
 | [ADR-0017](ADR-0017-multi-repo-por-capa.md) | Repositorios por capa (estilo Homy) | Aceptada | 2026-10-14 | Arquitectura §6, convenciones §3 |
 | [ADR-0018](ADR-0018-decisiones-implementacion-fase-1.md) | Decisiones de implementación de la fase 1 | Aceptada | 2026-10-15 | ADR-0016, ADR-0017; catálogo §3 |
 | [ADR-0019](ADR-0019-rate-limit-distribuido-en-postgres.md) | Rate limit distribuido de identity en PostgreSQL (Redis diferido) | Aceptada | 2026-10-15 | D-16, ADR-0012 |
+| [ADR-0024](ADR-0024-saga-multinube-aws-gcp-azure.md) | Despliegue multi-nube de los servicios de la SAGA (events en Azure, wallet en GCP, ticketing y datos en AWS) | Aceptada (diseño) | 2026-10-29 | ADR-0012 (parcial), C1, infraestructura §4.6 |

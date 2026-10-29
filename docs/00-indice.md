@@ -67,7 +67,7 @@ algo lo contradice, se corrige el otro documento o se escribe un ADR.
 | [mcp.md](03-arquitectura/mcp.md) | Servidor MCP, auth, herramientas, clientes |
 | [automatizacion-n8n.md](03-arquitectura/automatizacion-n8n.md) | Router + workflows wf-01…wf-06 |
 | [observabilidad.md](03-arquitectura/observabilidad.md) | OpenTelemetry, métricas, dashboards, alertas |
-| [adr/](03-arquitectura/adr/README.md) | ADR-0001…ADR-0017 (ADR-0001 reemplazada por ADR-0017) |
+| [adr/](03-arquitectura/adr/README.md) | ADR-0001…ADR-0024 (ADR-0001 reemplazada por ADR-0017; ADR-0012 parcialmente por ADR-0024) |
 
 ## 04 · Patrones y reglas
 
@@ -86,8 +86,10 @@ algo lo contradice, se corrige el otro documento o se escribe un ADR.
 
 ## 05 · Infraestructura
 
-[infraestructura.md](05-infraestructura/infraestructura.md) (local con Compose + Traefik, AWS, CI/CD) ·
-[entornos-y-variables.md](05-infraestructura/entornos-y-variables.md) (variables por componente, secretos).
+[infraestructura.md](05-infraestructura/infraestructura.md) (local con Compose + Traefik, AWS, multi-nube §4.6, CI/CD) ·
+[entornos-y-variables.md](05-infraestructura/entornos-y-variables.md) (variables por componente, secretos) ·
+[guia-levantamiento-local.md](05-infraestructura/guia-levantamiento-local.md) (cómo correr el proyecto en tu máquina) ·
+[guia-despliegue.md](05-infraestructura/guia-despliegue.md) (despliegue manual AWS + GCP + Azure, ADR-0024).
 
 ## 06 · Plan
 

@@ -1,6 +1,6 @@
 # ADR-0012 — Infraestructura AWS: un EC2 con Docker Compose + servicios gestionados
 
-- **Estado:** Aceptada
+- **Estado:** Aceptada — **parcialmente reemplazada por [ADR-0024](ADR-0024-saga-multinube-aws-gcp-azure.md)** (`events-service` pasa a Azure y `wallet-service` a GCP; RDS pasa a ser accesible por lista de IP)
 - **Fecha:** 2026-10-14
 - **Decisores:** Equipo Grupo 24 (Ing. Software II)
 
