@@ -26,7 +26,8 @@ var EA_TYPE_BY_KIND = {
   node: "Node",
   state: "State",
   initial: "StateNode",
-  final: "StateNode"
+  final: "StateNode",
+  note: "Note"
 };
 
 var DIAGRAM_TYPE = {
@@ -111,6 +112,12 @@ function addMethods(el, ops) {
 // Posicion de cada nodo segun el tipo de diagrama.
 function layoutNodes(d) {
   var i, n, col, row, cols = {}, counters = {}, x, y, w, h, k;
+  var lifeIdx = 0, lifelines = 0;
+  for (i = 0; i < d.nodes.length; i++) {
+    if (d.nodes[i].kind != "note") {
+      lifelines++;
+    }
+  }
   var colX = { actor: 20, boundary: 220, control: 460, entity: 700 };
   for (i = 0; i < d.nodes.length; i++) {
     n = d.nodes[i];
@@ -138,7 +145,18 @@ function layoutNodes(d) {
         w = 190;
       }
     } else if (d.type == "seq") {
-      x = 20 + i * 150;
+      if (n.kind == "note") {
+        counters.note = (counters.note || 0) + 1;
+        x = 20 + (d.nodes.length - counters.note) * 0;
+        x = 20 + lifelines * 150 + 40;
+        y = 20 + (counters.note - 1) * 90;
+        w = 200;
+        h = 70;
+        n.pos = "l=" + x + ";r=" + (x + w) + ";t=-" + y + ";b=-" + (y + h) + ";";
+        continue;
+      }
+      lifeIdx++;
+      x = 20 + (lifeIdx - 1) * 150;
       y = 20;
       w = 130;
       h = 60 + 28 * (d.edges.length + 1);

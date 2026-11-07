@@ -20,8 +20,9 @@ Node, Mermaid ni nada más, solo los archivos de `scripts/`.
 | `04-secuencia.js` | 54 | Diagramas de secuencia de los 24 UC |
 | `05-arquitectura-y-despliegue.js` | 4 | Vista de contenedores, mapa de contextos DDD, despliegue local (Docker Compose) y despliegue en la nube (AWS, Azure y GCP con Tailscale) |
 | `06-saga.js` | 7 | SAGA de inscripción: secuencia del camino feliz y del fallo con compensación, y máquinas de estado de `SagaInstance` (REGISTRATION y CANCELLATION) y `Registration` (versión del documento de la SAGA y versión detallada de UC-12 con el estado compuesto `COMPENSATING`) |
+| `07-otros-diagramas.js` | 44 | Todo lo demás de `docs/`: flujos de arquitectura, automatización n8n, pipeline de ML, IA local, seguridad, CI, estados (media, idempotencia, llaves, tema, cola offline), clases de patrones (DDD, hexagonal, clean) y secuencias restantes |
 
-Cada script crea **un paquete raíz propio** (por ejemplo «Bandada U - 03 Robustez») bajo el primer
+En total son **146 diagramas** en 7 scripts. Cada script crea **un paquete raíz propio** (por ejemplo «Bandada U - 03 Robustez») bajo el primer
 modelo del proyecto, con un subpaquete por UC o servicio. Si ese paquete ya existe, el script se
 detiene sin tocar nada: bórralo antes de volver a ejecutarlo.
 
@@ -46,6 +47,7 @@ Tardan entre unos segundos y un par de minutos cada uno. No cierres EA mientras 
 | `«boundary» …`, `«control» …`, `«entity» …` | Elementos **Boundary**, **Control**, **Entity** en un diagrama **Analysis** |
 | `participant X as Y` | Elemento **Object** (línea de vida) |
 | `A->>B: texto` / `A-->>B: texto` | Conector **Sequence** con `SequenceNo` correlativo. Los retornos llevan el prefijo `(retorno)` |
+| `Note over X: texto` (secuencia) y `note right of X` (estados) | Elemento **Note** con conector **NoteLink** al participante o estado |
 | `alt`/`opt`/`loop`/`par` | Se antepone `[alt …]`, `[loop …]` al texto del mensaje (no se crean fragmentos) |
 | `stateDiagram-v2`: `[*]`, estados y transiciones | Diagrama **Statechart**: **StateNode** inicial/final, **State** y conectores **StateFlow**; un `state X { … }` es un estado compuesto con sus subestados (`ParentID`) |
 | Subgrafo en arquitectura / despliegue | Elemento **Boundary** (contenedores) o **Node** (despliegue), con los componentes dibujados dentro |
@@ -56,8 +58,9 @@ Tardan entre unos segundos y un par de minutos cada uno. No cierres EA mientras 
 
 ## Limitaciones conocidas
 
-- **No se importan** las notas (`Note over …`), los fragmentos combinados reales de secuencia, los
-  los diagramas de estados que no son de la SAGA (media, idempotencia, rotación de llaves, tema, cola offline), las notas de los estados, el Gantt ni los demás `flowchart` de `docs/03-arquitectura` (solo se importan los cuatro de arquitectura y despliegue).
+- **No se importan** los fragmentos combinados reales de secuencia (`alt`, `opt`, `loop`, `par`; quedan
+  como prefijo del mensaje) ni el diagrama de **Gantt** de `docs/06-plan/roadmap-y-sprints.md`, que EA no
+  modela como diagrama. Todo lo demás que hay en Mermaid en `docs/` sí se importa.
 - Las relaciones entre casos de uso (`include`/`extend` de la sección «Relaciones entre casos de uso» del
   catálogo) no están en el Mermaid original, así que no se crean.
 - **Disposición:** robustez usa columnas fijas (actores, boundary, control, entity); casos de uso y clases

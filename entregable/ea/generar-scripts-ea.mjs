@@ -11,6 +11,7 @@ const DOCS = join(HERE, '..', '..', 'docs');
 const OUT = join(HERE, 'scripts');
 const runtime = readFileSync(join(HERE, 'runtime.js'), 'utf8');
 const issues = [];
+const used = new Set();
 
 // ------------------------------------------------------------------ utilidades
 const clean = (s) =>
@@ -100,8 +101,8 @@ function parseFlowchart(code, where) {
       idStack.pop();
       continue;
     }
-    if (/(<-->|-->|-\.[^.>]*\.->|-\.->|==>|---)/.test(line)) {
-      const parts = line.split(/\s*(<-->|-->|-\.[^.>]*\.->|-\.->|==>|---)\s*(?:\|([^|]*)\|\s*)?/);
+    if (/(<-->|-->|-\.[^.>]*\.->|-\.->|==>|---|-\.[^.>]*\.-)/.test(line)) {
+      const parts = line.split(/\s*(<-->|--\s+(?:\"[^\"]*\"|[^\s\"][^>]*?)\s+-->|-->|-\.[^.>]*\.->|-\.->|==>|---|-\.[^.>]*\.-)\s*(?:\|([^|]*)\|\s*)?/);
       // parts: [ep0, arrow1, label1, ep1, arrow2, label2, ep2...]
       const groupsOfEp = [];
       for (let i = 0; i < parts.length; i += 3) {
@@ -115,8 +116,9 @@ function parseFlowchart(code, where) {
       }
       for (let i = 0; i + 1 < groupsOfEp.length; i++) {
         const arrow = parts[3 * i + 1];
-        const dotted = arrow.match(/^-\.(.+)\.->$/);
-        const label = clean(parts[3 * i + 2] || (dotted ? dotted[1] : ''));
+        const dotted = arrow.match(/^-\.(.+)\.-+>?$/);
+        const dashed = arrow.match(/^--\s+(.+?)\s+-->$/);
+        const label = clean(parts[3 * i + 2] || (dotted ? dotted[1] : '') || (dashed ? dashed[1] : ''));
         for (const a of groupsOfEp[i])
           for (const b of groupsOfEp[i + 1]) edges.push({ from: a.id, to: b.id, label, both: arrow === '<-->', dashed: arrow.startsWith('-.') });
       }
@@ -180,6 +182,7 @@ function sequenceDiagram(code, where, title, path) {
     return n;
   };
   let seq = 0;
+  let noteN = 0;
   for (const raw of code.split('\n').slice(1)) {
     const line = raw.trim();
     if (!line || line.startsWith('%%') || /^(autonumber|activate|deactivate)\b/.test(line)) continue;
@@ -205,7 +208,14 @@ function sequenceDiagram(code, where, title, path) {
       frames.pop();
       continue;
     }
-    if (/^Note\b/i.test(line)) continue; // las notas no se importan
+    m = line.match(/^Note\s+(?:over|left of|right of)\s+([\w, ]+?)\s*:\s*(.*)$/i);
+    if (m) {
+      const nid = `note:${++noteN}`;
+      nodes.push({ id: nid, kind: 'note', name: '', notes: clean(m[2]) });
+      const target = m[1].split(',')[0].trim();
+      if (byId.has(target)) edges.push({ from: nid, to: target, type: 'NoteLink' });
+      continue;
+    }
     m = line.match(ARROW);
     if (m) {
       ensure(m[1]);
@@ -434,15 +444,24 @@ function stateDiagram(code, where, title, path) {
     return mk(id, role === 'init' ? { kind: 'initial', name: '', w: 30, h: 30 } : { kind: 'final', name: '', w: 30, h: 30 }).id;
   };
   let inNote = false;
+  let noteFor = null;
   for (const raw of code.split('\n').slice(1)) {
     const line = raw.trim();
-    if (!line || line.startsWith('%%') || /^direction/.test(line)) continue;
+    if (!line || line.startsWith('%%') || /^direction\b/.test(line)) continue;
     if (inNote) {
-      if (/^end note/.test(line)) inNote = false;
+      if (/^end note\b/.test(line)) inNote = false;
+      else noteFor.notes = (noteFor.notes ? noteFor.notes + ' ' : '') + clean(line);
       continue;
     }
-    if (/^note/.test(line)) {
-      if (!line.includes(':')) inNote = true;
+    if (/^note\b/.test(line)) {
+      const nm = line.match(/^note\s+(?:left of|right of|over)\s+(\w+)\s*(?::\s*(.*))?$/);
+      if (nm) {
+        const nid = `note:${items.size}`;
+        const target = mk(nm[1]).id;
+        noteFor = mk(nid, { kind: 'note', name: '', w: 170, h: 70, notes: nm[2] ? clean(nm[2]) : '' });
+        edges.push({ from: nid, to: target, type: 'NoteLink' });
+        if (!nm[2]) inNote = true;
+      }
       continue;
     }
     let m = line.match(/^state\s+(\w+)\s*\{$/);
@@ -475,6 +494,7 @@ function stateDiagram(code, where, title, path) {
   const nodes = ordered.map((it) => {
     const n = { id: it.id, kind: it.kind, name: it.name, pos: posOf(it) };
     if (it.parent && items.get(it.parent)) n.parent = it.parent;
+    if (it.notes) n.notes = it.notes;
     return n;
   });
   return { type: 'state', title, path, nodes, edges };
@@ -491,11 +511,11 @@ function archDiagram(code, where, title, path, mode) {
     items.set('g:' + gd.id, { id: 'g:' + gd.id, kind: groupKind, name: gd.name, stereo: mode === 'despliegue' ? 'execution environment' : 'subsystem', parent: gd.parent ? 'g:' + gd.parent : '', isGroup: true, children: [] });
   }
   for (const n of g.nodes) {
-    if (!n.label) continue;
-    const lines = (n.raw || n.label).split(/<br\s*\/?>/i).map((x) => x.replace(/^["']|["']$/g, '').trim()).filter(Boolean);
+    const lines = (n.raw || n.label || n.id).split(/<br\s*\/?>/i).map((x) => x.replace(/^["']|["']$/g, '').trim()).filter(Boolean);
     const it = { id: n.id, kind: 'component', name: lines[0], notes: lines.slice(1).join('\n') || undefined, parent: n.groupId ? 'g:' + n.groupId : '', children: [] };
     if (n.shape === 'cyl') it.stereo = 'datastore';
     if (n.shape === 'hex') it.stereo = 'message broker';
+    if (n.shape === 'rhombus') it.stereo = 'decision';
     if (mode === 'contextos') it.stereo = 'bounded context';
     items.set(n.id, it);
   }
@@ -530,8 +550,10 @@ const s1 = [];
 {
   const f = join(DOCS, '02-iconix', '03-casos-de-uso', '00-catalogo.md');
   const b = mermaidBlocks(f).find((x) => kindOf(x.code) === 'flowchart');
+  used.add(b.code);
   s1.push(useCaseDiagram(b.code, 'catalogo'));
   const d = mermaidBlocks(join(DOCS, '02-iconix', '02-modelo-dominio.md')).find((x) => kindOf(x.code) === 'classDiagram');
+  used.add(d.code);
   s1.push(classDiagram(d.code, 'modelo-dominio', 'Modelo de dominio (vista global)', ['Modelo de dominio']));
 }
 
@@ -543,6 +565,7 @@ const s2 = [];
     const name = f.replace(/\.md$/, '');
     for (const b of mermaidBlocks(join(dir, f))) {
       if (kindOf(b.code) !== 'classDiagram' || !/^1\./.test(b.heading)) continue;
+      used.add(b.code);
       s2.push(classDiagram(b.code, `estatico/${name}`, `Clases de diseno - ${name}`, [name]));
     }
   }
@@ -560,9 +583,11 @@ for (const f of ucFiles) {
   for (const b of mermaidBlocks(join(DOCS, '02-iconix', '03-casos-de-uso', f))) {
     const k = kindOf(b.code);
     if (k === 'flowchart' && /robustez/i.test(b.section)) {
+      used.add(b.code);
       const sub = /robustez/i.test(b.heading) ? '' : ' - ' + clean(b.heading.replace(/^\d+(\.\d+)*\s*/, ''));
       s3.push(robustnessDiagram(b.code, `${id}/robustez`, `${id} Robustez - ${clean(ucTitle)}${sub}`, [pkg]));
     } else if (k === 'sequenceDiagram') {
+      used.add(b.code);
       const sub = b.heading.replace(/^\d+(\.\d+)*\s*/, '');
       s4.push(sequenceDiagram(b.code, `${id}/secuencia`, `${id} Secuencia - ${clean(sub)}`, [pkg]));
     }
@@ -579,6 +604,7 @@ const s5 = [];
     if (!m) throw new Error(`sección no encontrada: ${file} ${sectionRe}`);
     const rest = text.slice(m.index);
     const blocks = [...rest.matchAll(/```mermaid\n([\s\S]*?)```/g)].filter((b) => kindOf(b[1]) === 'flowchart');
+    used.add(blocks[n][1]);
     return blocks[n][1];
   };
   s5.push(archDiagram(pick('03-arquitectura/arquitectura-general.md', /^## 2\. Contenedores/m), 'arq/contenedores', 'Vista de contenedores (arquitectura)', ['Arquitectura'], 'contenedores'));
@@ -594,13 +620,49 @@ const s6 = [];
   for (const b of mermaidBlocks(join(DOCS, f))) {
     const k = kindOf(b.code);
     const t = clean(b.heading.replace(/^\d+(\.\d+)*\.?\s*/, '').replace(/`/g, ''));
+    if (k === 'sequenceDiagram' || k === 'stateDiagram-v2') used.add(b.code);
     if (k === 'sequenceDiagram') s6.push(sequenceDiagram(b.code, 'saga/secuencia', `SAGA Secuencia - ${t}`, ['Secuencias']));
     else if (k === 'stateDiagram-v2') s6.push(stateDiagram(b.code, 'saga/estados', `SAGA Estados - ${t}`, ['Estados']));
   }
   for (const b of mermaidBlocks(join(DOCS, '02-iconix', '03-casos-de-uso', 'UC-12-inscribirse-evento.md'))) {
     if (kindOf(b.code) !== 'stateDiagram-v2') continue;
+    used.add(b.code);
     s6.push(stateDiagram(b.code, 'uc12/estados', `UC-12 Estados - ${clean(b.heading.replace(/`/g, ''))}`, ['Estados UC-12']));
   }
+}
+
+// 7) Resto de diagramas de la documentación (los que aún no se usaron)
+const s7 = [];
+{
+  const walkDocs = (dir, out = []) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const f = join(dir, e.name);
+      if (e.isDirectory()) walkDocs(f, out);
+      else if (e.name.endsWith('.md')) out.push(f);
+    }
+    return out;
+  };
+  const skipped = [];
+  for (const f of walkDocs(DOCS).sort()) {
+    const rel = f.slice(DOCS.length + 1);
+    const base = rel.replace(/\.md$/, '').replace(/^.*\//, '');
+    const dir = rel.includes('/') ? rel.split('/')[0] : 'raiz';
+    const pkg = [dir.replace(/^\d+-/, ''), base];
+    for (const b of mermaidBlocks(f)) {
+      if (used.has(b.code)) continue;
+      const k = kindOf(b.code);
+      const t = clean(b.heading.replace(/`/g, '')) || base;
+      const title = `${base} - ${t}`.slice(0, 120);
+      const where = `${rel}`;
+      if (k === 'flowchart' || k === 'graph') s7.push(archDiagram(b.code, where, title, pkg, 'contenedores'));
+      else if (k === 'sequenceDiagram') s7.push(sequenceDiagram(b.code, where, title, pkg));
+      else if (k === 'stateDiagram-v2') s7.push(stateDiagram(b.code, where, title, pkg));
+      else if (k === 'classDiagram') s7.push(classDiagram(b.code, where, title, pkg));
+      else skipped.push(`${rel} (${k}): ${t}`);
+      used.add(b.code);
+    }
+  }
+  skipped.forEach((x) => issues.push(`sin equivalente en EA, omitido: ${x}`));
 }
 
 // ------------------------------------------------------------------ emisión
@@ -615,6 +677,7 @@ const scripts = [
   ['04-secuencia.js', 'Bandada U - 04 Secuencia', s4],
   ['05-arquitectura-y-despliegue.js', 'Bandada U - 05 Arquitectura y despliegue', s5],
   ['06-saga.js', 'Bandada U - 06 SAGA', s6],
+  ['07-otros-diagramas.js', 'Bandada U - 07 Otros diagramas', s7],
 ];
 
 mkdirSync(OUT, { recursive: true });
