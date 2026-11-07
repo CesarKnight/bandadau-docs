@@ -46,6 +46,8 @@ const SHAPES = [
   [/^\[\/"?(.*?)"?\/\]$/, 'para'],
   [/^\(\("?(.*?)"?\)\)$/, 'circle'],
   [/^\[\("?(.*?)"?\)\]$/, 'cyl'],
+  [/^\{\{"?(.*?)"?\}\}$/, 'hex'],
+  [/^\{"?(.*?)"?\}$/, 'rhombus'],
   [/^\["?(.*?)"?\]$/, 'rect'],
 ];
 
@@ -55,7 +57,7 @@ function parseEndpoint(txt) {
   if (!m[2]) return { id: m[1] };
   for (const [re, shape] of SHAPES) {
     const s = m[2].match(re);
-    if (s) return { id: m[1], shape, label: clean(s[1]) };
+    if (s) return { id: m[1], shape, label: clean(s[1]), raw: s[1] };
   }
   return null;
 }
@@ -64,17 +66,20 @@ function parseFlowchart(code, where) {
   const nodes = new Map();
   const edges = [];
   const groups = [];
+  const groupDefs = [];
   const stack = [];
+  const idStack = [];
   const upsert = (ep) => {
     if (!ep) return null;
     let n = nodes.get(ep.id);
     if (!n) {
-      n = { id: ep.id, group: stack.length ? stack[stack.length - 1] : '' };
+      n = { id: ep.id, group: stack.length ? stack[stack.length - 1] : '', groupId: idStack.length ? idStack[idStack.length - 1] : '' };
       nodes.set(ep.id, n);
     }
     if (ep.label) {
       n.shape = ep.shape;
       n.label = ep.label;
+      n.raw = ep.raw;
     }
     return n;
   };
@@ -84,19 +89,22 @@ function parseFlowchart(code, where) {
     const sg = line.match(/^subgraph\s+(\w+)(?:\s*\["?(.*?)"?\])?$/);
     if (sg) {
       const name = clean(sg[2] || sg[1].replace(/_/g, ' '));
+      groupDefs.push({ id: sg[1], name, parent: idStack.length ? idStack[idStack.length - 1] : '' });
       stack.push(name);
+      idStack.push(sg[1]);
       groups.push(name);
       continue;
     }
     if (line === 'end') {
       stack.pop();
+      idStack.pop();
       continue;
     }
-    if (/(-->|-\.->|==>|---|-\.-)/.test(line)) {
-      const parts = line.split(/\s*(?:-->|-\.->|==>|---|-\.-)\s*(?:\|([^|]*)\|\s*)?/);
-      // parts: [ep0, label1, ep1, label2, ep2...]
+    if (/(<-->|-->|-\.[^.>]*\.->|-\.->|==>|---)/.test(line)) {
+      const parts = line.split(/\s*(<-->|-->|-\.[^.>]*\.->|-\.->|==>|---)\s*(?:\|([^|]*)\|\s*)?/);
+      // parts: [ep0, arrow1, label1, ep1, arrow2, label2, ep2...]
       const groupsOfEp = [];
-      for (let i = 0; i < parts.length; i += 2) {
+      for (let i = 0; i < parts.length; i += 3) {
         const eps = parts[i].split(/\s+&\s+/).map(parseEndpoint);
         if (eps.some((e) => !e)) {
           warn(where, line);
@@ -106,8 +114,11 @@ function parseFlowchart(code, where) {
         groupsOfEp.push(eps.map(upsert));
       }
       for (let i = 0; i + 1 < groupsOfEp.length; i++) {
-        const label = clean(parts[2 * i + 1]);
-        for (const a of groupsOfEp[i]) for (const b of groupsOfEp[i + 1]) edges.push({ from: a.id, to: b.id, label });
+        const arrow = parts[3 * i + 1];
+        const dotted = arrow.match(/^-\.(.+)\.->$/);
+        const label = clean(parts[3 * i + 2] || (dotted ? dotted[1] : ''));
+        for (const a of groupsOfEp[i])
+          for (const b of groupsOfEp[i + 1]) edges.push({ from: a.id, to: b.id, label, both: arrow === '<-->', dashed: arrow.startsWith('-.') });
       }
       continue;
     }
@@ -115,7 +126,7 @@ function parseFlowchart(code, where) {
     if (ep && ep.label) upsert(ep);
     else warn(where, line);
   }
-  return { nodes: [...nodes.values()], edges, groups };
+  return { nodes: [...nodes.values()], edges, groups, groupDefs };
 }
 
 function robustnessDiagram(code, where, title, path) {
@@ -334,6 +345,109 @@ function classDiagram(code, where, title, path) {
   return { type: 'class', title, path, nodes, edges };
 }
 
+
+// ------------------------------------------------------------------ arquitectura / despliegue
+// mode 'contenedores' (grupos = Boundary) | 'despliegue' (grupos = Node) | 'contextos'
+function archDiagram(code, where, title, path, mode) {
+  const g = parseFlowchart(code, where);
+  const W = 190, H = 70, GAP = 24, PAD = 24, HEAD = 34;
+  const groupKind = mode === 'despliegue' ? 'node' : 'boundary';
+  const items = new Map(); // id -> {id, kind, name, notes, stereo, children:[], parent}
+  for (const gd of g.groupDefs) {
+    items.set('g:' + gd.id, { id: 'g:' + gd.id, kind: groupKind, name: gd.name, stereo: mode === 'despliegue' ? 'execution environment' : 'subsystem', parent: gd.parent ? 'g:' + gd.parent : '', isGroup: true, children: [] });
+  }
+  for (const n of g.nodes) {
+    if (!n.label) continue;
+    const lines = (n.raw || n.label).split(/<br\s*\/?>/i).map((x) => x.replace(/^["']|["']$/g, '').trim()).filter(Boolean);
+    const it = { id: n.id, kind: 'component', name: lines[0], notes: lines.slice(1).join('\n') || undefined, parent: n.groupId ? 'g:' + n.groupId : '', children: [] };
+    if (n.shape === 'cyl') it.stereo = 'datastore';
+    if (n.shape === 'hex') it.stereo = 'message broker';
+    if (mode === 'contextos') it.stereo = 'bounded context';
+    items.set(n.id, it);
+  }
+  const roots = [];
+  for (const it of items.values()) (it.parent && items.get(it.parent) ? items.get(it.parent).children : roots).push(it);
+  // Tamaño de abajo hacia arriba y posiciones de arriba hacia abajo.
+  const measure = (it) => {
+    if (!it.isGroup) return Object.assign(it, { w: W, h: H });
+    it.children.forEach(measure);
+    const cols = Math.max(1, Math.min(4, Math.ceil(Math.sqrt(it.children.length))));
+    it.cols = cols;
+    const rows = Math.ceil(it.children.length / cols);
+    const colW = [], rowH = [];
+    it.children.forEach((c, i) => {
+      colW[i % cols] = Math.max(colW[i % cols] || 0, c.w);
+      rowH[Math.floor(i / cols)] = Math.max(rowH[Math.floor(i / cols)] || 0, c.h);
+    });
+    it.colW = colW;
+    it.rowH = rowH;
+    it.w = PAD * 2 + colW.reduce((a, b) => a + b, 0) + GAP * (cols - 1);
+    it.h = HEAD + PAD + rowH.reduce((a, b) => a + b, 0) + GAP * (rows - 1);
+    return it;
+  };
+  const place = (it, x, y) => {
+    it.x = x;
+    it.y = y;
+    if (!it.isGroup) return;
+    let cy = y + HEAD;
+    for (let r = 0; r * it.cols < it.children.length; r++) {
+      let cx = x + PAD;
+      for (let c = 0; c < it.cols; c++) {
+        const child = it.children[r * it.cols + c];
+        if (!child) break;
+        place(child, cx, cy);
+        cx += it.colW[c] + GAP;
+      }
+      cy += it.rowH[r] + GAP;
+    }
+  };
+  const top = { isGroup: true, children: roots };
+  roots.forEach(measure);
+  const cols = mode === 'contextos' ? 3 : Math.min(3, Math.max(1, roots.length));
+  const colW = [], rowH = [];
+  roots.forEach((c, i) => {
+    colW[i % cols] = Math.max(colW[i % cols] || 0, c.w);
+    rowH[Math.floor(i / cols)] = Math.max(rowH[Math.floor(i / cols)] || 0, c.h);
+  });
+  let cy = 20;
+  for (let r = 0; r * cols < roots.length; r++) {
+    let cx = 20;
+    for (let c = 0; c < cols; c++) {
+      const it = roots[r * cols + c];
+      if (!it) break;
+      place(it, cx, cy);
+      cx += colW[c] + GAP * 2;
+    }
+    cy += rowH[r] + GAP * 2;
+  }
+  void top;
+  // Los grupos primero (padres antes que hijos) para que queden detrás en el dibujo.
+  const ordered = [];
+  const walk = (list, groupsOnly) => list.forEach((it) => {
+    if (!!it.isGroup === groupsOnly) ordered.push(it);
+    if (it.isGroup) walk(it.children, groupsOnly);
+  });
+  walk(roots, true);
+  walk(roots, false);
+  const nodes = ordered.map((it) => {
+    const n = { id: it.id, kind: it.kind, name: it.name, pos: `l=${it.x};r=${it.x + it.w};t=-${it.y};b=-${it.y + it.h};` };
+    if (it.stereo) n.stereo = it.stereo;
+    if (it.notes) n.notes = it.notes;
+    return n;
+  });
+  const known = new Set(nodes.map((n) => n.id));
+  const edges = g.edges
+    .filter((e) => known.has(e.from) && known.has(e.to))
+    .map((e) => ({
+      from: e.from,
+      to: e.to,
+      type: mode === 'contextos' ? 'Dependency' : 'Association',
+      label: e.label,
+      dir: e.both ? 'Bi-Directional' : 'Source -> Destination',
+    }));
+  return { type: 'arch', title, path, nodes, edges };
+}
+
 // ------------------------------------------------------------------ recolección
 const kindOf = (code) => code.trim().split(/\s/)[0];
 const ucFiles = readdirSync(join(DOCS, '02-iconix', '03-casos-de-uso')).filter((f) => /^UC-\d+/.test(f)).sort();
@@ -382,6 +496,24 @@ for (const f of ucFiles) {
   }
 }
 
+
+// 5) Arquitectura y despliegue
+const s5 = [];
+{
+  const pick = (file, sectionRe, n = 0) => {
+    const text = readFileSync(join(DOCS, file), 'utf8');
+    const m = text.match(sectionRe);
+    if (!m) throw new Error(`sección no encontrada: ${file} ${sectionRe}`);
+    const rest = text.slice(m.index);
+    const blocks = [...rest.matchAll(/```mermaid\n([\s\S]*?)```/g)].filter((b) => kindOf(b[1]) === 'flowchart');
+    return blocks[n][1];
+  };
+  s5.push(archDiagram(pick('03-arquitectura/arquitectura-general.md', /^## 2\. Contenedores/m), 'arq/contenedores', 'Vista de contenedores (arquitectura)', ['Arquitectura'], 'contenedores'));
+  s5.push(archDiagram(pick('03-arquitectura/arquitectura-general.md', /^## 3\. Mapa de contextos/m), 'arq/contextos', 'Mapa de contextos (DDD estrategico)', ['Arquitectura'], 'contextos'));
+  s5.push(archDiagram(pick('05-infraestructura/infraestructura.md', /^### 2\.1 Vista general/m), 'desp/local', 'Despliegue local (Docker Compose)', ['Despliegue'], 'despliegue'));
+  s5.push(archDiagram(pick('05-infraestructura/infraestructura.md', /^### 4\.6 /m), 'desp/nube', 'Despliegue en la nube (AWS + Azure + GCP con Tailscale)', ['Despliegue'], 'despliegue'));
+}
+
 // ------------------------------------------------------------------ emisión
 function toJs(data) {
   return JSON.stringify(data).replace(/[\u007f-￿]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
@@ -392,6 +524,7 @@ const scripts = [
   ['02-modelo-estatico.js', 'Bandada U - 02 Modelo estatico', s2],
   ['03-robustez.js', 'Bandada U - 03 Robustez', s3],
   ['04-secuencia.js', 'Bandada U - 04 Secuencia', s4],
+  ['05-arquitectura-y-despliegue.js', 'Bandada U - 05 Arquitectura y despliegue', s5],
 ];
 
 mkdirSync(OUT, { recursive: true });

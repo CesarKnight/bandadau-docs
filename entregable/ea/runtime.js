@@ -17,11 +17,14 @@ var EA_TYPE_BY_KIND = {
   control: "Control",
   entity: "Entity",
   "class": "Class",
-  object: "Object"
+  object: "Object",
+  component: "Component",
+  node: "Node"
 };
 
 var DIAGRAM_TYPE = {
   usecase: "Use Case",
+  arch: "Component",
   "class": "Class",
   robust: "Analysis",
   seq: "Sequence"
@@ -137,6 +140,9 @@ function layoutNodes(d) {
       w = 190;
       x = 20 + (i % 4) * 240;
       y = 20 + Math.floor(i / 4) * 230;
+    }
+    if (d.type == "arch") {
+      continue;
     }
     n.pos = "l=" + x + ";r=" + (x + w) + ";t=-" + y + ";b=-" + (y + h) + ";";
   }

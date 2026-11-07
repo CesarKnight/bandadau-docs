@@ -18,6 +18,7 @@ Node, Mermaid ni nada más, solo los archivos de `scripts/`.
 | `02-modelo-estatico.js` | 8 | Clases de diseño de cada servicio (identidad, social, media, eventos, billetera, entradas, notificaciones, insights) |
 | `03-robustez.js` | 27 | Diagramas de robustez de los 24 UC (UC-12 tiene 4: curso básico y alternos) con elementos Boundary, Control y Entity |
 | `04-secuencia.js` | 54 | Diagramas de secuencia de los 24 UC |
+| `05-arquitectura-y-despliegue.js` | 4 | Vista de contenedores, mapa de contextos DDD, despliegue local (Docker Compose) y despliegue en la nube (AWS, Azure y GCP con Tailscale) |
 
 Cada script crea **un paquete raíz propio** (por ejemplo «Bandada U - 03 Robustez») bajo el primer
 modelo del proyecto, con un subpaquete por UC o servicio. Si ese paquete ya existe, el script se
@@ -45,6 +46,8 @@ Tardan entre unos segundos y un par de minutos cada uno. No cierres EA mientras 
 | `participant X as Y` | Elemento **Object** (línea de vida) |
 | `A->>B: texto` / `A-->>B: texto` | Conector **Sequence** con `SequenceNo` correlativo. Los retornos llevan el prefijo `(retorno)` |
 | `alt`/`opt`/`loop`/`par` | Se antepone `[alt …]`, `[loop …]` al texto del mensaje (no se crean fragmentos) |
+| Subgrafo en arquitectura / despliegue | Elemento **Boundary** (contenedores) o **Node** (despliegue), con los componentes dibujados dentro |
+| Nodo `["…"]`, `[("…")]`, `{{"…"}}` en arquitectura | **Component** (estereotipo `datastore` para bases y `message broker` para RabbitMQ), con las líneas extra del rótulo en *Notes* |
 | `class X { … }`, `<<AggregateRoot>>` | **Class** con atributos, operaciones y estereotipo |
 | `namespace Y { … }` | Subpaquete `Y` |
 | `<\|--`, `*--`, `o--`, `-->`, `..>`, `..\|>` | Generalization, Association con diamante (compuesta o compartida), Association dirigida, Dependency y Realization |
@@ -52,13 +55,13 @@ Tardan entre unos segundos y un par de minutos cada uno. No cierres EA mientras 
 ## Limitaciones conocidas
 
 - **No se importan** las notas (`Note over …`), los fragmentos combinados reales de secuencia, los
-  diagramas de estados (`stateDiagram-v2`), los diagramas de arquitectura (`flowchart` de
-  `docs/03-arquitectura`) ni el Gantt. Los diagramas de estados de la SAGA están en
+  diagramas de estados (`stateDiagram-v2`), los el Gantt ni los demás `flowchart` de `docs/03-arquitectura` (solo se importan los cuatro de arquitectura y despliegue). Los diagramas de estados de la SAGA están en
   `docs/03-arquitectura/saga-inscripcion-evento.md`.
 - Las relaciones entre casos de uso (`include`/`extend` de la sección «Relaciones entre casos de uso» del
   catálogo) no están en el Mermaid original, así que no se crean.
 - **Disposición:** robustez usa columnas fijas (actores, boundary, control, entity); casos de uso y clases
-  intentan el autoacomodo de EA (`LayoutDiagramEx`) y, si falla, quedan en rejilla. En los
+  intentan el autoacomodo de EA (`LayoutDiagramEx`) y, si falla, quedan en rejilla. En arquitectura y despliegue la
+  disposición es una rejilla anidada calculada por el generador. En los
   diagramas de secuencia el orden de los mensajes sale de `SequenceNo`; **si EA los dibuja
   desordenados, reordénalos con el menú del diagrama (`Sequence > Auto Number` o a mano) y avisa** para
   ajustar el script.
