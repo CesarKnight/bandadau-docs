@@ -51,6 +51,8 @@ Las reglas de negocio son las restricciones del dominio que el sistema debe hace
 
 ### Reglas por caso de uso
 
+Se presentan las reglas de los nueve casos de uso clave; las de los demás están en su especificación (`bandadau-docs/docs/02-iconix/03-casos-de-uso/`).
+
 @@uc section=1 numprefix=2.4 sub="^Reglas de negocio"
 
 ## 2.5. Diagrama UML de casos de uso
@@ -61,6 +63,12 @@ El sistema tiene 24 casos de uso agrupados en siete paquetes (Identidad, Social,
 
 ## 2.6. Especificación de casos de uso
 
-Cada especificación sigue la plantilla ICONIX del proyecto: cabecera con paquete, actores, prioridad, requisitos y servicios involucrados; precondiciones; disparador; curso básico; cursos alternos; postcondiciones y reglas de negocio.
+Los 24 casos de uso se especificaron con la plantilla ICONIX del proyecto (cabecera, precondiciones, disparador, curso básico, cursos alternos, postcondiciones y reglas de negocio). Para mantener el documento legible, se detallan los **nueve casos de uso clave**, que concentran las funcionalidades principales y los requisitos de la cátedra: UC-01 (registrarse), UC-05 (publicar contenido), UC-12 (inscribirse a un evento pagado, la SAGA), UC-13 (cancelar inscripción, compensaciones de la SAGA), UC-14 (validar entrada), UC-15 (recargar créditos), UC-19 (reporte generativo), UC-20 (monitorear la plataforma con un agente) y UC-22 (consulta MCP externa). Los otros 15 se resumen en la tabla 2.6.1 y su especificación completa está en el repositorio `bandadau-docs`.
 
-@@uc section=1 numprefix=2.6 preamble=1
+### 2.6.1. Casos de uso de apoyo (síntesis)
+
+@@uc-others
+
+### 2.6.2. Casos de uso clave (especificación detallada)
+
+@@uc section=1 numprefix=2.6.2 preamble=1

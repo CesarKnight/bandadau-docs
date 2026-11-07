@@ -14,7 +14,7 @@ El plan de pruebas sigue una pirámide: muchas pruebas unitarias rápidas en el 
 
 ## 5.2. Pruebas funcionales
 
-Las pruebas funcionales se derivan directamente de los casos de uso: cada caso de uso tiene su tabla de **pruebas de aceptación** en formato *Given / When / Then*, que cubre el curso básico, los cursos alternos y las reglas de negocio. A continuación se presentan las de los 24 casos de uso.
+Las pruebas funcionales se derivan directamente de los casos de uso: cada caso de uso tiene su tabla de **pruebas de aceptación** en formato *Given / When / Then*, que cubre el curso básico, los cursos alternos y las reglas de negocio. A continuación se presentan las de los nueve casos de uso clave; la sección 5.6.2 resume los casos de aceptación de los 24.
 
 @@uc section=5 numprefix=5.2
 

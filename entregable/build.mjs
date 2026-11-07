@@ -125,8 +125,27 @@ function ucFiles() {
     });
 }
 
+// Quita los bloques "### P-xxx" (pantallas) que no pertenecen a ningún caso de uso clave.
+function filterScreens(lines) {
+  const out = [];
+  let skip = false;
+  for (const l of lines) {
+    const lv = headingLevel(l);
+    if (lv && lv <= 3) {
+      skip = false;
+      if (lv === 3 && /^###\s+P-/.test(l)) {
+        const refs = (l.split('·')[0].match(/UC-\d+/g) || []);
+        skip = refs.length > 0 && !refs.some((u) => KEY_UCS.includes(u));
+      }
+    }
+    if (!skip) out.push(l);
+  }
+  return out;
+}
+
 function expandInclude(opts) {
   let lines = readDoc(opts.path);
+  if (opts.filterkey === '1') lines = filterScreens(lines);
   if (opts.section) {
     const s = extractSection(lines, new RegExp(opts.section));
     if (!s) throw new Error(`Sección /${opts.section}/ no encontrada en ${opts.path}`);
@@ -137,10 +156,31 @@ function expandInclude(opts) {
   return demote(lines, Number(opts.demote || 0));
 }
 
+// Casos de uso clave: se detallan completos; el resto solo aparece en tablas de síntesis.
+const KEY_UCS = ['UC-01', 'UC-05', 'UC-12', 'UC-13', 'UC-14', 'UC-15', 'UC-19', 'UC-20', 'UC-22'];
+
+function field(uc, name, trim = true) {
+  for (const l of uc.lines) {
+    const m = new RegExp(`^\\|\\s*${name}\\s*\\|\\s*(.*?)\\s*\\|\\s*$`).exec(l);
+    if (m) return m[1].replace(/\|/g, '/').replace(trim ? /\s*[\(,].*$/ : /$^/, '');
+  }
+  return '—';
+}
+
+function expandUcOthers() {
+  const rows = ['| Caso de uso | Paquete | Actor principal | Prioridad | Requisitos |', '|---|---|---|---|---|'];
+  for (const uc of ucFiles()) {
+    if (KEY_UCS.includes(uc.id)) continue;
+    rows.push(`| ${uc.id} — ${uc.title} | ${field(uc, 'Paquete')} | ${field(uc, 'Actor principal')} | ${field(uc, 'Prioridad \\(MoSCoW\\)')} | ${field(uc, 'Requisitos', false).replace(/\s*\(.*?\)/g, '')} |`);
+  }
+  return rows;
+}
+
 function expandUc(opts) {
   const out = [];
   const sec = Number(opts.section);
-  ucFiles().forEach((uc, idx) => {
+  const list = opts.all === '1' ? ucFiles() : ucFiles().filter((u) => KEY_UCS.includes(u.id));
+  list.forEach((uc, idx) => {
     const num = `${opts.numprefix}.${idx + 1}`;
     out.push('', `### ${num} ${uc.id} — ${uc.title}`, '');
     if (opts.preamble === '1') {
@@ -170,6 +210,7 @@ function expandUcTestSummary() {
   for (const uc of ucFiles()) {
     const s = extractSection(uc.lines, /^5\./);
     const ids = [];
+    const key = KEY_UCS.includes(uc.id);
     if (s) {
       for (const l of s.body) {
         const m = /^\|\s*(AT-[\w-]+|IT-[\w-]+|E2E-[\w-]+|NFR-[\w-]+)/.exec(l);
@@ -178,7 +219,7 @@ function expandUcTestSummary() {
     }
     total += ids.length;
     const range = ids.length ? (ids.length > 3 ? `${ids[0]} … ${ids[ids.length - 1]}` : ids.join(', ')) : '—';
-    rows.push(`| ${uc.id} — ${uc.title} | ${ids.length} | ${range} |`);
+    rows.push(`| ${uc.id} — ${uc.title}${key ? ' (clave)' : ''} | ${ids.length} | ${range} |`);
   }
   rows.push(`| **Total** | **${total}** | |`);
   return rows;
@@ -187,7 +228,7 @@ function expandUcTestSummary() {
 function expandDirectives(text) {
   const out = [];
   for (const line of text.split('\n')) {
-    const m = /^@@(include|uc-test-summary|uc)\s*(.*)$/.exec(line);
+    const m = /^@@(include|uc-test-summary|uc-others|uc)\s*(.*)$/.exec(line);
     if (!m) {
       out.push(line);
       continue;
@@ -196,6 +237,8 @@ function expandDirectives(text) {
     if (kind === 'include') {
       const mm = /^(\S+)\s*(.*)$/.exec(m[2]);
       out.push(...expandInclude({ path: mm[1], ...parseOpts(mm[2]) }), '');
+    } else if (kind === 'uc-others') {
+      out.push(...expandUcOthers(), '');
     } else if (kind === 'uc') {
       out.push(...expandUc(parseOpts(m[2])));
     } else {
@@ -374,7 +417,7 @@ console.log(`Markdown consolidado: ${mdPath} (${doc.split(/\s+/).length} palabra
 
 if (!NO_DOCX) {
   const ref = path.join(HERE, 'reference.docx');
-  const args = [mdPath, '-f', 'commonmark_x', '-o', OUT_DOCX, '--resource-path', BUILD, '--wrap=none'];
+  const args = [mdPath, '-f', 'commonmark_x', '-o', OUT_DOCX, '--resource-path', `${BUILD}:${HERE}`, '--wrap=none'];
   if (fs.existsSync(ref)) args.push('--reference-doc', ref);
   const r = spawnSync('pandoc', args, { stdio: 'inherit' });
   if (r.status !== 0) process.exit(r.status ?? 1);
