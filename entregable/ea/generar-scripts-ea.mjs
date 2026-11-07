@@ -346,30 +346,13 @@ function classDiagram(code, where, title, path) {
 }
 
 
-// ------------------------------------------------------------------ arquitectura / despliegue
-// mode 'contenedores' (grupos = Boundary) | 'despliegue' (grupos = Node) | 'contextos'
-function archDiagram(code, where, title, path, mode) {
-  const g = parseFlowchart(code, where);
-  const W = 190, H = 70, GAP = 24, PAD = 24, HEAD = 34;
-  const groupKind = mode === 'despliegue' ? 'node' : 'boundary';
-  const items = new Map(); // id -> {id, kind, name, notes, stereo, children:[], parent}
-  for (const gd of g.groupDefs) {
-    items.set('g:' + gd.id, { id: 'g:' + gd.id, kind: groupKind, name: gd.name, stereo: mode === 'despliegue' ? 'execution environment' : 'subsystem', parent: gd.parent ? 'g:' + gd.parent : '', isGroup: true, children: [] });
-  }
-  for (const n of g.nodes) {
-    if (!n.label) continue;
-    const lines = (n.raw || n.label).split(/<br\s*\/?>/i).map((x) => x.replace(/^["']|["']$/g, '').trim()).filter(Boolean);
-    const it = { id: n.id, kind: 'component', name: lines[0], notes: lines.slice(1).join('\n') || undefined, parent: n.groupId ? 'g:' + n.groupId : '', children: [] };
-    if (n.shape === 'cyl') it.stereo = 'datastore';
-    if (n.shape === 'hex') it.stereo = 'message broker';
-    if (mode === 'contextos') it.stereo = 'bounded context';
-    items.set(n.id, it);
-  }
-  const roots = [];
-  for (const it of items.values()) (it.parent && items.get(it.parent) ? items.get(it.parent).children : roots).push(it);
-  // Tamaño de abajo hacia arriba y posiciones de arriba hacia abajo.
+
+// Distribución anidada compartida (arquitectura, despliegue y estados).
+// roots: [{id, isGroup, children, w?, h?}] -> devuelve los elementos ordenados (grupos primero)
+// con x, y, w, h calculados.
+function layoutItems(roots, { W, H, GAP, PAD, HEAD, topCols = 0 }) {
   const measure = (it) => {
-    if (!it.isGroup) return Object.assign(it, { w: W, h: H });
+    if (!it.isGroup) return Object.assign(it, { w: it.w || W, h: it.h || H });
     it.children.forEach(measure);
     const cols = Math.max(1, Math.min(4, Math.ceil(Math.sqrt(it.children.length))));
     it.cols = cols;
@@ -401,9 +384,8 @@ function archDiagram(code, where, title, path, mode) {
       cy += it.rowH[r] + GAP;
     }
   };
-  const top = { isGroup: true, children: roots };
   roots.forEach(measure);
-  const cols = mode === 'contextos' ? 3 : Math.min(3, Math.max(1, roots.length));
+  const cols = topCols || Math.min(4, Math.max(1, Math.ceil(Math.sqrt(roots.length))));
   const colW = [], rowH = [];
   roots.forEach((c, i) => {
     colW[i % cols] = Math.max(colW[i % cols] || 0, c.w);
@@ -420,8 +402,6 @@ function archDiagram(code, where, title, path, mode) {
     }
     cy += rowH[r] + GAP * 2;
   }
-  void top;
-  // Los grupos primero (padres antes que hijos) para que queden detrás en el dibujo.
   const ordered = [];
   const walk = (list, groupsOnly) => list.forEach((it) => {
     if (!!it.isGroup === groupsOnly) ordered.push(it);
@@ -429,8 +409,101 @@ function archDiagram(code, where, title, path, mode) {
   });
   walk(roots, true);
   walk(roots, false);
+  return ordered;
+}
+
+const posOf = (it) => `l=${it.x};r=${it.x + it.w};t=-${it.y};b=-${it.y + it.h};`;
+
+// ------------------------------------------------------------------ estados
+function stateDiagram(code, where, title, path) {
+  const items = new Map();
+  const edges = [];
+  const stack = [];
+  const scope = () => (stack.length ? stack[stack.length - 1] : '');
+  const mk = (id, extra) => {
+    let it = items.get(id);
+    if (!it) {
+      it = { id, kind: 'state', name: id, parent: scope(), children: [] };
+      items.set(id, it);
+    }
+    return Object.assign(it, extra || {});
+  };
+  const end = (tok, role) => {
+    if (tok !== '[*]') return mk(tok).id;
+    const id = `${role}:${scope() || 'top'}`;
+    return mk(id, role === 'init' ? { kind: 'initial', name: '', w: 30, h: 30 } : { kind: 'final', name: '', w: 30, h: 30 }).id;
+  };
+  let inNote = false;
+  for (const raw of code.split('\n').slice(1)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('%%') || /^direction/.test(line)) continue;
+    if (inNote) {
+      if (/^end note/.test(line)) inNote = false;
+      continue;
+    }
+    if (/^note/.test(line)) {
+      if (!line.includes(':')) inNote = true;
+      continue;
+    }
+    let m = line.match(/^state\s+(\w+)\s*\{$/);
+    if (m) {
+      mk(m[1], { isGroup: true });
+      stack.push(m[1]);
+      continue;
+    }
+    if (line === '}') {
+      stack.pop();
+      continue;
+    }
+    m = line.match(/^state\s+"(.*)"\s+as\s+(\w+)$/);
+    if (m) {
+      mk(m[2], { name: clean(m[1]) });
+      continue;
+    }
+    m = line.match(/^(\[\*\]|\w+)\s*-->\s*(\[\*\]|\w+)\s*(?::\s*(.*))?$/);
+    if (m) {
+      const from = end(m[1], 'init');
+      const to = end(m[2], 'final');
+      edges.push({ from, to, type: 'StateFlow', label: clean(m[3]), dir: 'Source -> Destination' });
+      continue;
+    }
+    warn(where, line);
+  }
+  const roots = [];
+  for (const it of items.values()) (it.parent && items.get(it.parent) ? items.get(it.parent).children : roots).push(it);
+  const ordered = layoutItems(roots, { W: 190, H: 60, GAP: 40, PAD: 30, HEAD: 36 });
   const nodes = ordered.map((it) => {
-    const n = { id: it.id, kind: it.kind, name: it.name, pos: `l=${it.x};r=${it.x + it.w};t=-${it.y};b=-${it.y + it.h};` };
+    const n = { id: it.id, kind: it.kind, name: it.name, pos: posOf(it) };
+    if (it.parent && items.get(it.parent)) n.parent = it.parent;
+    return n;
+  });
+  return { type: 'state', title, path, nodes, edges };
+}
+
+// ------------------------------------------------------------------ arquitectura / despliegue
+// mode 'contenedores' (grupos = Boundary) | 'despliegue' (grupos = Node) | 'contextos'
+function archDiagram(code, where, title, path, mode) {
+  const g = parseFlowchart(code, where);
+  const W = 190, H = 70, GAP = 24, PAD = 24, HEAD = 34;
+  const groupKind = mode === 'despliegue' ? 'node' : 'boundary';
+  const items = new Map(); // id -> {id, kind, name, notes, stereo, children:[], parent}
+  for (const gd of g.groupDefs) {
+    items.set('g:' + gd.id, { id: 'g:' + gd.id, kind: groupKind, name: gd.name, stereo: mode === 'despliegue' ? 'execution environment' : 'subsystem', parent: gd.parent ? 'g:' + gd.parent : '', isGroup: true, children: [] });
+  }
+  for (const n of g.nodes) {
+    if (!n.label) continue;
+    const lines = (n.raw || n.label).split(/<br\s*\/?>/i).map((x) => x.replace(/^["']|["']$/g, '').trim()).filter(Boolean);
+    const it = { id: n.id, kind: 'component', name: lines[0], notes: lines.slice(1).join('\n') || undefined, parent: n.groupId ? 'g:' + n.groupId : '', children: [] };
+    if (n.shape === 'cyl') it.stereo = 'datastore';
+    if (n.shape === 'hex') it.stereo = 'message broker';
+    if (mode === 'contextos') it.stereo = 'bounded context';
+    items.set(n.id, it);
+  }
+  const roots = [];
+  for (const it of items.values()) (it.parent && items.get(it.parent) ? items.get(it.parent).children : roots).push(it);
+  const ordered = layoutItems(roots, { W, H, GAP, PAD, HEAD, topCols: mode === 'contextos' ? 3 : 0 });
+  const nodes = ordered.map((it) => {
+    const n = { id: it.id, kind: it.kind, name: it.name, pos: posOf(it) };
     if (it.stereo) n.stereo = it.stereo;
     if (it.notes) n.notes = it.notes;
     return n;
@@ -514,6 +587,22 @@ const s5 = [];
   s5.push(archDiagram(pick('05-infraestructura/infraestructura.md', /^### 4\.6 /m), 'desp/nube', 'Despliegue en la nube (AWS + Azure + GCP con Tailscale)', ['Despliegue'], 'despliegue'));
 }
 
+// 6) SAGA
+const s6 = [];
+{
+  const f = '03-arquitectura/saga-inscripcion-evento.md';
+  for (const b of mermaidBlocks(join(DOCS, f))) {
+    const k = kindOf(b.code);
+    const t = clean(b.heading.replace(/^\d+(\.\d+)*\.?\s*/, '').replace(/`/g, ''));
+    if (k === 'sequenceDiagram') s6.push(sequenceDiagram(b.code, 'saga/secuencia', `SAGA Secuencia - ${t}`, ['Secuencias']));
+    else if (k === 'stateDiagram-v2') s6.push(stateDiagram(b.code, 'saga/estados', `SAGA Estados - ${t}`, ['Estados']));
+  }
+  for (const b of mermaidBlocks(join(DOCS, '02-iconix', '03-casos-de-uso', 'UC-12-inscribirse-evento.md'))) {
+    if (kindOf(b.code) !== 'stateDiagram-v2') continue;
+    s6.push(stateDiagram(b.code, 'uc12/estados', `UC-12 Estados - ${clean(b.heading.replace(/`/g, ''))}`, ['Estados UC-12']));
+  }
+}
+
 // ------------------------------------------------------------------ emisión
 function toJs(data) {
   return JSON.stringify(data).replace(/[\u007f-￿]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
@@ -525,6 +614,7 @@ const scripts = [
   ['03-robustez.js', 'Bandada U - 03 Robustez', s3],
   ['04-secuencia.js', 'Bandada U - 04 Secuencia', s4],
   ['05-arquitectura-y-despliegue.js', 'Bandada U - 05 Arquitectura y despliegue', s5],
+  ['06-saga.js', 'Bandada U - 06 SAGA', s6],
 ];
 
 mkdirSync(OUT, { recursive: true });

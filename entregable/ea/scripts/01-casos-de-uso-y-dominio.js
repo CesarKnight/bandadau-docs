@@ -23,12 +23,16 @@ var EA_TYPE_BY_KIND = {
   "class": "Class",
   object: "Object",
   component: "Component",
-  node: "Node"
+  node: "Node",
+  state: "State",
+  initial: "StateNode",
+  final: "StateNode"
 };
 
 var DIAGRAM_TYPE = {
   usecase: "Use Case",
   arch: "Component",
+  state: "Statechart",
   "class": "Class",
   robust: "Analysis",
   seq: "Sequence"
@@ -145,7 +149,7 @@ function layoutNodes(d) {
       x = 20 + (i % 4) * 240;
       y = 20 + Math.floor(i / 4) * 230;
     }
-    if (d.type == "arch") {
+    if (n.pos) {
       continue;
     }
     n.pos = "l=" + x + ";r=" + (x + w) + ";t=-" + y + ";b=-" + (y + h) + ";";
@@ -167,6 +171,15 @@ function buildDiagram(root, d) {
     pk = n.group && (d.type == "class" || d.type == "usecase") && n.kind != "actor"
       ? childPackage(pkgRoot, n.group) : pkgRoot;
     el = pk.Elements.AddNew(n.name, EA_TYPE_BY_KIND[n.kind] || "Class");
+    if (n.kind == "initial") {
+      el.Subtype = 100;
+    }
+    if (n.kind == "final") {
+      el.Subtype = 101;
+    }
+    if (n.parent && byId[n.parent]) {
+      el.ParentID = byId[n.parent].ElementID;
+    }
     if (n.stereo) {
       el.Stereotype = n.stereo;
     }

@@ -19,6 +19,7 @@ Node, Mermaid ni nada más, solo los archivos de `scripts/`.
 | `03-robustez.js` | 27 | Diagramas de robustez de los 24 UC (UC-12 tiene 4: curso básico y alternos) con elementos Boundary, Control y Entity |
 | `04-secuencia.js` | 54 | Diagramas de secuencia de los 24 UC |
 | `05-arquitectura-y-despliegue.js` | 4 | Vista de contenedores, mapa de contextos DDD, despliegue local (Docker Compose) y despliegue en la nube (AWS, Azure y GCP con Tailscale) |
+| `06-saga.js` | 7 | SAGA de inscripción: secuencia del camino feliz y del fallo con compensación, y máquinas de estado de `SagaInstance` (REGISTRATION y CANCELLATION) y `Registration` (versión del documento de la SAGA y versión detallada de UC-12 con el estado compuesto `COMPENSATING`) |
 
 Cada script crea **un paquete raíz propio** (por ejemplo «Bandada U - 03 Robustez») bajo el primer
 modelo del proyecto, con un subpaquete por UC o servicio. Si ese paquete ya existe, el script se
@@ -46,6 +47,7 @@ Tardan entre unos segundos y un par de minutos cada uno. No cierres EA mientras 
 | `participant X as Y` | Elemento **Object** (línea de vida) |
 | `A->>B: texto` / `A-->>B: texto` | Conector **Sequence** con `SequenceNo` correlativo. Los retornos llevan el prefijo `(retorno)` |
 | `alt`/`opt`/`loop`/`par` | Se antepone `[alt …]`, `[loop …]` al texto del mensaje (no se crean fragmentos) |
+| `stateDiagram-v2`: `[*]`, estados y transiciones | Diagrama **Statechart**: **StateNode** inicial/final, **State** y conectores **StateFlow**; un `state X { … }` es un estado compuesto con sus subestados (`ParentID`) |
 | Subgrafo en arquitectura / despliegue | Elemento **Boundary** (contenedores) o **Node** (despliegue), con los componentes dibujados dentro |
 | Nodo `["…"]`, `[("…")]`, `{{"…"}}` en arquitectura | **Component** (estereotipo `datastore` para bases y `message broker` para RabbitMQ), con las líneas extra del rótulo en *Notes* |
 | `class X { … }`, `<<AggregateRoot>>` | **Class** con atributos, operaciones y estereotipo |
@@ -55,8 +57,7 @@ Tardan entre unos segundos y un par de minutos cada uno. No cierres EA mientras 
 ## Limitaciones conocidas
 
 - **No se importan** las notas (`Note over …`), los fragmentos combinados reales de secuencia, los
-  diagramas de estados (`stateDiagram-v2`), el Gantt ni los demás `flowchart` de `docs/03-arquitectura` (solo se importan los cuatro de arquitectura y despliegue). Los diagramas de estados de la SAGA están en
-  `docs/03-arquitectura/saga-inscripcion-evento.md`.
+  los diagramas de estados que no son de la SAGA (media, idempotencia, rotación de llaves, tema, cola offline), las notas de los estados, el Gantt ni los demás `flowchart` de `docs/03-arquitectura` (solo se importan los cuatro de arquitectura y despliegue).
 - Las relaciones entre casos de uso (`include`/`extend` de la sección «Relaciones entre casos de uso» del
   catálogo) no están en el Mermaid original, así que no se crean.
 - **Disposición:** robustez usa columnas fijas (actores, boundary, control, entity); casos de uso y clases
