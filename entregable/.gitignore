@@ -1,3 +1,5 @@
 build/
 *.docx
+!Bandada-U-Documento-Entregable.docx
+!reference.docx
 !reference.docx
