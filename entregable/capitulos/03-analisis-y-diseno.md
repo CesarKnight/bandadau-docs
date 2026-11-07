@@ -108,12 +108,7 @@ El sistema es **políglota** por diseño: cada servicio elige el motor que mejor
 
 ## 3.6. Diseño de interfaces de usuario
 
-Los prototipos se diseñaron como *storyboards* de baja fidelidad antes de implementar las pantallas. Cada pantalla se asocia a un caso de uso y corresponde al *boundary* de su diagrama de robustez. Todas las interfaces usan tokens de diseño (modo claro y oscuro) y textos externalizados con i18n (español e inglés).
-
-Se muestran los *storyboards* de las pantallas de los casos de uso clave; la matriz del final relaciona **todas** las pantallas con sus casos de uso, boundaries y operaciones.
-
-@@include 02-iconix/05-prototipos-gui.md demote=2 filterkey=1
-
+Cada pantalla de la aplicación se asocia a un caso de uso y corresponde al *boundary* de su diagrama de robustez. Todas las interfaces usan tokens de diseño (modo claro y oscuro) y textos externalizados con i18n (español e inglés). Las pantallas se diseñaron primero como bocetos de baja fidelidad, que están en `bandadau-docs/docs/02-iconix/05-prototipos-gui.md`; aquí se muestran las **interfaces implementadas**, capturadas de la aplicación en ejecución.
 
 ### 3.6.1. Interfaces implementadas (capturas de la aplicación)
 
@@ -156,3 +151,9 @@ Las siguientes capturas se tomaron el 7 de noviembre de 2026 sobre el sistema re
 **Landing pública.** Primeras secciones de la página de presentación (exportación estática de Next.js).
 
 ![Landing: portada, funciones y cómo funciona.](capturas/img/lnd-01-landing-inicio.png){width=3.2in}
+
+### 3.6.2. Matriz de pantallas, casos de uso y boundaries
+
+La matriz relaciona **todas** las pantallas con sus casos de uso, boundaries y operaciones.
+
+@@include 02-iconix/05-prototipos-gui.md section="^4\. Matriz" demote=2 dropheading=1
