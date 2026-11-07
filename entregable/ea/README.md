@@ -55,7 +55,7 @@ Tardan entre unos segundos y un par de minutos cada uno. No cierres EA mientras 
 ## Limitaciones conocidas
 
 - **No se importan** las notas (`Note over …`), los fragmentos combinados reales de secuencia, los
-  diagramas de estados (`stateDiagram-v2`), los el Gantt ni los demás `flowchart` de `docs/03-arquitectura` (solo se importan los cuatro de arquitectura y despliegue). Los diagramas de estados de la SAGA están en
+  diagramas de estados (`stateDiagram-v2`), el Gantt ni los demás `flowchart` de `docs/03-arquitectura` (solo se importan los cuatro de arquitectura y despliegue). Los diagramas de estados de la SAGA están en
   `docs/03-arquitectura/saga-inscripcion-evento.md`.
 - Las relaciones entre casos de uso (`include`/`extend` de la sección «Relaciones entre casos de uso» del
   catálogo) no están en el Mermaid original, así que no se crean.
