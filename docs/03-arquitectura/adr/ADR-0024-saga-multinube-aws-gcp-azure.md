@@ -1,6 +1,6 @@
 # ADR-0024 — Despliegue multi-nube de los servicios de la SAGA (AWS · GCP · Azure)
 
-- **Estado:** Aceptada (diseño; **no implementado**: `bandadau-infra/aws/` y los *override* de producción aún no existen)
+- **Estado:** Aceptada — **parcialmente reemplazada por [ADR-0025](ADR-0025-despliegue-simplificado-tailscale.md)** (2026-11-06): se mantiene el reparto de servicios (events→Azure, wallet→GCP, resto→AWS) y la condición C6; la conectividad (RDS público, AMQPS, listas de IP, Caddy), el acceso a DynamoDB, los registros de imágenes y el despliegue pasan a ADR-0025. Corrección: `events-service` **no** usa DynamoDB.
 - **Fecha:** 2026-10-29
 - **Decisores:** Equipo Grupo 24 (Ing. Software II)
 - **Reemplaza parcialmente a:** [ADR-0012](ADR-0012-infra-aws-ec2-compose.md) (solo el "un EC2" para los servicios de la SAGA; RDS, DynamoDB, S3 y CloudFront se mantienen)

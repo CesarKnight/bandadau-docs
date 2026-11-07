@@ -1212,3 +1212,16 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 - **No verificado:** nada de la multi-nube se ha ejecutado. Supuestos a comprobar en la primera prueba (marcados ⚠ en la guía): soporte `amqps://` en los clientes de events (Spring) y wallet (php-amqplib), prefijo real de `bandada-idempotency`
   por servicio, perfil Spring de producción, versión de PostgreSQL en RDS, sintaxis del Caddyfile y latencia de la SAGA entre nubes. El supuesto "los datos pueden estar solo en AWS" se basa en la lectura de la regla por el equipo; confirmarlo con la cátedra (plan B en ADR-0024).
 - **Abierto:** `adr/README.md` no lista ADR-0022 ni ADR-0023 (no se tocaron); crear `bandadau-infra/aws/` y los *override* de producción cuando se implemente.
+
+### 2026-11-06 — ADR-0025: despliegue simplificado con Tailscale (`bandadau-infra/deploy/`) y documentación de Docker
+
+**Agente:** Claude Code · **Repos:** `bandadau-infra` (`deploy/`, `.gitignore`, `AGENTS.md`) y `bandadau-docs` (ADR-0025, guía de despliegue reescrita, `docker-y-justificacion-de-imagenes.md`, `infraestructura.md` §4, C6).
+
+- **Qué cambió:** reparto multi-nube igual (events→Azure, wallet+worker+relay→GCP, resto→AWS); la conectividad pasa a una red privada Tailscale y los datos a contenedores del EC2 (sin RDS, sin AMQPS, sin listas de IP, sin Caddy);
+  DynamoDB real como única pieza gestionada de AWS; Traefik con Let's Encrypt + nginx de estáticos (sin CloudFront/S3/ACM); imágenes solo en GHCR; un `deploy.sh` con rollback. ADR-0024 queda parcialmente reemplazada.
+- **Hallazgos verificados en código:** `events-service` **no usa DynamoDB** (solo el `depends_on` del Compose local); wallet sí (`DynamoIdempotencyStore`, prefijo `wallet-service#`); events (Spring `addresses`) y wallet (`setIsSecure`) soportan `amqps://`.
+- **Implementación:** tres *overrides* de Compose (`!override`/`!reset`, Compose ≥ 2.24, validados con v5.5.1 y `config -q`), tres `.env.*.example` con marcadores de secreto (`render-env.sh` los comparte entre nubes), rutas de producción de Traefik, nginx, `build-push.sh`,
+  `dynamodb-create.sh`, `publish-static.sh`, `deploy.sh` (sintaxis `bash -n` y lógica de etiquetas probadas).
+- **NO verificado:** ningún contenedor se levantó (el daemon de Docker estaba apagado) ni se creó ninguna VM/cuenta; enrutamiento Docker → Tailscale, publicación de puertos en la IP Tailscale, Let's Encrypt, rollback de `deploy.sh`,
+  tiempo de compilar `linux/amd64` en un Mac ARM, tag `nginx:1.28-alpine`, comandos de `az`/`gcloud`/`aws`/`tailscale`, el seed contra producción.
+- **Abierto:** probar de punta a punta en las tres nubes; decidir si se construye en GitHub Actions; backups de Postgres/Mongo (manuales).

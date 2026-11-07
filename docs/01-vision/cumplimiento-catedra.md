@@ -31,7 +31,7 @@ Esta matriz se revisa en cada hito ICONIX; ningún ítem puede quedar sin caso d
 | C3 | Frontend web Angular y React (Next.js) | Next.js: landing + admin-shell · Angular: mfe-moderation · React (Vite): mfe-insights · React Native Web (Expo): app web | `catalogo-servicios.md` §2 |
 | C4 | 3 bases: Postgres, MongoDB, DynamoDB (AWS) | Postgres: identity, events, wallet · Mongo: social, media · DynamoDB: ticketing, notification, insights, idempotencia | `catalogo-servicios.md` §1 y §6 |
 | C5 | ≥3 arquitecturas de código (Hexagonal, Clean, DDD) | Hexagonal: identity, wallet · Clean: social, media, ticketing, notification, insights · DDD: events | `04-patrones-y-reglas/` |
-| C6 | Microservicios desplegados en instancias de proveedores distintos (AWS, GCP, Azure; un cuarto va en AWS) | Los 3 servicios de la SAGA (C1): `events-service` en **Azure**, `wallet-service` en **GCP**, `ticketing-service` en **AWS**; el resto y todos los datos en AWS. **Diseño aceptado, no implementado** | ADR-0024, `infraestructura.md` §4.6, `guia-despliegue.md` |
+| C6 | Microservicios desplegados en instancias de proveedores distintos (AWS, GCP, Azure; un cuarto va en AWS) | Los 3 servicios de la SAGA (C1): `events-service` en **Azure**, `wallet-service` (+ worker y relay) en **GCP**, `ticketing-service` en **AWS**; el resto de servicios y todos los datos en AWS; las tres VMs unidas por una red privada **Tailscale**. **Diseño aceptado, no desplegado** | ADR-0025 (reemplaza la conectividad de ADR-0024), `infraestructura.md` §4.6, `guia-despliegue.md`, `docker-y-justificacion-de-imagenes.md`, `bandadau-infra/deploy/` |
 
 ## Guion de demostración (defensa)
 
