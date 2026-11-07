@@ -26,6 +26,8 @@ En total son **146 diagramas** en 7 scripts. Cada script crea **un paquete raíz
 modelo del proyecto, con un subpaquete por UC o servicio. Si ese paquete ya existe, el script se
 detiene sin tocar nada: bórralo antes de volver a ejecutarlo.
 
+**¿Dónde va cada diagrama en el Word?** Ver [`UBICACION-DIAGRAMAS.md`](UBICACION-DIAGRAMAS.md): para cada diagrama de EA indica la figura y la sección del documento (o dónde ponerlo si no está).
+
 ## Cómo ejecutarlos (EA 15 o superior, Windows)
 
 1. Abre un proyecto en EA. **Usa una copia o un proyecto de prueba**, porque los scripts crean miles de
@@ -79,6 +81,7 @@ Los `.js` de `scripts/` están versionados y **no se editan a mano**. Si cambia 
 ```bash
 node entregable/ea/generar-scripts-ea.mjs   # reescribe entregable/ea/scripts/*.js
 node entregable/ea/probar-scripts.mjs       # valida sintaxis y conteos con la simulación de EA
+node entregable/build.mjs && node entregable/ea/generar-ubicacion.mjs   # actualiza UBICACION-DIAGRAMAS.md
 ```
 
 `runtime.js` es la lógica común (se antepone a los datos de cada script).

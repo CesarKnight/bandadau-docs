@@ -541,6 +541,21 @@ function archDiagram(code, where, title, path, mode) {
   return { type: 'arch', title, path, nodes, edges };
 }
 
+
+// Etiqueta cada diagrama con el Mermaid de origen (para el manifiesto de ubicación).
+for (const name of ['robustnessDiagram', 'useCaseDiagram', 'sequenceDiagram', 'classDiagram', 'archDiagram', 'stateDiagram']) {
+  const fn = { robustnessDiagram, useCaseDiagram, sequenceDiagram, classDiagram, archDiagram, stateDiagram }[name];
+  const wrapped = (code, ...rest) => Object.assign(fn(code, ...rest), { code: code.replace(/\n$/, '') });
+  switch (name) {
+    case 'robustnessDiagram': robustnessDiagram = wrapped; break;
+    case 'useCaseDiagram': useCaseDiagram = wrapped; break;
+    case 'sequenceDiagram': sequenceDiagram = wrapped; break;
+    case 'classDiagram': classDiagram = wrapped; break;
+    case 'archDiagram': archDiagram = wrapped; break;
+    case 'stateDiagram': stateDiagram = wrapped; break;
+  }
+}
+
 // ------------------------------------------------------------------ recolección
 const kindOf = (code) => code.trim().split(/\s/)[0];
 const ucFiles = readdirSync(join(DOCS, '02-iconix', '03-casos-de-uso')).filter((f) => /^UC-\d+/.test(f)).sort();
@@ -681,13 +696,17 @@ const scripts = [
 ];
 
 mkdirSync(OUT, { recursive: true });
-for (const [file, title, diagrams] of scripts) {
+const manifest = [];
+for (const [file, title, withCode] of scripts) {
+  const diagrams = withCode.map(({ code, ...d }) => d);
+  withCode.forEach((d) => manifest.push({ script: file, scriptTitle: title, title: d.title, path: d.path, type: d.type, code: d.code }));
   const header = `// ${title} (${diagrams.length} diagramas)\nvar SCRIPT_TITLE = ${JSON.stringify(title)};\nvar DIAGRAMS = ${toJs(diagrams)};\n\n`;
   writeFileSync(join(OUT, file), header + runtime);
   const nodes = diagrams.reduce((a, d) => a + d.nodes.length, 0);
   const edges = diagrams.reduce((a, d) => a + d.edges.length, 0);
   console.log(`${file}: ${diagrams.length} diagramas, ${nodes} elementos, ${edges} conectores`);
 }
+writeFileSync(join(HERE, 'manifiesto.json'), JSON.stringify(manifest, null, 1));
 if (issues.length) {
   console.log(`\n${issues.length} lineas no interpretadas:`);
   issues.slice(0, 40).forEach((i) => console.log('  ' + i));
