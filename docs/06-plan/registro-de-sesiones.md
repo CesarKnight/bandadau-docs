@@ -1225,3 +1225,14 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 - **NO verificado:** ningún contenedor se levantó (el daemon de Docker estaba apagado) ni se creó ninguna VM/cuenta; enrutamiento Docker → Tailscale, publicación de puertos en la IP Tailscale, Let's Encrypt, rollback de `deploy.sh`,
   tiempo de compilar `linux/amd64` en un Mac ARM, tag `nginx:1.28-alpine`, comandos de `az`/`gcloud`/`aws`/`tailscale`, el seed contra producción.
 - **Abierto:** probar de punta a punta en las tres nubes; decidir si se construye en GitHub Actions; backups de Postgres/Mongo (manuales).
+
+### 2026-11-08 — Despliegue de AWS con Terraform (ADR-0026) y guía rápida
+
+**Agente:** Claude Code · **Repos:** `bandadau-infra` (`terraform/aws/`, `deploy/frontend.sh`, `deploy/build-push.sh`, `deploy/docker-compose.aws.yaml`, `deploy/traefik/routers.prod.yml`, `Makefile`, `AGENTS.md`) y `bandadau-docs` (ADR-0026, `guia-despliegue-rapida.md`, guía de despliegue, índice)
+
+- **Qué cambió:** el borde público pasa a **CloudFront + ACM + Route 53** (ADR-0026, reemplaza parcialmente ADR-0025); Traefik del EC2 escucha en HTTP:80 y exige `X-Origin-Verify`; AWS se crea y se borra con Terraform (`make aws-apply` / `make aws-destroy`, `destroy.sh` con comprobación por etiqueta `Project=bandadau`). Variante de bajo presupuesto: **EC2 `t4g.large` (ARM, 8 GB)**; `build-push.sh` publica amd64 + arm64. Se usa la zona de Route 53 creada a mano (`route53_zone_id`); el rol del EC2 incluye SSM como acceso sin puertos. `deploy/frontend.sh` compila con URLs de producción y publica cada frontend; guía «cambié esto, corro esto».
+- **Desplegado en AWS (verificado):** 27 recursos con `terraform apply` en la cuenta 855158726945 (EC2 `i-073eb25117f5b7f2f`, IP elástica 44.210.6.97, 4 tablas DynamoDB con TTL, IAM, certificado ACM emitido, CloudFront `EV9QCWK9M89T3` en estado Deployed, DNS resolviendo a CloudFront). Por SSM: Docker 29.9.3, Compose 5.7.0, Tailscale instalado, repo clonado, disco y 8 GB de RAM. El origen directo está bloqueado por el grupo de seguridad.
+- **Errores corregidos en el camino:** el nombre de la lista de prefijos es `com.amazonaws.global.cloudfront.origin-facing` (con guion); un `plan` incompleto no se aplicó.
+- **NO verificado:** ningún contenedor de la aplicación corre aún (CloudFront responde 504 porque no hay Traefik), Tailscale sin autenticar (no se pasó llave), imágenes arm64 y su rendimiento con 8 GB, caché de assets por `x-viewer-host`, MCP/SSE y subidas a `s3.*` a través de CloudFront, `frontend.sh` (solo `DRY_RUN`), Azure y GCP.
+- **Abierto:** llave de Tailscale y `tailscale up` en el EC2; crear las VMs de Azure y GCP; `render-env.sh`, imágenes (`build-push.sh`) y `deploy.sh aws`; `frontend.sh all`; `make aws-destroy` tras la presentación.
+

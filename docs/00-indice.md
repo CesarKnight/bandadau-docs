@@ -89,7 +89,7 @@ algo lo contradice, se corrige el otro documento o se escribe un ADR.
 [infraestructura.md](05-infraestructura/infraestructura.md) (local con Compose + Traefik, AWS, multi-nube §4.6, CI/CD) ·
 [entornos-y-variables.md](05-infraestructura/entornos-y-variables.md) (variables por componente, secretos) ·
 [guia-levantamiento-local.md](05-infraestructura/guia-levantamiento-local.md) (cómo correr el proyecto en tu máquina) ·
-[guia-despliegue.md](05-infraestructura/guia-despliegue.md) (despliegue manual AWS + GCP + Azure, ADR-0024).
+[guia-despliegue.md](05-infraestructura/guia-despliegue.md) (despliegue manual AWS + GCP + Azure, ADR-0024) · [guia-despliegue-rapida.md](05-infraestructura/guia-despliegue-rapida.md) (día a día: «cambié esto, corro esto») · AWS como código y borrado total: `bandadau-infra/terraform/aws/README.md` (ADR-0026).
 
 ## 06 · Plan
 

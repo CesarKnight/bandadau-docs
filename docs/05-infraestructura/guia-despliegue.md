@@ -88,9 +88,9 @@ printf 'admin:%s\n' "$(openssl passwd -apr1 'CLAVE-LARGA')" > deploy/traefik/ops
 
 ```bash
 docker login ghcr.io -u <usuario>              # token write:packages
-GHCR_OWNER=<tu-org> IMAGE_TAG=v1 deploy/build-push.sh     # las 9 imágenes, linux/amd64
+GHCR_OWNER=<tu-org> IMAGE_TAG=v1 deploy/build-push.sh     # las 9 imágenes, linux/amd64 + linux/arm64 (el EC2 t4g es ARM; Azure y GCP, x86)
 ```
-Construir para x86-64 desde un Mac con Apple Silicon es **emulado y lento** (varios minutos por servicio; **⚠ No medido**). Alternativa: construirlas en GitHub Actions (no implementado). Pon el mismo `IMAGE_TAG` en los tres `.env`.
+Construir para x86-64 desde un Mac con Apple Silicon es **emulado y lento** (la parte arm64 es nativa) (varios minutos por servicio; **⚠ No medido**). Alternativa: construirlas en GitHub Actions (no implementado). Pon el mismo `IMAGE_TAG` en los tres `.env`.
 
 ## 7. Desplegar
 
@@ -101,9 +101,11 @@ PUSH_ENV=1 deploy/deploy.sh azure     # events-service
 PUSH_ENV=1 deploy/deploy.sh gcp       # wallet-service, wallet-worker, wallet-relay
 ```
 Si algo falla: `ssh ubuntu@bandada-aws` y `cd /opt/bandada/bandadau-infra && docker compose --env-file deploy/.env.aws -f docker-compose.yaml -f deploy/docker-compose.aws.yaml --profile infra --profile services logs <servicio>`.
-La primera vez, Traefik tarda un minuto en obtener los certificados.
+El HTTPS lo pone CloudFront (certificado de ACM): no hay que esperar certificados en el EC2.
 
 ## 8. Frontends
+
+> **Atajo (ADR-0026):** `deploy/frontend.sh all` compila con las URLs de producción y publica todo (landing, app, panel y microfrontends con su manifiesto); ver `guia-despliegue-rapida.md`. Lo de abajo es el procedimiento manual.
 
 Las variables `NEXT_PUBLIC_*` y `EXPO_PUBLIC_*` se fijan al **compilar**: apúntalas a `https://api.<dominio>` (tabla en `entornos-y-variables.md` §4.11) y publica cada carpeta compilada:
 ```bash
