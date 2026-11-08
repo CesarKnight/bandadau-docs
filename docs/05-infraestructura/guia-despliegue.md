@@ -18,7 +18,7 @@ Las tres VMs forman una red privada **Tailscale** (`100.x.x.x`). Solo el EC2 tie
 
 ## 1. Requisitos
 
-- Cuentas con créditos: **AWS, Azure, Google Cloud, Tailscale** (gratuita) y **GitHub** (para GHCR). Un **dominio** con DNS editable (o un DNS comodín gratuito como DuckDNS: **⚠ No verificado** con Let's Encrypt).
+- Cuentas con créditos: **AWS, Azure, Google Cloud, Tailscale** (gratuita) y **GitHub** (para GHCR). El **dominio `bandadau.lat`** (Namecheap) con los nameservers delegados a **Route 53** (lo hace `terraform/aws`, ver ADR-0026).
 - En tu máquina: `aws`, `az`, `gcloud`, `docker` (con `buildx`), `node` ≥ 22, `openssl`, `rsync`, `ssh`, `tailscale` (con sesión iniciada en tu cuenta).
 - Los 8 repos como carpetas hermanas (`bandadau-infra/scripts/clone-all.sh`). Docker Compose **≥ 2.24** en las VMs.
 - Un **token de GitHub** con `write:packages` (publicar imágenes) y otro con `read:packages` (para las VMs).
@@ -33,6 +33,8 @@ Las tres VMs forman una red privada **Tailscale** (`100.x.x.x`). Solo el EC2 tie
 4. **Orden de arranque (⚠ No verificado):** Docker publica puertos en la IP Tailscale, que debe existir antes. En cada VM: `sudo systemctl edit docker` y añade `[Unit]` / `After=tailscaled.service`.
 
 ## 3. AWS (EC2 + DynamoDB)
+
+> **Desde ADR-0026 los pasos 1 a 4 y 6 de esta sección los hace Terraform** (`bandadau-infra/terraform/aws/`, ver su `README.md`): EC2 con IP elástica y rol, grupo de seguridad, usuario IAM de wallet, las 4 tablas, el DNS en Route 53, el certificado y CloudFront. Solo queda el paso 5 (`docker login ghcr.io`). Lo que sigue describe lo que Terraform automatiza, por si se quiere hacer a mano. **El borde público ya no es Let's Encrypt:** CloudFront termina HTTPS y Traefik escucha en el 80.
 
 1. **EC2**: Ubuntu 22.04 (x86-64), **`t3.large`** (8 GB; `t3.xlarge` si quieres holgura), 30 GB gp3. **Elastic IP** asociada. Grupo de seguridad: **entrada solo 80 y 443** (no abras 22: se entra por Tailscale SSH).
    Los contenedores leen el rol de la instancia, así que pide **IMDSv2 con salto 2**: `--metadata-options HttpTokens=required,HttpPutResponseHopLimit=2`.
@@ -76,7 +78,7 @@ cd bandadau-infra
 deploy/render-env.sh aws && deploy/render-env.sh azure && deploy/render-env.sh gcp
 ```
 Genera `deploy/.env.aws|azure|gcp` y `deploy/.secrets` (contraseñas aleatorias, **las mismas** en las tres nubes: RabbitMQ y Postgres de events y wallet, secretos de cliente, llaves de Laravel).
-Luego edita en los tres archivos lo que el script marca como "por rellenar": `BASE_DOMAIN`, `ACME_EMAIL`, `GHCR_OWNER` y las tres `TS_IP_*`; en `.env.gcp`, `WALLET_AWS_ACCESS_KEY_ID` y `WALLET_AWS_SECRET_ACCESS_KEY` (paso 3.4).
+Luego edita en los tres archivos lo que el script marca como "por rellenar": `BASE_DOMAIN`, `ORIGIN_VERIFY` (`terraform output -raw origin_verify_secret`), `GHCR_OWNER` y las tres `TS_IP_*`; en `.env.gcp`, `WALLET_AWS_ACCESS_KEY_ID` y `WALLET_AWS_SECRET_ACCESS_KEY` (paso 3.4).
 Crea la clave de las UIs de operación (Mailpit, RabbitMQ y MinIO quedan detrás de ella):
 ```bash
 printf 'admin:%s\n' "$(openssl passwd -apr1 'CLAVE-LARGA')" > deploy/traefik/ops.htpasswd
@@ -158,7 +160,9 @@ Mientras un servicio se reinicia, los demás siguen y los mensajes de la SAGA es
 | Contenedor no arranca: `cannot assign requested address` | Tailscale no estaba activo cuando arrancó Docker (ver paso 2.4) |
 | Azure/GCP no llegan al EC2 (`nc` falla) | Nodo fuera de la tailnet, IP equivocada en el `.env` o contenedor sin ruta a `tailscale0` (**⚠ No verificado**) |
 | `401` en la API | `JWT_ISSUER` (`https://api.<dominio>`) distinto del `iss` de los tokens, o `JWKS_URL` inaccesible desde la VM |
-| Let's Encrypt falla | DNS aún no apunta al EC2 o el 80 está cerrado |
+| `403` en todo el sitio | Falta `ORIGIN_VERIFY` en `.env.aws` o no coincide con el secreto de CloudFront (`terraform output origin_verify_secret`) |
+| `502`/`504` de CloudFront | Traefik caído o el EC2 sin puerto 80 para la lista de CloudFront; revisa `docker compose ps` y el grupo de seguridad |
+| Certificado de ACM no se valida | Los nameservers de Namecheap aún no apuntan a Route 53 (`dig NS bandadau.lat`) |
 | `AccessDeniedException` de DynamoDB (wallet) | Prefijo `wallet-service#` o condición `LeadingKeys` incorrectos en la política IAM |
 | Servicios del EC2 sin credenciales de AWS | Falta `HttpPutResponseHopLimit=2` en la instancia |
 | Imagen no se descarga | `docker login ghcr.io` sin token `read:packages` o `GHCR_OWNER` distinto |

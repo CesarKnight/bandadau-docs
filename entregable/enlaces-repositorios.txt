@@ -1,0 +1,9 @@
+https://github.com/ThonkasM/bandadau-admin
+https://github.com/ThonkasM/bandadau-backend
+https://github.com/ThonkasM/bandadau-brand
+https://github.com/ThonkasM/bandadau-docs
+https://github.com/ThonkasM/bandadau-frontend
+https://github.com/ThonkasM/bandadau-infra
+https://github.com/ThonkasM/bandadau-landing
+https://github.com/ThonkasM/bandadau-ml
+https://github.com/ThonkasM/bandadau-shared

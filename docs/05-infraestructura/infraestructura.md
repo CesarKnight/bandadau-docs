@@ -641,7 +641,7 @@ on-demand (≈ USD 35 esa semana).
    contenedor; las migraciones deben ser **compatibles hacia atrás** (expand/contract) porque el
    *rollback* no las revierte.
 
-### 4.6 Despliegue vigente: multi-nube con Tailscale (ADR-0025)
+### 4.6 Despliegue vigente: multi-nube con Tailscale (ADR-0025) y CloudFront (ADR-0026)
 
 > **Estado: diseño aceptado, no ejecutado.** Archivos en `bandadau-infra/deploy/` (validados con `docker compose config`, sin levantar contenedores). Cumple la condición C6 de `cumplimiento-catedra.md`.
 > Procedimiento: `guia-despliegue.md`. Justificación de Docker y de cada imagen: `docker-y-justificacion-de-imagenes.md`.
@@ -649,10 +649,11 @@ on-demand (≈ USD 35 esa semana).
 ```mermaid
 flowchart TB
     U["Navegador y app móvil"]
-    DNS["DNS del dominio<br/>registros A hacia la IP elástica"]
+    DNS["Route 53<br/>bandadau.lat (delegado desde Namecheap)"]
+    CF["CloudFront + ACM<br/>HTTPS · alias bandadau.lat y comodín"]
     subgraph TS["Red privada Tailscale (WireGuard) 100.x.x.x"]
-        subgraph AWS["AWS · EC2 (única VM con puertos públicos 80 y 443)"]
-            TR["Traefik<br/>TLS Let's Encrypt"]
+        subgraph AWS["AWS · EC2 (solo CloudFront entra por el 80)"]
+            TR["Traefik<br/>HTTP :80 · exige X-Origin-Verify"]
             NG["nginx estáticos<br/>landing · app · panel · mfes"]
             SV["identity · social · media · ticketing<br/>notification · insights · admin-gateway"]
             DATA[("Postgres 3 bases · Mongo rs0<br/>RabbitMQ · MinIO · Mailpit · n8n")]
@@ -667,7 +668,8 @@ flowchart TB
     DDB[("DynamoDB real<br/>4 tablas · AWS")]
     GHCR["GHCR<br/>imágenes de los 9 servicios"]
 
-    U --> DNS --> TR
+    U --> DNS --> CF
+    CF -->|"HTTP + cabecera secreta"| TR
     TR --> NG
     TR --> SV
     TR -->|"http://TS_IP_AZURE:7004"| EV
@@ -682,12 +684,13 @@ flowchart TB
     GHCR -.pull.-> GC
 ```
 
-| Tema | Decisión (ADR-0025) |
+| Tema | Decisión (ADR-0025 y ADR-0026) |
 |---|---|
 | Reparto | `events-service` → Azure · `wallet-service` + worker + relay → GCP · el resto → AWS (el excedente de servicios va a AWS) |
 | Conectividad | Tailscale en el host de cada VM; Azure y GCP sin puertos de entrada; los puertos internos del EC2 (Postgres 5432, RabbitMQ 5672, identity 7001, media 7003, Mailpit 8025) se publican **solo en su IP Tailscale** |
 | Datos | Todos en AWS: Postgres, Mongo, RabbitMQ, MinIO y Mailpit como **contenedores del EC2**; **DynamoDB real** (4 tablas, `deploy/dynamodb-create.sh`). Sin RDS. Solo wallet usa DynamoDB fuera de AWS; events **no** usa DynamoDB |
-| Borde público | Traefik con Let's Encrypt (HTTP-01, resolver `le`) en el EC2 + nginx para estáticos; reemplaza CloudFront, ACM, Route 53 obligatorios y S3 de estáticos |
+| Borde público | **CloudFront** (certificado ACM, alias raíz y comodín) → Traefik del EC2 por HTTP:80; el grupo de seguridad solo admite la lista de CloudFront y Traefik exige `X-Origin-Verify`. DNS en **Route 53** (delegado desde Namecheap). nginx sirve los estáticos (ADR-0026) |
+| AWS como código | `bandadau-infra/terraform/aws/` (EC2, IP elástica, DynamoDB, IAM, ACM, CloudFront, Route 53), etiqueta `Project=bandadau`; **`make aws-destroy`** lo borra todo (ADR-0026) |
 | Imágenes | GHCR, `linux/amd64`, etiqueta por servicio (`TAG_<SERVICIO>`, por defecto `IMAGE_TAG`) |
 | Despliegue | `deploy/deploy.sh <aws, azure o gcp> [servicio] [tag]`: SSH por Tailscale, `pull`, `up -d --no-deps`, espera de `healthy`, rollback automático |
 | Secretos | `deploy/render-env.sh` genera `.env.<nube>` y `.secrets` (mismos valores en las tres nubes); archivos con permisos 600, fuera de git |
@@ -697,7 +700,7 @@ flowchart TB
 **Dependencias que cruzan nubes** (todas por la red privada): `events → Postgres, RabbitMQ, identity (JWKS y token de servicio) y media (portadas)`, `wallet → Postgres, RabbitMQ, identity (JWKS) y DynamoDB`,
 `ticketing → events` (REST), `admin-gateway`, `insights` y `n8n → events` y `wallet` (`/internal/v1/**`). Traefik conserva el bloqueo público de `/internal/**` y `/api/v1/auth/service-token`.
 
-**Qué NO está verificado:** ejecución real de contenedores y de las VMs, enrutamiento Docker → Tailscale, emisión de certificados, latencia de la SAGA entre nubes, rollback de `deploy.sh`.
+**Qué NO está verificado:** ejecución real de contenedores y de las VMs, `terraform plan/apply`, validación del certificado de ACM y el origen de CloudFront, enrutamiento Docker → Tailscale, latencia de la SAGA entre nubes, rollback de `deploy.sh`.
 **Plan B** si la cátedra exige que los datos estén en la nube de cada servicio: un Postgres en contenedor por VM remota (más backups y costo). **Punto único de falla** aceptado: datos y borde en un solo EC2.
 
 ---

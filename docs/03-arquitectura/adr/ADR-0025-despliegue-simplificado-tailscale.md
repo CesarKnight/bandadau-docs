@@ -4,6 +4,7 @@
 - **Fecha:** 2026-11-06
 - **Decisores:** Equipo Grupo 24 (Ing. Software II)
 - **Reemplaza parcialmente a:** [ADR-0024](ADR-0024-saga-multinube-aws-gcp-azure.md) (conectividad, acceso a datos, borde público, registro de imágenes y despliegue) y [ADR-0012](ADR-0012-infra-aws-ec2-compose.md) (RDS, CloudFront, S3 de estáticos, ECR/SSM/CloudWatch/CloudFormation)
+- **Reemplazada parcialmente por:** [ADR-0026](ADR-0026-cloudfront-route53-terraform.md) (puntos 5 y 6: el borde público pasa a CloudFront con Route 53 y ACM; Traefik ya no termina TLS).
 - **Se mantiene de ADR-0024:** el reparto de servicios: `events-service` en Azure, `wallet-service` (+ worker y relay) en GCP, `ticketing-service` y el resto en AWS, y la condición C6.
 
 ## Contexto

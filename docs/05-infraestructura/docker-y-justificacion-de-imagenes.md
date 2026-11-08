@@ -93,7 +93,7 @@ Regla del proyecto: **nunca `latest`**; la versión exacta evita que un `docker 
 | Pieza del diseño inicial | Decisión | Motivo |
 |---|---|---|
 | RDS PostgreSQL | Postgres en contenedor en el EC2 | Sin base pública ni TLS que configurar; Tailscale ya cifra |
-| CloudFront + ACM + Route 53 + OAC (5 distribuciones) | Traefik con Let's Encrypt + nginx | Una pieza menos que aprender y pagar; funciona con cualquier DNS |
+| CloudFront + S3 con OAC (5 distribuciones, un bucket por sitio) | **Una** distribución de CloudFront con ACM y Route 53 delante de Traefik + nginx (ADR-0026) | Un solo alias comodín y el enrutamiento por host ya hecho en Traefik y nginx; sin buckets que sincronizar ni borrar |
 | S3 para estáticos | Carpeta servida por nginx | Desplegar un microfrontend = copiar su carpeta |
 | ECR, SSM Parameter Store, Secrets Manager, CloudWatch, SES, Polly, EventBridge, CloudFormation | Fuera de la demo | Un script (`deploy.sh`) y archivos `.env` generados bastan para 3 VMs |
 | Un EC2 con los 9 servicios | 3 VMs (regla multi-nube de la cátedra) | Cumple C6 con los servicios de la SAGA |
