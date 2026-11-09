@@ -136,7 +136,7 @@ function robustnessDiagram(code, where, title, path) {
   const nodes = g.nodes
     .filter((n) => n.label)
     .map((n) => {
-      const m = n.label.match(/^[«<]+\s*(boundary|control|entity)\s*[»>]+\s*(.*)$/i);
+      const m = n.label.match(/^[«<]+\s*(actor|boundary|control|entity)\s*[»>]+\s*(.*)$/i);
       if (m) return { id: n.id, kind: m[1].toLowerCase(), name: m[2] };
       return { id: n.id, kind: 'actor', name: n.label.replace(/^\p{Extended_Pictographic}️?\s*/u, '') };
     });

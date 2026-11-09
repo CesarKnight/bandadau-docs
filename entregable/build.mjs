@@ -421,6 +421,9 @@ async function processMermaid(text) {
 const capDir = path.join(HERE, 'capitulos');
 const files = fs.readdirSync(capDir).filter((f) => f.endsWith('.md')).sort();
 let doc = files.map((f) => expandDirectives(fs.readFileSync(path.join(capDir, f), 'utf8'))).join('\n\n');
+// Los bloques <details> son fuentes para otras herramientas (p. ej. Mermaid para EA):
+// no se incluyen en el Word para no duplicar figuras.
+doc = doc.replace(/<details[\s\S]*?<\/details>/gi, '');
 doc = cleanForWord(doc);
 doc = await processMermaid(doc);
 doc = tuneTables(doc);

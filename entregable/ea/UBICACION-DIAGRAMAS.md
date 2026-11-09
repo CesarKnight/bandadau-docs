@@ -13,6 +13,11 @@ figura en la sección indicada. Los nombres de paquete son los que crea el scrip
 están en el Word (columna «Sugerencia»). La numeración de figuras puede moverse si se agregan o quitan
 figuras: vuelve a generar este archivo después de reconstruir el documento.
 
+> **Nota (2026-11-08):** este resumen quedó pendiente de regenerar tras el cambio del diagrama de
+> robustez de UC-14 y la migración de su ejemplo en `00-metodologia-iconix.md`. Ejecuta
+> `node entregable/build.mjs` (requiere `pandoc` y `mmdc`) y luego
+> `node entregable/ea/generar-ubicacion.mjs` para actualizar los conteos y la numeración.
+
 ## 01 · Casos de uso y dominio
 
 Script: `scripts/01-casos-de-uso-y-dominio.js` · paquete EA: «Bandada U - 01 Casos de uso y dominio» · 2 de 2 diagramas están en el documento.

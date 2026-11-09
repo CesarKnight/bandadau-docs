@@ -26,6 +26,7 @@ function makeEnv() {
   let nextId = 1;
   const counts = { packages: 0, elements: 0, connectors: 0, diagrams: 0, objects: 0, attrs: 0, methods: 0 };
   const out = [];
+  const elements = [];
   const mkEnd = () => ({ Cardinality: '', Aggregation: 0, Update() {} });
   const mkPackage = (name) => {
     const p = { Name: name, PackageID: nextId++, Update() {} };
@@ -36,6 +37,7 @@ function makeEnv() {
   };
   const mkElement = (name, type) => {
     const e = { Name: name, Type: type, ElementID: nextId++, Update() {} };
+    elements.push(e);
     e.Attributes = coll((n, t) => ({ Name: n, Type: t, Update() {} }), () => counts.attrs++);
     e.Methods = coll((n, t) => ({ Name: n, ReturnType: t, Update() {} }), () => counts.methods++);
     e.Connectors = coll((n, t) => ({ Name: n, Type: t, SupplierID: 0, ClientEnd: mkEnd(), SupplierEnd: mkEnd(), Update() {} }), () => counts.connectors++);
@@ -54,7 +56,7 @@ function makeEnv() {
     ReloadDiagram() {},
     GetProjectInterface: () => ({ LayoutDiagramEx() { return true; } }),
   };
-  return { Repository, Session: { Output: (m) => out.push(m), Prompt: (m) => out.push('PROMPT ' + m) }, counts, out };
+  return { Repository, Session: { Output: (m) => out.push(m), Prompt: (m) => out.push('PROMPT ' + m) }, counts, out, elements };
 }
 
 for (const file of readdirSync(DIR).filter((f) => f.endsWith('.js')).sort()) {
@@ -77,6 +79,13 @@ for (const file of readdirSync(DIR).filter((f) => f.endsWith('.js')).sort()) {
   if (env.counts.elements !== expNodes) problems.push(`elementos ${env.counts.elements}/${expNodes}`);
   if (env.counts.connectors !== expEdges) problems.push(`conectores ${env.counts.connectors}/${expEdges}`);
   if (env.counts.objects !== expNodes) problems.push(`objetos de diagrama ${env.counts.objects}/${expNodes}`);
+  if (file === '03-robustez.js') {
+    const native = env.elements.filter((e) => ['Boundary', 'Control', 'Entity'].includes(e.Type));
+    if (native.length) problems.push(`robustez con tipos nativos Boundary/Control/Entity: ${native.length}`);
+    const expected = ['EAUML::boundary', 'EAUML::control', 'EAUML::entity'];
+    const missing = expected.filter((s) => !env.elements.some((e) => e.StereotypeEx === s));
+    if (missing.length) problems.push(`faltan estereotipos: ${missing.join(', ')}`);
+  }
   const avisos = env.out.filter((l) => l.startsWith('AVISO') || l.startsWith('ERROR') || l.startsWith('PROMPT'));
   if (avisos.length) problems.push(...avisos.slice(0, 5));
   console.log(`${problems.length ? 'FALLA' : 'OK   '} ${file}  ${JSON.stringify(env.counts)}`);

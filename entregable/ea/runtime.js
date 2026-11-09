@@ -26,6 +26,46 @@ var EA_TYPE_BY_KIND = {
   note: "Note"
 };
 
+// En robustez, boundary/control/entity son objetos UML con el perfil EAUML,
+// no los tipos nativos Boundary/Control/Entity de EA (que se dibujan como rectangulos).
+var ROBUST_STEREOTYPE = {
+  boundary: "EAUML::boundary",
+  control: "EAUML::control",
+  entity: "EAUML::entity"
+};
+
+function eaElementType(d, n) {
+  if (d.type == "robust" && ROBUST_STEREOTYPE[n.kind]) {
+    return "Object";
+  }
+  return EA_TYPE_BY_KIND[n.kind] || "Class";
+}
+
+function eaStereotype(d, n) {
+  if (n.stereo) {
+    return n.stereo;
+  }
+  if (d.type == "robust" && ROBUST_STEREOTYPE[n.kind]) {
+    return ROBUST_STEREOTYPE[n.kind];
+  }
+  return "";
+}
+
+function setElementStereotype(el, stereo) {
+  var parts;
+  if (!stereo) {
+    return;
+  }
+  parts = stereo.split("::");
+  if (parts.length > 1) {
+    // Stereotype guarda el nombre corto; StereotypeEx, el perfil completo.
+    el.Stereotype = parts[parts.length - 1];
+    el.StereotypeEx = stereo;
+  } else {
+    el.Stereotype = stereo;
+  }
+}
+
 var DIAGRAM_TYPE = {
   usecase: "Use Case",
   arch: "Component",
@@ -115,15 +155,19 @@ function layoutNodes(d) {
     }
   }
   var colX = { actor: 20, boundary: 220, control: 460, entity: 700 };
+  // Tamano de los simbolos de robustez (ajustar aqui si quedan grandes/pequenos).
+  var ROBUST_BOX = { w: 50, h: 60, row: 80 };
   for (i = 0; i < d.nodes.length; i++) {
     n = d.nodes[i];
     w = 150;
     h = 60;
     if (d.type == "robust") {
+      w = ROBUST_BOX.w;
+      h = ROBUST_BOX.h;
       k = n.kind;
       counters[k] = (counters[k] || 0) + 1;
       x = colX[k] || 20;
-      y = 20 + (counters[k] - 1) * 90;
+      y = 20 + (counters[k] - 1) * ROBUST_BOX.row;
     } else if (d.type == "usecase") {
       if (n.kind == "actor") {
         counters.actor = (counters.actor || 0) + 1;
@@ -184,7 +228,7 @@ function buildDiagram(root, d) {
     n = d.nodes[i];
     pk = n.group && (d.type == "class" || d.type == "usecase") && n.kind != "actor"
       ? childPackage(pkgRoot, n.group) : pkgRoot;
-    el = pk.Elements.AddNew(n.name, EA_TYPE_BY_KIND[n.kind] || "Class");
+    el = pk.Elements.AddNew(n.name, eaElementType(d, n));
     if (n.kind == "initial") {
       el.Subtype = 100;
     }
@@ -194,9 +238,7 @@ function buildDiagram(root, d) {
     if (n.parent && byId[n.parent]) {
       el.ParentID = byId[n.parent].ElementID;
     }
-    if (n.stereo) {
-      el.Stereotype = n.stereo;
-    }
+    setElementStereotype(el, eaStereotype(d, n));
     if (n.notes) {
       el.Notes = n.notes;
     }

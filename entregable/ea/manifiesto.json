@@ -267,7 +267,7 @@
    "UC-14 validar entrada"
   ],
   "type": "robust",
-  "code": "flowchart LR\n    POR([\"👤 Portero\"])\n    EST([\"👤 Estudiante\"])\n\n    B1[/\"«boundary» Pantalla Mi entrada (QR)\"/]\n    B2[/\"«boundary» Pantalla Validar entradas (cámara)\"/]\n    B3[/\"«boundary» Endpoint validateTicket\"/]\n    B4[/\"«boundary» Cola offline del dispositivo\"/]\n    B5[/\"«boundary» Exchange bandada.events\"/]\n\n    C1((\"«control» Leer y pre-verificar QR\"))\n    C2((\"«control» Enviar validación\"))\n    C3((\"«control» Autorizar organizador\"))\n    C4((\"«control» Verificar firma JWS\"))\n    C5((\"«control» Marcar ticket usado\"))\n    C6((\"«control» Publicar ticket usado\"))\n    C7((\"«control» Registrar escaneo offline\"))\n    C8((\"«control» Sincronizar cola\"))\n\n    E1[(\"«entity» Ticket\")]\n    E2[(\"«entity» TicketSigningKey\")]\n    E3[(\"«entity» OfflineMutation\")]\n\n    EST --> B1\n    POR --> B2\n    B2 --> C1\n    C1 --> E2\n    C1 --> C2\n    C2 --> B3\n    B3 --> C3\n    C3 --> E1\n    C3 --> C4\n    C4 --> E2\n    C4 --> C5\n    C5 --> E1\n    C5 --> C6\n    C6 --> B5\n    C5 --> B3\n    B3 --> C2\n    C2 --> B2\n    C1 --> C7\n    C7 --> E3\n    C7 --> B4\n    B4 --> C8\n    C8 --> E3\n    C8 --> B3"
+  "code": "flowchart LR\n    %% Los estereotipos son la fuente para el generador de EA; las formas son aproximadas.\n    POR([\"«actor» Portero\"])\n    EST([\"«actor» Estudiante\"])\n\n    B1[/\"«boundary» Pantalla Mi entrada (QR)\"/]\n    B2[/\"«boundary» Pantalla Validar entradas (cámara)\"/]\n    B3[/\"«boundary» Endpoint validateTicket\"/]\n    B4[/\"«boundary» Cola offline del dispositivo\"/]\n    B5[/\"«boundary» Exchange bandada.events\"/]\n\n    C1((\"«control» Leer y pre-verificar QR\"))\n    C2((\"«control» Enviar validación\"))\n    C3((\"«control» Autorizar organizador\"))\n    C4((\"«control» Verificar firma JWS\"))\n    C5((\"«control» Marcar ticket usado\"))\n    C6((\"«control» Publicar ticket usado\"))\n    C7((\"«control» Registrar escaneo offline\"))\n    C8((\"«control» Sincronizar cola\"))\n\n    E1[(\"«entity» Ticket\")]\n    E2[(\"«entity» TicketSigningKey\")]\n    E3[(\"«entity» OfflineMutation\")]\n\n    EST --> B1\n    POR --> B2\n    B2 --> C1\n    C1 --> E2\n    C1 --> C2\n    C2 --> B3\n    B3 --> C3\n    C3 --> C4\n    C4 --> E2\n    C4 --> C5\n    C5 --> E1\n    C5 --> C6\n    C6 --> B5\n    C5 --> B3\n    B3 --> C2\n    C2 --> B2\n    C1 --> C7\n    C7 --> E3\n    C7 --> B4\n    B4 --> C8\n    C8 --> E3\n    C8 --> B3\n\n    classDef alt fill:#c62828,color:#fff,stroke:#8e0000,stroke-width:1.5px;\n    class B4,C7,C8 alt;"
  },
  {
   "script": "03-robustez.js",
@@ -1029,17 +1029,6 @@
   ],
   "type": "arch",
   "code": "flowchart LR\n    A[\"1 · Análisis de requisitos<br/>Modelo de dominio<br/>Casos de uso (texto)<br/>Prototipos GUI\"] -->|Requirements Review| B\n    B[\"2 · Análisis y diseño preliminar<br/>Diagramas de robustez<br/>Dominio actualizado<br/>Texto UC desambiguado\"] -->|Preliminary Design Review| C\n    C[\"3 · Diseño detallado<br/>Diagramas de secuencia<br/>Modelo estático (clases)<br/>Contratos API/eventos\"] -->|Critical Design Review| D\n    D[\"4 · Implementación<br/>Código + pruebas unitarias<br/>Pruebas de integración/sistema<br/>Trazabilidad\"] -->|Delivery Review| E([\"Entrega\"])"
- },
- {
-  "script": "07-otros-diagramas.js",
-  "scriptTitle": "Bandada U - 07 Otros diagramas",
-  "title": "00-metodologia-iconix - 2. Reglas del diagrama de robustez (las verificamos en la PDR)",
-  "path": [
-   "iconix",
-   "00-metodologia-iconix"
-  ],
-  "type": "arch",
-  "code": "flowchart LR\n    A([\"👤 Estudiante\"])\n    B1[/\"«boundary» Pantalla Nuevo Post\"/]\n    C1((\"«control» Validar contenido\"))\n    E1[(\"«entity» Post\")]\n    A --> B1 --> C1 --> E1"
  },
  {
   "script": "07-otros-diagramas.js",

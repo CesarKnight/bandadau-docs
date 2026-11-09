@@ -16,13 +16,13 @@ Node, Mermaid ni nada más, solo los archivos de `scripts/`.
 |---|---|---|
 | `01-casos-de-uso-y-dominio.js` | 2 | Diagrama general de casos de uso (8 actores, 24 UC en 7 paquetes) y modelo de dominio |
 | `02-modelo-estatico.js` | 8 | Clases de diseño de cada servicio (identidad, social, media, eventos, billetera, entradas, notificaciones, insights) |
-| `03-robustez.js` | 27 | Diagramas de robustez de los 24 UC (UC-12 tiene 4: curso básico y alternos) con elementos Boundary, Control y Entity |
+| `03-robustez.js` | 27 | Diagramas de robustez de los 24 UC (UC-12 tiene 4: curso básico y alternos) con **Actor** y objetos UML con estereotipos `EAUML::boundary`, `EAUML::control` y `EAUML::entity` |
 | `04-secuencia.js` | 54 | Diagramas de secuencia de los 24 UC |
 | `05-arquitectura-y-despliegue.js` | 4 | Vista de contenedores, mapa de contextos DDD, despliegue local (Docker Compose) y despliegue en la nube (AWS, Azure y GCP con Tailscale) |
 | `06-saga.js` | 7 | SAGA de inscripción: secuencia del camino feliz y del fallo con compensación, y máquinas de estado de `SagaInstance` (REGISTRATION y CANCELLATION) y `Registration` (versión del documento de la SAGA y versión detallada de UC-12 con el estado compuesto `COMPENSATING`) |
-| `07-otros-diagramas.js` | 44 | Todo lo demás de `docs/`: flujos de arquitectura, automatización n8n, pipeline de ML, IA local, seguridad, CI, estados (media, idempotencia, llaves, tema, cola offline), clases de patrones (DDD, hexagonal, clean) y secuencias restantes |
+| `07-otros-diagramas.js` | 43 | Todo lo demás de `docs/`: flujos de arquitectura, automatización n8n, pipeline de ML, IA local, seguridad, CI, estados (media, idempotencia, llaves, tema, cola offline), clases de patrones (DDD, hexagonal, clean) y secuencias restantes |
 
-En total son **146 diagramas** en 7 scripts. Cada script crea **un paquete raíz propio** (por ejemplo «Bandada U - 03 Robustez») bajo el primer
+En total son **145 diagramas** en 7 scripts. Cada script crea **un paquete raíz propio** (por ejemplo «Bandada U - 03 Robustez») bajo el primer
 modelo del proyecto, con un subpaquete por UC o servicio. Si ese paquete ya existe, el script se
 detiene sin tocar nada: bórralo antes de volver a ejecutarlo.
 
@@ -44,9 +44,9 @@ Tardan entre unos segundos y un par de minutos cada uno. No cierres EA mientras 
 
 | Mermaid | EA |
 |---|---|
-| Actor `(["…"])` fuera de subgrafo / `actor` | Elemento **Actor** |
+| Actor `«actor» …` (o `(["…"])` fuera de subgrafo) | Elemento **Actor** |
 | UC dentro de `subgraph` | Elemento **UseCase** en un subpaquete con el nombre del subgrafo |
-| `«boundary» …`, `«control» …`, `«entity» …` | Elementos **Boundary**, **Control**, **Entity** en un diagrama **Analysis** |
+| `«boundary» …`, `«control» …`, `«entity» …` (estereotipo explícito) | **Object** con estereotipo `EAUML::boundary`, `EAUML::control` o `EAUML::entity` en un diagrama **Analysis** |
 | `participant X as Y` | Elemento **Object** (línea de vida) |
 | `A->>B: texto` / `A-->>B: texto` | Conector **Sequence** con `SequenceNo` correlativo. Los retornos llevan el prefijo `(retorno)` |
 | `Note over X: texto` (secuencia) y `note right of X` (estados) | Elemento **Note** con conector **NoteLink** al participante o estado |
@@ -57,6 +57,15 @@ Tardan entre unos segundos y un par de minutos cada uno. No cierres EA mientras 
 | `class X { … }`, `<<AggregateRoot>>` | **Class** con atributos, operaciones y estereotipo |
 | `namespace Y { … }` | Subpaquete `Y` |
 | `<\|--`, `*--`, `o--`, `-->`, `..>`, `..\|>` | Generalization, Association con diamante (compuesta o compartida), Association dirigida, Dependency y Realization |
+
+> En los diagramas de robustez el generador usa el **estereotipo**, no la forma de Mermaid: Mermaid
+> no tiene los símbolos nativos de ICONIX. `«actor»` se mapea a **Actor**; `«boundary»`,
+> `«control»` y `«entity»` a un **Object** con estereotipo `EAUML::boundary`, `EAUML::control` o
+> `EAUML::entity` (no a los tipos nativos Boundary/Control/Entity, que EA dibuja como rectángulos).
+> Las formas de Mermaid son solo una aproximación visual; la versión formal es la que crea EA.
+> Requiere el perfil **EAUML** (incluido en EA) para que esos objetos se dibujen con las formas
+> clásicas de robustez. Todo nodo de robustez debe llevar su estereotipo: si falta, el generador lo
+> interpreta como actor (comportamiento heredado de los diagramas de casos de uso).
 
 ## Limitaciones conocidas
 
@@ -71,6 +80,8 @@ Tardan entre unos segundos y un par de minutos cada uno. No cierres EA mientras 
   diagramas de secuencia el orden de los mensajes sale de `SequenceNo`; **si EA los dibuja
   desordenados, reordénalos con el menú del diagrama (`Sequence > Auto Number` o a mano) y avisa** para
   ajustar el script.
+- **Tamaño en robustez:** los símbolos usan la constante `ROBUST_BOX` de `runtime.js` (50×60 px, fila de
+  80 px). Si tu EA dibuja los nombres muy juntos, ajusta esos valores y regenera los scripts.
 - Los conectores de un diagrama aparecen al abrirlo; si faltara alguno, usa clic derecho en el diagrama >
   **Show Relations** (o `Ctrl+Alt+R`).
 
