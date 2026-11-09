@@ -1236,3 +1236,16 @@ A-5 (UC-14 escáner con `expo-camera`), A-9 (pruebas Jest/RNTL + Maestro), A-10 
 - **NO verificado:** ningún contenedor de la aplicación corre aún (CloudFront responde 504 porque no hay Traefik), Tailscale sin autenticar (no se pasó llave), imágenes arm64 y su rendimiento con 8 GB, caché de assets por `x-viewer-host`, MCP/SSE y subidas a `s3.*` a través de CloudFront, `frontend.sh` (solo `DRY_RUN`), Azure y GCP.
 - **Abierto:** llave de Tailscale y `tailscale up` en el EC2; crear las VMs de Azure y GCP; `render-env.sh`, imágenes (`build-push.sh`) y `deploy.sh aws`; `frontend.sh all`; `make aws-destroy` tras la presentación.
 
+
+### 2026-11-08 (noche) — Despliegue multi-nube en producción, seed UAGRM y APK de demo
+
+**Agente:** Claude Code · **Repos:** `bandadau-infra` (`terraform/aws/iam.tf`, `deploy/docker-compose.gcp.yaml`, `deploy/.env.gcp.example`, `seed/`) y `bandadau-docs`.
+
+- **Desplegado y verificado:** AWS 17/17 contenedores sanos (CloudFront → Traefik), Azure `events-service` sano, GCP `wallet-service`/`worker`/`relay` sanos. `bandadau.lat`, `app.`, `admin.`, `mfe.` y `api.…/jwks.json` responden 200; `/internal/**` devuelve 403; login real con `lucia@uagrm.edu.bo`.
+- **SAGA verificada de extremo a extremo** entre las tres nubes: seed con 69 pasos correctos (recargas del wallet en GCP e inscripciones de pago a eventos de Azure confirmadas).
+- **Seed:** perfil `SEED_PROFILE=uagrm` (solo UAGRM). Nuevo `SEED_KEY_SALT` para reintentar inscripciones fallidas (la clave de idempotencia fija repetía el `FAILED`) y recarga de saldo para `lucia`.
+- **Hallazgos corregidos:** imágenes de GHCR privadas (ahora públicas, comprobado anónimo contra el registro); el healthcheck del wallet usa `DynamoDB DescribeTable` y faltaba en la política IAM `bandada-wallet-service` (acción aparte, sin `LeadingKeys`); el validador del wallet prohíbe `PAYMENT_SIMULATOR_ENABLED=true` con `APP_ENV=production`.
+- **Decisión de demo (registrada):** el wallet de GCP corre con `WALLET_APP_ENV=staging` y el simulador activo, para poder recargar saldo sin pasarela real. Para producción real: `production` + simulador `false`. Aprobada por el usuario.
+- **Seguridad:** SSH público y RDP de GCP cerrados (acceso por Tailscale). Pendiente del usuario: revocar la llave de Tailscale que se pegó en el chat.
+- **NO verificado:** instalación y arranque del APK en un dispositivo; comportamiento real de los scripts de Enterprise Architect; rendimiento bajo carga.
+- **Teardown tras la defensa:** `make aws-destroy` y `make aws-check`; `gcloud projects delete bandadau-demo-2026`; `az group delete -n bandada-rg`.
