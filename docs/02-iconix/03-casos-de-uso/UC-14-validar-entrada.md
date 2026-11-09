@@ -114,56 +114,15 @@ autenticidad, la escritura condicional prueba unicidad.
 
 ## 2. Diagrama de robustez (fase de análisis)
 
-```mermaid
-flowchart LR
-    POR(["👤 Portero"])
-    EST(["👤 Estudiante"])
+![Diagrama de robustez de UC-14 con notación ICONIX: actor, boundary, control y entity; el curso alterno «sin red» va en rojo.](img/UC-14-robustez.png)
 
-    B1[/"«boundary» Pantalla Mi entrada (QR)"/]
-    B2[/"«boundary» Pantalla Validar entradas (cámara)"/]
-    B3[/"«boundary» Endpoint validateTicket"/]
-    B4[/"«boundary» Cola offline del dispositivo"/]
-    B5[/"«boundary» Exchange bandada.events"/]
+*Figura — Diagrama de robustez de UC-14 con notación ICONIX (curso alterno «sin red» en rojo).*
 
-    C1(("«control» Leer y pre-verificar QR"))
-    C2(("«control» Enviar validación"))
-    C3(("«control» Autorizar organizador"))
-    C4(("«control» Verificar firma JWS"))
-    C5(("«control» Marcar ticket usado"))
-    C6(("«control» Publicar ticket usado"))
-    C7(("«control» Registrar escaneo offline"))
-    C8(("«control» Sincronizar cola"))
-
-    E1[("«entity» Ticket")]
-    E2[("«entity» TicketSigningKey")]
-    E3[("«entity» OfflineMutation")]
-
-    EST --> B1
-    POR --> B2
-    B2 --> C1
-    C1 --> E2
-    C1 --> C2
-    C2 --> B3
-    B3 --> C3
-    C3 --> E1
-    C3 --> C4
-    C4 --> E2
-    C4 --> C5
-    C5 --> E1
-    C5 --> C6
-    C6 --> B5
-    C5 --> B3
-    B3 --> C2
-    C2 --> B2
-    C1 --> C7
-    C7 --> E3
-    C7 --> B4
-    B4 --> C8
-    C8 --> E3
-    C8 --> B3
-```
-
-> `B1` (pantalla del estudiante) se lee ópticamente desde `B2`; no hay mensaje de software entre ellas.
+> **Notación ICONIX (no UML).** Actor = figura de palo; boundary = círculo con barra vertical;
+> control = círculo con flecha curva; entity = círculo con línea horizontal. Las líneas son
+> asociaciones de comunicación, no flechas de flujo. El curso alterno «sin red» se dibuja en rojo.
+> El QR pasa de la pantalla del estudiante a la del portero por lectura óptica: no es un mensaje
+> de software entre ambas pantallas.
 
 | Objeto | Tipo | Componente real |
 |---|---|---|

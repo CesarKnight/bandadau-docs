@@ -110,6 +110,18 @@ function stripH1(lines) {
   return [...lines.slice(0, i), ...lines.slice(i + 1)];
 }
 
+/** Reescribe imágenes relativas de un doc fuente a rutas absolutas y les fija ancho 100 %. */
+function rewriteImagePaths(lines, sourceRel) {
+  const base = path.dirname(path.join(DOCS, sourceRel));
+  return lines.map((line) =>
+    line.replace(/(!\[[^\]]*\]\()([^)\s]+)(\))(\{[^}]*\})?/g, (m, pre, target, close, attrs) => {
+      if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('/')) return m;
+      const abs = path.resolve(base, decodeURIComponent(target));
+      return `${pre}${abs}${close}${attrs || '{width=100%}'}`;
+    }),
+  );
+}
+
 // ---------------------------------------------------------------- directivas
 function ucFiles() {
   const dir = path.join(DOCS, '02-iconix/03-casos-de-uso');
@@ -118,7 +130,8 @@ function ucFiles() {
     .filter((f) => /^UC-\d+/.test(f))
     .sort()
     .map((f) => {
-      const lines = fs.readFileSync(path.join(dir, f), 'utf8').split('\n');
+      const rel = `02-iconix/03-casos-de-uso/${f}`;
+      const lines = rewriteImagePaths(fs.readFileSync(path.join(dir, f), 'utf8').split('\n'), rel);
       const h1 = lines.find((l) => headingLevel(l) === 1) || '';
       const m = /^#\s+(UC-\d+)\s+—\s+(.*)$/.exec(h1);
       return { file: f, lines, id: m ? m[1] : f, title: m ? m[2].trim() : f };
@@ -144,7 +157,7 @@ function filterScreens(lines) {
 }
 
 function expandInclude(opts) {
-  let lines = readDoc(opts.path);
+  let lines = rewriteImagePaths(readDoc(opts.path), opts.path);
   if (opts.filterkey === '1') lines = filterScreens(lines);
   if (opts.section) {
     const s = extractSection(lines, new RegExp(opts.section));

@@ -1,0 +1,201 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900" role="img" aria-label="Diagrama de robustez ICONIX de UC-14">
+<defs>
+<marker id="arrow-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#222" /></marker>
+<marker id="arrow-alt" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#c62828" /></marker>
+</defs>
+<rect x="0" y="0" width="1400" height="900" fill="#fff" />
+<path d="M 26 20 H 300 V 880 H 0 V 46 Z" fill="#fff" stroke="#222" stroke-width="1.4" />
+<path d="M 0 46 L 26 20 L 26 46 Z" fill="#e6e6e6" stroke="#222" stroke-width="1.4" />
+<text x="16" y="68" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700" fill="#333">CURSO BÁSICO:</text>
+<text x="16" y="85" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">El portero escanea el QR de la</text>
+<text x="16" y="102" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">entrada. La app pre-verifica la</text>
+<text x="16" y="119" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">firma ES256 con la clave pública</text>
+<text x="16" y="136" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">en caché y envía validateTicket</text>
+<text x="16" y="153" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">con una Idempotency-Key.</text>
+<text x="16" y="170" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333"></text>
+<text x="16" y="187" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">El servicio autoriza al organizador,</text>
+<text x="16" y="204" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">verifica la firma y marca el ticket</text>
+<text x="16" y="221" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">USED con una escritura condicional</text>
+<text x="16" y="238" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">en DynamoDB. La app muestra</text>
+<text x="16" y="255" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">«Entrada válida» y el outbox publica</text>
+<text x="16" y="272" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">ticket.used.v1.</text>
+<text x="16" y="306" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700" fill="#333">CURSOS ALTERNOS:</text>
+<text x="16" y="323" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">Sin red: la app verifica la firma</text>
+<text x="16" y="340" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">localmente, registra el escaneo en</text>
+<text x="16" y="357" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">la cola offline y muestra «Válida</text>
+<text x="16" y="374" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">(pendiente)». Al volver la red, la</text>
+<text x="16" y="391" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">cola se drena con la misma clave.</text>
+<text x="16" y="408" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333"></text>
+<text x="16" y="425" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">QR inválido, de otro evento, ya</text>
+<text x="16" y="442" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">usado o portero no autorizado:</text>
+<text x="16" y="459" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">pantalla de error; el ticket no</text>
+<text x="16" y="476" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">cambia. Dos puertas a la vez: la</text>
+<text x="16" y="493" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">escritura condicional deja</text>
+<text x="16" y="510" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#333">exactamente un USED.</text>
+<text x="16" y="545" font-family="Arial, Helvetica, sans-serif" font-size="11.5" font-style="italic" fill="#555">El QR pasa de la pantalla del estudiante a la</text>
+<text x="16" y="560" font-family="Arial, Helvetica, sans-serif" font-size="11.5" font-style="italic" fill="#555">del portero por lectura óptica; no es un</text>
+<text x="16" y="575" font-family="Arial, Helvetica, sans-serif" font-size="11.5" font-style="italic" fill="#555">mensaje de software entre ambas.</text>
+<path d="M 371.9 148.5 L 486.3 134.2" fill="none" stroke="#222" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<text x="429.1" y="135.4" fill="#222" font-family="Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="5">escanea QR</text>
+<path d="M 372 570 L 486 570" fill="none" stroke="#222" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<text x="429" y="564" fill="#222" font-family="Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="5">presenta QR</text>
+<path d="M 554 130 L 666 130" fill="none" stroke="#222" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<path d="M 700 164 L 700 224" fill="none" stroke="#222" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<text x="700" y="188" fill="#222" font-family="Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="5">clave pública</text>
+<path d="M 734 130 L 826 130" fill="none" stroke="#222" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<path d="M 894 130 L 996 130" fill="none" stroke="#222" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<text x="930" y="118" fill="#222" font-family="Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="5">POST /validate</text>
+<path d="M 1030 164 L 1030 246" fill="none" stroke="#222" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<path d="M 996.4 285.2 L 900 300 L 871.6 378" fill="none" stroke="#222" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<path d="M 826 410 L 736 410" fill="none" stroke="#222" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<text x="781" y="404" fill="#222" font-family="Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="5">ISSUED</text>
+<path d="M 888.5 428.5 L 1001.5 501.5" fill="none" stroke="#222" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<path d="M 1064 520 L 1156 520" fill="none" stroke="#222" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<text x="1110" y="514" fill="#222" font-family="Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="5">ticket.used.v1</text>
+<path d="M 666 130 L 580 130 L 580 660 L 667.7 689.2" fill="none" stroke="#c62828" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<text x="580" y="392.2" fill="#c62828" font-family="Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="5">sin red</text>
+<path d="M 666 700 L 554 700" fill="none" stroke="#c62828" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<path d="M 734 700 L 994 700" fill="none" stroke="#c62828" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<text x="864" y="694" fill="#c62828" font-family="Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="5">guarda</text>
+<path d="M 554 700 L 600 700 L 600 840 L 820 840 L 836 824" fill="none" stroke="#c62828" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<text x="700" y="828" fill="#c62828" font-family="Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="5">al volver la red</text>
+<path d="M 889.3 782.8 L 999 718.3" fill="none" stroke="#c62828" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+<path d="M 894 800 L 1320 800 L 1320 160 L 1063.8 133.5" fill="none" stroke="#c62828" stroke-width="1.6" stroke-dasharray="7 5" stroke-linecap="round" stroke-linejoin="round" />
+<text x="1320" y="558.2" fill="#c62828" font-family="Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="5">sincroniza</text>
+<g transform="translate(360 150)" stroke="#222" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="-36" r="9" fill="#fff" />
+<line x1="0" y1="-27" x2="0" y2="0" />
+<line x1="-17" y1="-15" x2="17" y2="-15" />
+<line x1="0" y1="0" x2="-15" y2="22" />
+<line x1="0" y1="0" x2="15" y2="22" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="360" y="202">Portero</text>
+</g>
+<g transform="translate(360 570)" stroke="#222" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="-36" r="9" fill="#fff" />
+<line x1="0" y1="-27" x2="0" y2="0" />
+<line x1="-17" y1="-15" x2="17" y2="-15" />
+<line x1="0" y1="0" x2="-15" y2="22" />
+<line x1="0" y1="0" x2="15" y2="22" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="360" y="622">Estudiante</text>
+</g>
+<g transform="translate(520 130)" stroke="#222" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="0" r="30" fill="#fff" />
+<line x1="-26" y1="-30" x2="-26" y2="30" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="520" y="184">Validar</text>
+<text x="520" y="207">entradas</text>
+</g>
+<g transform="translate(520 570)" stroke="#222" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="0" r="30" fill="#fff" />
+<line x1="-26" y1="-30" x2="-26" y2="30" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="520" y="624">Mi entrada</text>
+<text x="520" y="647">(QR)</text>
+</g>
+<g transform="translate(1030 130)" stroke="#222" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="0" r="30" fill="#fff" />
+<line x1="-26" y1="-30" x2="-26" y2="30" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="1030" y="60">Endpoint</text>
+<text x="1030" y="83">validateTicket</text>
+</g>
+<g transform="translate(520 700)" stroke="#c62828" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="0" r="30" fill="#c62828" />
+<line x1="-26" y1="-30" x2="-26" y2="30" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="520" y="754">Cola offline</text>
+</g>
+<g transform="translate(1190 520)" stroke="#222" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="0" r="30" fill="#fff" />
+<line x1="-26" y1="-30" x2="-26" y2="30" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="1190" y="574">bandada.events</text>
+</g>
+<g transform="translate(700 130)" stroke="#222" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="0" r="28" fill="#fff" />
+<path d="M 18 -26 Q 0 -50 -18 -26" fill="none" stroke-width="1.8" />
+<path d="M -18 -26 L -10 -36 M -18 -26 L -10 -16" fill="none" stroke-width="1.8" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="700" y="52">Pre-verificar QR</text>
+</g>
+<g transform="translate(860 130)" stroke="#222" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="0" r="28" fill="#fff" />
+<path d="M 18 -26 Q 0 -50 -18 -26" fill="none" stroke-width="1.8" />
+<path d="M -18 -26 L -10 -36 M -18 -26 L -10 -16" fill="none" stroke-width="1.8" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="860" y="184">Enviar validación</text>
+</g>
+<g transform="translate(1030 280)" stroke="#222" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="0" r="28" fill="#fff" />
+<path d="M 18 -26 Q 0 -50 -18 -26" fill="none" stroke-width="1.8" />
+<path d="M -18 -26 L -10 -36 M -18 -26 L -10 -16" fill="none" stroke-width="1.8" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="1030" y="334">Autorizar y verificar</text>
+<text x="1030" y="357">firma JWS</text>
+</g>
+<g transform="translate(860 410)" stroke="#222" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="0" r="28" fill="#fff" />
+<path d="M 18 -26 Q 0 -50 -18 -26" fill="none" stroke-width="1.8" />
+<path d="M -18 -26 L -10 -36 M -18 -26 L -10 -16" fill="none" stroke-width="1.8" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="860" y="464">Marcar usado</text>
+</g>
+<g transform="translate(1030 520)" stroke="#222" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="0" r="28" fill="#fff" />
+<path d="M 18 -26 Q 0 -50 -18 -26" fill="none" stroke-width="1.8" />
+<path d="M -18 -26 L -10 -36 M -18 -26 L -10 -16" fill="none" stroke-width="1.8" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="1030" y="574">Publicar usado</text>
+</g>
+<g transform="translate(700 700)" stroke="#c62828" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="0" r="28" fill="#c62828" />
+<path d="M 18 -26 Q 0 -50 -18 -26" fill="none" stroke-width="1.8" />
+<path d="M -18 -26 L -10 -36 M -18 -26 L -10 -16" fill="none" stroke-width="1.8" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="700" y="754">Registrar offline</text>
+</g>
+<g transform="translate(860 800)" stroke="#c62828" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="0" r="28" fill="#c62828" />
+<path d="M 18 -26 Q 0 -50 -18 -26" fill="none" stroke-width="1.8" />
+<path d="M -18 -26 L -10 -36 M -18 -26 L -10 -16" fill="none" stroke-width="1.8" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="860" y="854">Sincronizar</text>
+</g>
+<g transform="translate(700 410)" stroke="#222" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="0" r="30" fill="#fff" />
+<line x1="-30" y1="34" x2="30" y2="34" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="700" y="468">Ticket</text>
+</g>
+<g transform="translate(700 260)" stroke="#222" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="0" r="30" fill="#fff" />
+<line x1="-30" y1="34" x2="30" y2="34" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="700" y="318">TicketSigningKey</text>
+</g>
+<g transform="translate(1030 700)" stroke="#222" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="0" cy="0" r="30" fill="#fff" />
+<line x1="-30" y1="34" x2="30" y2="34" />
+</g>
+<g fill="#111" font-family="Arial, Helvetica, sans-serif" font-size="20" text-anchor="middle">
+<text x="1030" y="758">OfflineMutation</text>
+</g>
+</svg>
